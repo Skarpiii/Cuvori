@@ -58,12 +58,13 @@
       backdrop-filter:blur(16px);
     }
     .brand{
-      display:inline-flex;align-items:center;gap:9px;
-      background:var(--dark);color:#fff;
-      padding:9px 16px 9px 11px;border-radius:12px;
-      font-size:19px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;
-      white-space:nowrap;margin-right:10px;
+      display:inline-flex;align-items:center;
+      background:#000;
+      padding:2px 12px 2px 6px;border-radius:12px;
+      white-space:nowrap;margin-right:10px;line-height:0;
     }
+    .brand-logo{height:54px;width:auto;display:block}
+    .brand-logo-mark{display:none;height:42px;width:auto}
     .brand-mark{
       display:inline-grid;place-items:center;
       width:28px;height:28px;border-radius:9px;
@@ -633,6 +634,71 @@
     .chat-nudge{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;background:#fff7e0;border-bottom:1px solid #f1dfa3;color:#6b4e00;font-size:12px;font-weight:700}
     .chat-nudge .link-btn{font-size:12px;padding:0;white-space:nowrap}
     @media(max-width:760px){.reco-card{grid-template-columns:1fr}.reco-ico{display:none}.reco-actions{grid-template-columns:1fr 1fr}}
+    button.stat{text-align:left;cursor:pointer;color:var(--text);font:inherit;transition:.15s}
+    button.stat:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:#d6dde7}
+    .tl-title{text-align:center;font-size:22px;margin:0 0 22px}
+
+    /* ---------- Carousels ---------- */
+    .car{position:relative;min-width:0;max-width:100%}
+    .ep-main>div,.ep-pane{min-width:0}
+    .car-track{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;cursor:grab}
+    .car-track::-webkit-scrollbar{display:none}
+    .car-track.grabbing{cursor:grabbing;scroll-behavior:auto}
+    .car-item{scroll-snap-align:start;flex:0 0 auto;min-width:0}
+    .car-one .car-track{gap:0}
+    .car-one .car-item{flex:0 0 100%;width:100%}
+    .car-many .car-item{flex:0 0 250px;width:250px}
+    .car-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:4;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(11,18,32,.72);color:#fff;font-size:22px;line-height:1;display:grid;place-items:center;padding:0 0 3px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:.15s}
+    .car-arrow:hover{background:var(--accent);border-color:var(--accent)}
+    .car-prev{left:8px}.car-next{right:8px}
+    .card-gallery{position:relative}
+    .card-gallery .media{border-radius:12px}
+    .card-gallery .media-counter{pointer-events:none}
+    .card-gallery .car-arrow{width:30px;height:30px;font-size:18px}
+    .card-gallery .car-item{cursor:pointer}
+
+    /* ---------- Profile portfolio rows ---------- */
+    .pf-ownerbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;margin-bottom:14px;border:1px dashed #b9cdea;border-radius:14px;background:var(--accent-soft)}
+    .pf-videos .car-track{padding:6px 4px 10px;scroll-padding-inline:4px}
+    .pf-videos .work{width:100%;position:relative;transition:transform .2s ease,box-shadow .2s ease}
+    .pf-videos .work .media{aspect-ratio:16/10}
+    @media(hover:hover) and (pointer:fine){ .pf-videos .work:hover{transform:scale(1.04);box-shadow:var(--shadow-lg);z-index:3} }
+    .hover-preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:#000}
+    .pf-hint{margin:2px 4px 14px}
+    .pf-ctl{display:flex;gap:4px;padding:0 10px 10px;flex-wrap:wrap}
+    .pf-ctl button{width:32px;height:30px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:14px;color:var(--text);padding:0}
+    .pf-ctl button:hover:not(:disabled){background:var(--panel-2)}
+    .pf-ctl button:disabled{opacity:.35;cursor:default}
+    .pf-ctl .danger-btn{margin-left:auto;border-color:rgba(214,69,69,.4)}
+    .pf-thumbs-wrap{margin-top:6px}
+    .pf-thumbs-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 4px}
+    .pf-thumbs .car-many .car-item{flex-basis:132px;width:132px}
+    .pf-thumbs .car-track{padding:4px;scroll-padding-inline:4px}
+    .thumb{position:relative;aspect-ratio:16/9;border-radius:10px;background:var(--panel-3) center/cover no-repeat;border:2px solid transparent;cursor:pointer;transition:.15s;overflow:hidden}
+    .thumb:hover{transform:translateY(-2px)}
+    .thumb.active{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,122,224,.2)}
+    .thumb-badge{position:absolute;left:6px;top:6px;background:rgba(11,18,32,.78);color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px}
+    .thumb-badge.muted-badge{background:rgba(255,255,255,.85);color:var(--muted)}
+    .thumb-del{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(214,69,69,.9);color:#fff;font-size:14px;line-height:1;padding:0}
+    .pf-thumbs .car-arrow{width:28px;height:28px;font-size:16px}
+
+    /* ---------- Expanded viewer ---------- */
+    .viewer-modal .modal-body{padding:12px 12px 16px}
+    .viewer .car-track{background:#000;border-radius:14px}
+    .viewer .slide{width:100%;aspect-ratio:16/9;background:#000;display:grid;place-items:center}
+    .viewer .slide video,.viewer .slide iframe{width:100%;height:100%;border:0;display:block;background:#000}
+    .viewer .slide .media{width:100%;height:100%;border-radius:0}
+    .viewer .car-arrow{width:44px;height:44px;font-size:26px}
+    .viewer-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding:0 4px}
+    @media(max-width:680px){
+      .car-many .car-item{flex-basis:200px;width:200px}
+      .pf-thumbs .car-many .car-item{flex-basis:110px;width:110px}
+      .viewer .car-arrow{width:36px;height:36px;font-size:22px}
+      .pf-ownerbar{flex-direction:column;align-items:stretch}
+      .pf-ownerbar>div{display:grid;grid-template-columns:1fr 1fr}
+    }
+
+    .demo-banner{background:#fff7e0;color:#6b4e00;border-bottom:1px solid #f1dfa3;font-size:13px;font-weight:700;text-align:center;padding:7px 12px}
     /* ---------- Responsive ---------- */
     @media(min-width:1240px){
       body:not(.sidebar-collapsed) .right-sidebar{transform:translateX(0)}
@@ -652,8 +718,9 @@
     }
     @media(max-width:680px){
       .topbar{padding:0 12px;gap:8px}
-      .brand span:last-child{display:none}
-      .brand{padding:9px 11px;margin-right:0}
+      .brand-logo{display:none}
+      .brand-logo-mark{display:block}
+      .brand{padding:4px 8px;margin-right:0}
       .grid,.two-col,.form-grid,.filter-grid{grid-template-columns:1fr}
       .steps{grid-template-columns:1fr}
       .hero{padding-top:40px}
@@ -674,7 +741,7 @@
 <body>
 <div class="shell">
   <header class="topbar">
-    <a href="#home" class="brand" data-route="home"><span class="brand-mark">C</span><span>Cuvori</span></a>
+    <a href="#home" class="brand" data-route="home" aria-label="Cuvori"><img class="brand-logo" src="data:image/webp;base64,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" alt="Cuvori"><img class="brand-logo-mark" src="data:image/webp;base64,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" alt="Cuvori"></a>
     <nav class="nav">
       <button class="nav-btn" data-route="jobs" data-i18n="browseJobs">Browse jobs</button>
       <button class="nav-btn" data-route="post-job" data-i18n="postJob">Post a job</button>
@@ -682,7 +749,8 @@
       <button class="nav-btn" data-route="join-editor" data-i18n="joinEditor">Join as an editor</button>
     </nav>
     <div class="header-actions">
-      <button class="primary dark" data-route="create-account" data-i18n="createAccount">Create account</button>
+      <button class="secondary" id="signInBtn" data-route="create-account" data-auth-open="signin" data-i18n="p_signIn">Sign in</button>
+      <button class="primary dark" id="createAccountBtn" data-route="create-account" data-auth-open="signup" data-i18n="createAccount">Create account</button>
       <button id="messagesBtn" class="icon-btn attention" aria-label="Messages" title="Messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="badge" id="messageBadge">2</span></button>
       <button id="notificationsBtn" class="icon-btn attention" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="badge" id="notifBadge">!</span></button>
       <button class="secondary account-btn" data-route="account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span data-i18n="account">Account</span></button>
@@ -695,9 +763,10 @@
     </div>
   </header>
 
+  <div id="demoBanner" class="demo-banner hidden" data-i18n="a_demoBanner">Demo mode — accounts are not saved yet. The live site will use real accounts.</div>
   <div id="mobileMenuBackdrop" class="mobile-menu-backdrop hidden"></div>
   <nav id="mobileMenu" class="mobile-menu">
-    <div class="mobile-menu-top"><strong>Cuvori</strong><button class="icon-btn" id="mobileMenuClose" aria-label="Close menu">×</button></div>
+    <div class="mobile-menu-top"><img src="data:image/webp;base64,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" alt="Cuvori" style="height:36px;border-radius:8px"><button class="icon-btn" id="mobileMenuClose" aria-label="Close menu">×</button></div>
     <button class="mobile-nav-btn" data-route="jobs" data-i18n="browseJobs">Browse jobs</button>
     <button class="mobile-nav-btn" data-route="post-job" data-i18n="postJob">Post a job</button>
     <button class="mobile-nav-btn" data-route="how" data-i18n="howItWorks">How it works</button>
@@ -706,7 +775,8 @@
     <button class="mobile-nav-btn" data-route="settings" data-i18n="settings">Settings</button>
     <div class="mobile-menu-divider"></div>
     <button class="mobile-nav-btn" data-route="join-editor" data-i18n="joinEditor">Join as an editor</button>
-    <button class="mobile-nav-btn" data-route="create-account" data-i18n="createAccount">Create account</button>
+    <button class="mobile-nav-btn" data-route="create-account" data-auth-open="signup" data-i18n="createAccount">Create account</button>
+    <button class="mobile-nav-btn hidden" id="signOutBtnM" data-i18n="signOut">Sign out</button>
     <div class="mobile-menu-divider"></div>
     <div class="mobile-menu-label" data-i18n="language">Language</div>
     <div id="mobileLangList" class="mobile-lang-list"></div>
@@ -945,14 +1015,14 @@
       </div>
       <div class="seg" id="howSeg"><button class="seg-btn active" data-aud="clients" data-i18n="p_forClients">I want to hire</button><button class="seg-btn" data-aud="editors" data-i18n="p_forEditors">I'm an editor</button></div>
 
-      <div class="how-tl" data-aud-pane="clients">
+      <div class="how-tl" data-aud-pane="clients"><h2 class="tl-title" data-i18n="p_clientsPath">For clients: hire in 4 steps</h2>
         <div class="tl-step"><div class="tl-num">1</div><div class="tl-body"><h3 data-i18n="clientStep1Title">Find the right professional</h3><p class="muted" data-i18n="clientStep1Desc">Use search and filters, then review real portfolio work.</p></div></div>
         <div class="tl-step"><div class="tl-num">2</div><div class="tl-body"><h3 data-i18n="clientStep2Title">Message directly</h3><p class="muted" data-i18n="clientStep2Desc">Discuss your project directly in Cuvori messaging.</p></div></div>
         <div class="tl-step"><div class="tl-num">3</div><div class="tl-body"><h3 data-i18n="clientStep3Title">Agree on the job</h3><p class="muted" data-i18n="clientStep3Desc">Set scope, price, timeline and revisions.</p></div></div>
         <div class="tl-step"><div class="tl-num">4</div><div class="tl-body"><h3 data-i18n="clientStep4Title">Confirm with a contract</h3><p class="muted" data-i18n="clientStep4Desc">Use a Cuvori contract before work begins. Cuvori takes no commission.</p></div></div>
         <div class="tl-cta"><button class="primary" data-route="home" data-i18n="p_findProfessional">Find a professional</button><button class="secondary" data-route="post-job" data-i18n="postJob">Post a job</button></div>
       </div>
-      <div class="how-tl hidden" data-aud-pane="editors">
+      <div class="how-tl hidden" data-aud-pane="editors"><h2 class="tl-title" data-i18n="p_editorsPath">For editors: start in 4 steps</h2>
         <div class="tl-step"><div class="tl-num">1</div><div class="tl-body"><h3 data-i18n="editorStep1Title">Create an account</h3><p class="muted" data-i18n="editorStep1Desc">Anyone can create a normal Cuvori account.</p></div></div>
         <div class="tl-step"><div class="tl-num">2</div><div class="tl-body"><h3 data-i18n="editorStep2Title">Get an editor invite</h3><p class="muted" data-i18n="editorStep2Desc">Creating a professional editor profile requires an invite.</p></div></div>
         <div class="tl-step"><div class="tl-num">3</div><div class="tl-body"><h3 data-i18n="editorStep3Title">Show your work first</h3><p class="muted" data-i18n="editorStep3Desc">Add projects, videos, thumbnails, skills, languages and specializations.</p></div></div>
@@ -1009,22 +1079,22 @@
     <section id="page-account" class="page">
       <div class="page-head">
         <div><h1 data-i18n="account">Account</h1></div>
-        <button class="secondary" data-route="settings" data-i18n="settings">Settings</button>
+        <div style="display:flex;gap:8px"><button class="secondary" data-route="settings" data-i18n="settings">Settings</button><button class="secondary hidden" id="signOutBtn" data-i18n="signOut">Sign out</button></div>
       </div>
       <div class="panel profile-hero account-hero">
-        <div class="avatar">EC</div>
+        <div class="avatar account-avatar">EC</div>
         <div>
-          <h2 style="margin-bottom:4px">Egidijus</h2>
-          <div class="muted" style="margin-bottom:12px">egidijusss159@gmail.com · <span id="accountRole">Client</span></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="secondary" data-i18n="editProfileBtn">Edit profile</button><button class="secondary" data-route="join-editor" data-i18n="createEditorProfileBtn">Create editor profile</button></div>
+          <h2 style="margin-bottom:4px" id="accountName">Egidijus</h2>
+          <div class="muted" style="margin-bottom:12px"><span id="accountEmail">egidijusss159@gmail.com</span> · <span id="accountRole">Client</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="secondary" data-route="settings" data-i18n="editProfileBtn">Edit profile</button><button class="secondary" data-route="join-editor" data-i18n="createEditorProfileBtn">Create editor profile</button><button class="primary hidden" id="myProfileBtn" data-i18n="myProfileBtn">My editor profile</button></div>
         </div>
       </div>
       <div id="recoHost"></div>
       <div class="stat-row">
-        <div class="stat"><div class="stat-num">2</div><div class="muted" data-i18n="p_statChats">Active conversations</div></div>
-        <div class="stat"><div class="stat-num">0</div><div class="muted" data-i18n="p_statJobs">Posted jobs</div></div>
-        <div class="stat"><div class="stat-num">0</div><div class="muted" data-i18n="contracts">Contracts</div></div>
-        <div class="stat"><div class="stat-num">3</div><div class="muted" data-i18n="p_statSaved">Saved profiles</div></div>
+        <button class="stat" data-stat="chats"><div class="stat-num">2</div><div class="muted" data-i18n="p_statChats">Active conversations</div></button>
+        <button class="stat" data-route="jobs"><div class="stat-num">0</div><div class="muted" data-i18n="p_statJobs">Posted jobs</div></button>
+        <button class="stat" data-route="contracts"><div class="stat-num">0</div><div class="muted" data-i18n="contracts">Contracts</div></button>
+        <button class="stat" data-stat="saved"><div class="stat-num">3</div><div class="muted" data-i18n="p_statSaved">Saved profiles</div></button>
       </div>
       <div class="two-col" style="margin-top:18px">
         <div class="panel">
@@ -1061,22 +1131,22 @@
           <div class="panel set-pane active" data-set-pane="profile">
             <h3 data-i18n="p_setProfile">Profile</h3>
             <div class="form-grid">
-              <div><label data-i18n="firstNameLabel">First name</label><input value="Egidijus"></div>
-              <div><label data-i18n="emailLabel">Email</label><input type="email" value="egidijusss159@gmail.com"></div>
+              <div><label data-i18n="firstNameLabel">First name</label><input id="profileFirstName" value="Egidijus"></div>
+              <div><label data-i18n="emailLabel">Email</label><input id="profileEmail" type="email" value="egidijusss159@gmail.com" readonly></div>
               <div><label data-i18n="labelLocation">Location</label><input data-i18n-placeholder="filterLocationPlaceholder" placeholder="Search location"></div>
               <div><label data-i18n="languagesLabel">Languages</label><input data-i18n-placeholder="filterLanguagesPlaceholder" placeholder="Type languages"></div>
               <div><label data-i18n="accountTypeLabel">Account type</label><select id="accountTypeSelect"><option value="client" data-i18n="roleClient">Client</option><option value="editor" data-i18n="roleEditor">Editor</option></select></div>
             </div>
-            <div class="form-actions"><button class="primary" data-save-toast data-i18n="p_saveChanges">Save changes</button></div>
+            <div class="form-actions"><button class="primary" id="saveProfileBtn" data-i18n="p_saveChanges">Save changes</button></div>
           </div>
           <div class="panel set-pane" data-set-pane="password">
             <h3 data-i18n="settingChangePassword">Change password</h3>
             <div class="form-grid">
-              <div style="grid-column:1/-1"><label data-i18n="currentPasswordPlaceholder">Current password</label><input type="password"></div>
-              <div><label data-i18n="newPasswordPlaceholder">New password</label><input type="password"></div>
-              <div><label data-i18n="p_repeatPassword">Repeat new password</label><input type="password"></div>
+              <div style="grid-column:1/-1"><label data-i18n="currentPasswordPlaceholder">Current password</label><input type="password" id="pwCurrent"></div>
+              <div><label data-i18n="newPasswordPlaceholder">New password</label><input type="password" id="pwNew"></div>
+              <div><label data-i18n="p_repeatPassword">Repeat new password</label><input type="password" id="pwRepeat"></div>
             </div>
-            <div class="form-actions"><button class="primary" data-save-toast data-i18n="p_updatePassword">Update password</button></div>
+            <div class="form-actions"><button class="primary" id="savePasswordBtn" data-i18n="p_updatePassword">Update password</button></div>
           </div>
           <div class="panel set-pane" data-set-pane="notifications">
             <h3 data-i18n="p_setNotifications">Notifications</h3>
@@ -1144,17 +1214,18 @@
         </div>
         <div class="panel auth-card">
           <div class="seg small" id="authSeg"><button class="seg-btn active" data-auth="signup" data-i18n="createAccount">Create account</button><button class="seg-btn" data-auth="signin" data-i18n="p_signIn">Sign in</button></div>
-          <div class="two-col" style="gap:8px;margin:16px 0 4px"><button class="secondary" data-i18n="continueGoogle">Continue with Google</button><button class="secondary" data-i18n="continueFacebook">Continue with Facebook</button></div>
+          <div class="two-col" style="gap:8px;margin:16px 0 4px"><button class="secondary" data-auth-social data-i18n="continueGoogle">Continue with Google</button><button class="secondary" data-auth-social data-i18n="continueFacebook">Continue with Facebook</button></div>
           <div class="divider"><span data-i18n="orDivider">or</span></div>
           <div data-auth-pane="signup">
-            <div class="form-grid"><div><label data-i18n="firstNameLabel">First name</label><input></div><div><label data-i18n="emailLabel">Email</label><input type="email"></div><div style="grid-column:1/-1"><label data-i18n="passwordLabel">Password</label><input type="password"></div></div>
-            <button class="primary" style="width:100%;margin-top:14px" data-auth-submit data-i18n="createAccount">Create account</button>
+            <div class="form-grid"><div><label data-i18n="firstNameLabel">First name</label><input id="suName" autocomplete="given-name"></div><div><label data-i18n="emailLabel">Email</label><input id="suEmail" type="email" autocomplete="email"></div><div style="grid-column:1/-1"><label data-i18n="passwordLabel">Password</label><input id="suPass" type="password" autocomplete="new-password"></div></div>
+            <div id="authNotice" style="margin-top:12px"></div>
+            <button class="primary" style="width:100%;margin-top:14px" data-auth-signup data-i18n="createAccount">Create account</button>
             <p class="muted small" style="margin:12px 0 0;text-align:center" data-i18n="p_terms">By continuing you agree to Cuvori's terms and privacy policy.</p>
           </div>
           <div data-auth-pane="signin" class="hidden">
-            <div class="form-grid"><div style="grid-column:1/-1"><label data-i18n="emailLabel">Email</label><input type="email"></div><div style="grid-column:1/-1"><label data-i18n="passwordLabel">Password</label><input type="password"></div></div>
-            <button class="primary" style="width:100%;margin-top:14px" data-auth-submit data-i18n="p_signIn">Sign in</button>
-            <button class="link-btn" style="width:100%;margin-top:8px" data-i18n="p_forgot">Forgot password?</button>
+            <div class="form-grid"><div style="grid-column:1/-1"><label data-i18n="emailLabel">Email</label><input id="siEmail" type="email" autocomplete="email"></div><div style="grid-column:1/-1"><label data-i18n="passwordLabel">Password</label><input id="siPass" type="password" autocomplete="current-password"></div></div>
+            <button class="primary" style="width:100%;margin-top:14px" data-auth-signin data-i18n="p_signIn">Sign in</button>
+            <button class="link-btn" id="forgotBtn" style="width:100%;margin-top:8px" data-i18n="p_forgot">Forgot password?</button>
           </div>
         </div>
       </div>
@@ -1178,6 +1249,12 @@
 <div id="modalRoot"></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
+<script>
+  // Fill these two values after creating your Supabase project (Project Settings → API).
+  // Leave them empty to run the site in demo mode (no real accounts).
+  window.CUVORI_CONFIG = { supabaseUrl: "https://tnxujwlfatcvxzevllfr.supabase.co", supabaseAnonKey: "sb_publishable_unSsruTqbFzMzhAOVpAoYQ_0jUjvA_H" };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 (() => {
   "use strict";
@@ -1483,8 +1560,8 @@
       priceLabel:"Price", pricePlaceholder:"Agreed price", timelineLabel:"Timeline", 
       timelinePlaceholder:"Delivery date", scopeLabel:"Scope and deliverables", 
       revisionsLabel:"Revisions / other terms", saveDraftBtn:"Save draft", toastAddJobTitle:"Add a job title first.", 
-      toastJobPublished:"Job draft published in this prototype.", invitePassedTitle:"Prototype check passed.", 
-      invitePassedDesc:"In production, Claude should validate the invite code against the backend before editor-profile creation is unlocked.", 
+      toastJobPublished:"Job draft published in this prototype.", invitePassedTitle:"Invite accepted.", 
+      invitePassedDesc:"Your account can now create an editor profile. Open Account → My editor profile to add your work.", 
       inviteEnterCode:"Enter an invitation code." 
     },
     de:{
@@ -1604,8 +1681,8 @@
       scopeLabel:"Umfang und Ergebnisse", revisionsLabel:"Korrekturen / sonstige Bedingungen", 
       saveDraftBtn:"Entwurf speichern", toastAddJobTitle:"Gib zuerst einen Jobtitel ein.", 
       toastJobPublished:"Job-Entwurf in diesem Prototyp veröffentlicht.", 
-      invitePassedTitle:"Prototyp-Prüfung bestanden.", 
-      invitePassedDesc:"In Produktion sollte Claude den Einladungscode serverseitig prüfen, bevor die Editor-Profilerstellung freigeschaltet wird.", 
+      invitePassedTitle:"Einladung angenommen.", 
+      invitePassedDesc:"Dein Konto kann jetzt ein Editor-Profil erstellen. Öffne Konto → Mein Editor-Profil, um deine Arbeiten hinzuzufügen.", 
       inviteEnterCode:"Gib einen Einladungscode ein." 
     },
     ru:{
@@ -1723,8 +1800,8 @@
       scopeLabel:"Объём и результаты", revisionsLabel:"Правки / прочие условия", saveDraftBtn:"Сохранить черновик", 
       toastAddJobTitle:"Сначала укажите название вакансии.", 
       toastJobPublished:"Черновик вакансии опубликован в этом прототипе.", 
-      invitePassedTitle:"Проверка прототипа пройдена.", 
-      invitePassedDesc:"В продакшене Claude должен проверять код приглашения на сервере, прежде чем разблокировать создание профиля редактора.", 
+      invitePassedTitle:"Приглашение принято.", 
+      invitePassedDesc:"Теперь ваш аккаунт может создать профиль монтажёра. Откройте Аккаунт → Мой профиль монтажёра, чтобы добавить работы.", 
       inviteEnterCode:"Введите код приглашения." 
     },
     lt:{
@@ -1849,8 +1926,8 @@
       revisionsLabel:"Pataisymai / kitos sąlygos", saveDraftBtn:"Išsaugoti juodraštį", 
       toastAddJobTitle:"Pirmiausia įveskite darbo pavadinimą.", 
       toastJobPublished:"Darbo juodraštis paskelbtas šiame prototipe.", 
-      invitePassedTitle:"Prototipo patikra sėkminga.", 
-      invitePassedDesc:"Produkcinėje versijoje Claude turėtų patikrinti kvietimo kodą serverio pusėje prieš atrakinant editoriaus profilio kūrimą.", 
+      invitePassedTitle:"Pakvietimas priimtas.", 
+      invitePassedDesc:"Jūsų paskyra dabar gali sukurti editoriaus profilį. Atidarykite Paskyra → Mano editoriaus profilis ir pridėkite darbus.", 
       inviteEnterCode:"Įveskite kvietimo kodą." 
     },
     es:{
@@ -1974,8 +2051,8 @@
       scopeLabel:"Alcance y entregables", revisionsLabel:"Revisiones / otras condiciones", 
       saveDraftBtn:"Guardar borrador", toastAddJobTitle:"Añade primero un título de trabajo.", 
       toastJobPublished:"Borrador de trabajo publicado en este prototipo.", 
-      invitePassedTitle:"Verificación de prototipo superada.", 
-      invitePassedDesc:"En producción, Claude debería validar el código de invitación en el servidor antes de desbloquear la creación de perfil de editor.", 
+      invitePassedTitle:"Invitación aceptada.", 
+      invitePassedDesc:"Tu cuenta ya puede crear un perfil de editor. Abre Cuenta → Mi perfil de editor para añadir tu trabajo.", 
       inviteEnterCode:"Introduce un código de invitación." 
     },
     pl:{
@@ -2092,8 +2169,8 @@
       scopeLabel:"Zakres i efekty", revisionsLabel:"Poprawki / inne warunki", saveDraftBtn:"Zapisz projekt", 
       toastAddJobTitle:"Najpierw dodaj tytuł zlecenia.", 
       toastJobPublished:"Projekt zlecenia opublikowany w tym prototypie.", 
-      invitePassedTitle:"Weryfikacja prototypu zakończona sukcesem.", 
-      invitePassedDesc:"W wersji produkcyjnej Claude powinien zweryfikować kod zaproszenia po stronie serwera, zanim odblokuje tworzenie profilu montażysty.", 
+      invitePassedTitle:"Zaproszenie przyjęte.", 
+      invitePassedDesc:"Twoje konto może teraz utworzyć profil montażysty. Otwórz Konto → Mój profil montażysty, aby dodać prace.", 
       inviteEnterCode:"Wpisz kod zaproszenia." 
     },
     uk:{
@@ -2210,8 +2287,8 @@
       scopeLabel:"Обсяг і результати", revisionsLabel:"Правки / інші умови", saveDraftBtn:"Зберегти чернетку", 
       toastAddJobTitle:"Спочатку вкажіть назву роботи.", 
       toastJobPublished:"Чернетку роботи опубліковано в цьому прототипі.", 
-      invitePassedTitle:"Перевірку прототипу пройдено.", 
-      invitePassedDesc:"У продакшені Claude має перевіряти код запрошення на сервері, перш ніж розблокувати створення профілю редактора.", 
+      invitePassedTitle:"Запрошення прийнято.", 
+      invitePassedDesc:"Тепер ваш акаунт може створити профіль монтажера. Відкрийте Акаунт → Мій профіль монтажера, щоб додати роботи.", 
       inviteEnterCode:"Введіть код запрошення." 
     }
   };
@@ -2722,6 +2799,26 @@
          roleNowEditor:"Тепер ви користуєтеся Cuvori як монтажер.", roleNowClient:"Тепер ви користуєтеся Cuvori як клієнт.", lastUpdateSent:"Оновлення надіслано. Наступне нагадування через 1 тиждень і 2 дні, якщо клієнт нічого не отримає." }
   };
   for(const code in T_RECO2){ if(T[code]) Object.assign(T[code], T_RECO2[code]); }
+  const T_MISC={"en":{"showingReviews":"Showing {a} of {b} reviews","p_clientsPath":"For clients: hire in 4 steps","p_editorsPath":"For editors: start in 4 steps","p_resetTitle":"Reset password","p_resetDesc":"Enter your email and we'll send a reset link.","p_resetSent":"Reset link sent. Check your inbox."},"de":{"showingReviews":"{a} von {b} Bewertungen","p_clientsPath":"Für Kunden: in 4 Schritten beauftragen","p_editorsPath":"Für Editoren: in 4 Schritten starten","p_resetTitle":"Passwort zurücksetzen","p_resetDesc":"Gib deine E-Mail ein und wir senden dir einen Link.","p_resetSent":"Link gesendet. Prüfe dein Postfach."},"ru":{"showingReviews":"Показано {a} из {b} отзывов","p_clientsPath":"Для клиентов: нанять за 4 шага","p_editorsPath":"Для монтажёров: начать за 4 шага","p_resetTitle":"Сброс пароля","p_resetDesc":"Введите email, и мы отправим ссылку для сброса.","p_resetSent":"Ссылка отправлена. Проверьте почту."},"lt":{"showingReviews":"Rodoma {a} iš {b} atsiliepimų","p_clientsPath":"Klientams: samdykite per 4 žingsnius","p_editorsPath":"Montuotojams: pradėkite per 4 žingsnius","p_resetTitle":"Slaptažodžio atkūrimas","p_resetDesc":"Įveskite el. paštą ir atsiųsime nuorodą.","p_resetSent":"Nuoroda išsiųsta. Patikrinkite paštą."},"es":{"showingReviews":"Mostrando {a} de {b} reseñas","p_clientsPath":"Para clientes: contrata en 4 pasos","p_editorsPath":"Para editores: empieza en 4 pasos","p_resetTitle":"Restablecer contraseña","p_resetDesc":"Escribe tu email y te enviaremos un enlace.","p_resetSent":"Enlace enviado. Revisa tu correo."},"pl":{"showingReviews":"Pokazano {a} z {b} opinii","p_clientsPath":"Dla klientów: zatrudnij w 4 krokach","p_editorsPath":"Dla montażystów: zacznij w 4 krokach","p_resetTitle":"Resetuj hasło","p_resetDesc":"Podaj e-mail, a wyślemy link do resetu.","p_resetSent":"Link wysłany. Sprawdź skrzynkę."},"uk":{"showingReviews":"Показано {a} з {b} відгуків","p_clientsPath":"Для клієнтів: найняти за 4 кроки","p_editorsPath":"Для монтажерів: почати за 4 кроки","p_resetTitle":"Скидання пароля","p_resetDesc":"Введіть email, і ми надішлемо посилання.","p_resetSent":"Посилання надіслано. Перевірте пошту."}};
+  for(const code in T_MISC){ if(T[code]) Object.assign(T[code], T_MISC[code]); }
+  // Invite codes. Prototype only: real invites must be generated and checked on the backend (admin-only).
+  // Codes are stored as hashes so the valid list is not readable at a glance in the page source.
+  const INVITE_HASHES = ["947093d5","16bf4938","17629659","4aaf1fb2","51d23043"];
+  function inviteHash(str){ let h=0x811c9dc5; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; } return h.toString(16).padStart(8,"0"); }
+  function isValidInvite(code){ return INVITE_HASHES.includes(inviteHash(code)); }
+  function usedInvites(){ try{ return JSON.parse(localStorage.getItem("cuvoriInvitesUsed"))||[]; }catch{ return []; } }
+  function inviteUsed(code){ return usedInvites().includes(inviteHash(code)); }
+  function markInviteUsed(code){ const u=usedInvites(); u.push(inviteHash(code)); try{ localStorage.setItem("cuvoriInvitesUsed",JSON.stringify(u)); }catch{} }
+  const T_INV={
+    en:{inviteBadFormat:"Invite codes look like CUV-XXXX-XXXX.", inviteInvalid:"This invite code is not valid.", inviteUsed:"This invite code has already been used."},
+    de:{inviteBadFormat:"Einladungscodes sehen so aus: CUV-XXXX-XXXX.", inviteInvalid:"Dieser Einladungscode ist ungültig.", inviteUsed:"Dieser Einladungscode wurde bereits verwendet."},
+    ru:{inviteBadFormat:"Код приглашения выглядит так: CUV-XXXX-XXXX.", inviteInvalid:"Этот код приглашения недействителен.", inviteUsed:"Этот код приглашения уже использован."},
+    lt:{inviteBadFormat:"Pakvietimo kodai atrodo taip: CUV-XXXX-XXXX.", inviteInvalid:"Šis pakvietimo kodas negalioja.", inviteUsed:"Šis pakvietimo kodas jau panaudotas."},
+    es:{inviteBadFormat:"Los códigos de invitación tienen el formato CUV-XXXX-XXXX.", inviteInvalid:"Este código de invitación no es válido.", inviteUsed:"Este código de invitación ya se ha usado."},
+    pl:{inviteBadFormat:"Kody zaproszeń wyglądają tak: CUV-XXXX-XXXX.", inviteInvalid:"Ten kod zaproszenia jest nieprawidłowy.", inviteUsed:"Ten kod zaproszenia został już użyty."},
+    uk:{inviteBadFormat:"Коди запрошень мають вигляд CUV-XXXX-XXXX.", inviteInvalid:"Цей код запрошення недійсний.", inviteUsed:"Цей код запрошення вже використано."}
+  };
+  for(const code in T_INV){ if(T[code]) Object.assign(T[code], T_INV[code]); }
 
   function loadReco(){
     let d={}; try{ d=JSON.parse(localStorage.getItem("cuvoriReco"))||{}; }catch{}
@@ -2809,6 +2906,8 @@
     const sel=$("#accountTypeSelect"); if(sel) sel.value=state.user.role;
     const row=$("#reminderRow"); if(row) row.classList.toggle("hidden",!isEditor());
     const tg=$("#reminderToggle"); if(tg) tg.checked=state.reminderEnabled;
+    const mp=$("#myProfileBtn"); if(mp) mp.classList.toggle("hidden",!isEditor());
+    const ce=$("[data-i18n='createEditorProfileBtn']"); if(ce) ce.classList.toggle("hidden",isEditor());
   }
 
 
@@ -2923,6 +3022,8 @@
     if(typeof updateJobPreview==="function" && $("#pvTitle")) updateJobPreview();
     if(typeof runJobSearch==="function" && $("#jobCount")) runJobSearch();
     if(typeof refreshReco==="function" && state.user) refreshReco();
+    if(typeof buildCardGalleries==="function" && state.user) buildCardGalleries();
+    if(typeof applyAuthUI==="function" && state.auth) applyAuthUI();
   }
 
   function buildLanguageMenu(){
@@ -3023,17 +3124,300 @@
   function fill(str, vars){ return Object.keys(vars).reduce((s,k)=>s.split("{"+k+"}").join(vars[k]), str); }
   function stars(n){ return "★★★★★".slice(0,n) + "☆☆☆☆☆".slice(0,5-n); }
 
+  // ---------- Portfolio galleries (video carousel + thumbnails + owner management) ----------
+  const T_GAL = {
+    en:{ myProfileBtn:"My editor profile", ownerNote:"This is your portfolio. Only you can see the editing controls.", addProject:"Add project", editPortfolio:"Manage portfolio", doneEditing:"Done",
+         deleteProject:"Delete", confirmDeleteTitle:"Delete this project?", confirmDeleteDesc:"It will be removed from your portfolio. This cannot be undone.", cancelBtn:"Cancel",
+         moveUp:"Move left", moveDown:"Move right", moveFirst:"Move to start", moveLast:"Move to end", videoLinkLabel:"Video link (YouTube, Vimeo or direct .mp4)", videoFileLabel:"Or upload a video file",
+         thumbLabel:"Custom thumbnail (optional)", tagsLabel:"Search tags (hidden from clients)", tagsPlaceholder:"e.g. wedding, drone, colour grade", titleOptional:"Title (optional)",
+         saveProject:"Save project", projectAdded:"Project added.", projectDeleted:"Project deleted.", needVideo:"Add a video link or file first.", thumbsHeading:"Thumbnails", linkedTo:"Linked to video {n}",
+         unlinkedThumb:"Not linked", addThumb:"Add thumbnail", thumbLinkLabel:"Link to a video (optional)", noLink:"No link", noProjects:"No projects yet. Add your first video.",
+         videoOf:"Video {i} of {n}", prevVideo:"Previous video", nextVideo:"Next video", hoverHint:"Hover to preview · click to open", ownAbout:"New on Cuvori. Add a short bio in Settings.", countryLithuania:"Lithuania", pinProject:"Pin", unpinProject:"Unpin" },
+    de:{ myProfileBtn:"Mein Editor-Profil", ownerNote:"Das ist dein Portfolio. Nur du siehst die Bearbeitungsfunktionen.", addProject:"Projekt hinzufügen", editPortfolio:"Portfolio verwalten", doneEditing:"Fertig",
+         deleteProject:"Löschen", confirmDeleteTitle:"Dieses Projekt löschen?", confirmDeleteDesc:"Es wird aus deinem Portfolio entfernt. Das lässt sich nicht rückgängig machen.", cancelBtn:"Abbrechen",
+         moveUp:"Nach links", moveDown:"Nach rechts", moveFirst:"An den Anfang", moveLast:"Ans Ende", videoLinkLabel:"Video-Link (YouTube, Vimeo oder direkte .mp4)", videoFileLabel:"Oder Videodatei hochladen",
+         thumbLabel:"Eigenes Vorschaubild (optional)", tagsLabel:"Such-Tags (für Kunden unsichtbar)", tagsPlaceholder:"z. B. Hochzeit, Drohne, Farbkorrektur", titleOptional:"Titel (optional)",
+         saveProject:"Projekt speichern", projectAdded:"Projekt hinzugefügt.", projectDeleted:"Projekt gelöscht.", needVideo:"Füge zuerst einen Video-Link oder eine Datei hinzu.", thumbsHeading:"Vorschaubilder", linkedTo:"Verknüpft mit Video {n}",
+         unlinkedThumb:"Nicht verknüpft", addThumb:"Vorschaubild hinzufügen", thumbLinkLabel:"Mit Video verknüpfen (optional)", noLink:"Keine Verknüpfung", noProjects:"Noch keine Projekte. Füge dein erstes Video hinzu.",
+         videoOf:"Video {i} von {n}", prevVideo:"Vorheriges Video", nextVideo:"Nächstes Video", hoverHint:"Zum Vorschauen darüberfahren · zum Öffnen klicken", ownAbout:"Neu bei Cuvori. Füge in den Einstellungen eine kurze Bio hinzu.", countryLithuania:"Litauen", pinProject:"Anpinnen", unpinProject:"Lösen" },
+    ru:{ myProfileBtn:"Мой профиль монтажёра", ownerNote:"Это ваше портфолио. Кнопки редактирования видите только вы.", addProject:"Добавить проект", editPortfolio:"Управлять портфолио", doneEditing:"Готово",
+         deleteProject:"Удалить", confirmDeleteTitle:"Удалить этот проект?", confirmDeleteDesc:"Он будет удалён из портфолио. Это нельзя отменить.", cancelBtn:"Отмена",
+         moveUp:"Влево", moveDown:"Вправо", moveFirst:"В начало", moveLast:"В конец", videoLinkLabel:"Ссылка на видео (YouTube, Vimeo или прямая .mp4)", videoFileLabel:"Или загрузите видеофайл",
+         thumbLabel:"Своя обложка (необязательно)", tagsLabel:"Теги для поиска (скрыты от клиентов)", tagsPlaceholder:"например: свадьба, дрон, цветокоррекция", titleOptional:"Название (необязательно)",
+         saveProject:"Сохранить проект", projectAdded:"Проект добавлен.", projectDeleted:"Проект удалён.", needVideo:"Сначала добавьте ссылку или файл видео.", thumbsHeading:"Обложки", linkedTo:"Связано с видео {n}",
+         unlinkedThumb:"Не связано", addThumb:"Добавить обложку", thumbLinkLabel:"Связать с видео (необязательно)", noLink:"Без связи", noProjects:"Проектов пока нет. Добавьте первое видео.",
+         videoOf:"Видео {i} из {n}", prevVideo:"Предыдущее видео", nextVideo:"Следующее видео", hoverHint:"Наведите для превью · нажмите, чтобы открыть", ownAbout:"Новичок на Cuvori. Добавьте короткое описание в настройках.", countryLithuania:"Литва", pinProject:"Закрепить", unpinProject:"Открепить" },
+    lt:{ myProfileBtn:"Mano editoriaus profilis", ownerNote:"Tai jūsų portfolio. Redagavimo mygtukus matote tik jūs.", addProject:"Pridėti projektą", editPortfolio:"Tvarkyti portfolio", doneEditing:"Baigta",
+         deleteProject:"Ištrinti", confirmDeleteTitle:"Ištrinti šį projektą?", confirmDeleteDesc:"Jis bus pašalintas iš portfolio. To atšaukti negalima.", cancelBtn:"Atšaukti",
+         moveUp:"Į kairę", moveDown:"Į dešinę", moveFirst:"Į pradžią", moveLast:"Į pabaigą", videoLinkLabel:"Vaizdo įrašo nuoroda (YouTube, Vimeo arba tiesioginė .mp4)", videoFileLabel:"Arba įkelkite vaizdo failą",
+         thumbLabel:"Sava miniatiūra (nebūtina)", tagsLabel:"Paieškos žymos (klientams nematomos)", tagsPlaceholder:"pvz.: vestuvės, dronas, spalvų korekcija", titleOptional:"Pavadinimas (nebūtina)",
+         saveProject:"Išsaugoti projektą", projectAdded:"Projektas pridėtas.", projectDeleted:"Projektas ištrintas.", needVideo:"Pirmiausia pridėkite nuorodą arba failą.", thumbsHeading:"Miniatiūros", linkedTo:"Susieta su vaizdo įrašu {n}",
+         unlinkedThumb:"Nesusieta", addThumb:"Pridėti miniatiūrą", thumbLinkLabel:"Susieti su vaizdo įrašu (nebūtina)", noLink:"Be sąsajos", noProjects:"Projektų dar nėra. Pridėkite pirmą vaizdo įrašą.",
+         videoOf:"Vaizdo įrašas {i} iš {n}", prevVideo:"Ankstesnis", nextVideo:"Kitas", hoverHint:"Užveskite peržiūrai · spustelėkite atidaryti", ownAbout:"Naujokas Cuvori. Pridėkite trumpą aprašymą nustatymuose.", countryLithuania:"Lietuva", pinProject:"Prisegti", unpinProject:"Atsegti" },
+    es:{ myProfileBtn:"Mi perfil de editor", ownerNote:"Este es tu portafolio. Solo tú ves los controles de edición.", addProject:"Añadir proyecto", editPortfolio:"Gestionar portafolio", doneEditing:"Listo",
+         deleteProject:"Eliminar", confirmDeleteTitle:"¿Eliminar este proyecto?", confirmDeleteDesc:"Se quitará de tu portafolio. No se puede deshacer.", cancelBtn:"Cancelar",
+         moveUp:"Mover a la izquierda", moveDown:"Mover a la derecha", moveFirst:"Mover al inicio", moveLast:"Mover al final", videoLinkLabel:"Enlace del vídeo (YouTube, Vimeo o .mp4 directo)", videoFileLabel:"O sube un archivo de vídeo",
+         thumbLabel:"Miniatura personalizada (opcional)", tagsLabel:"Etiquetas de búsqueda (ocultas para clientes)", tagsPlaceholder:"p. ej. boda, dron, etalonaje", titleOptional:"Título (opcional)",
+         saveProject:"Guardar proyecto", projectAdded:"Proyecto añadido.", projectDeleted:"Proyecto eliminado.", needVideo:"Añade primero un enlace o archivo de vídeo.", thumbsHeading:"Miniaturas", linkedTo:"Vinculada al vídeo {n}",
+         unlinkedThumb:"Sin vincular", addThumb:"Añadir miniatura", thumbLinkLabel:"Vincular a un vídeo (opcional)", noLink:"Sin vínculo", noProjects:"Aún no hay proyectos. Añade tu primer vídeo.",
+         videoOf:"Vídeo {i} de {n}", prevVideo:"Vídeo anterior", nextVideo:"Vídeo siguiente", hoverHint:"Pasa el ratón para previsualizar · clic para abrir", ownAbout:"Nuevo en Cuvori. Añade una breve bio en Ajustes.", countryLithuania:"Lituania", pinProject:"Fijar", unpinProject:"Soltar" },
+    pl:{ myProfileBtn:"Mój profil montażysty", ownerNote:"To Twoje portfolio. Tylko Ty widzisz przyciski edycji.", addProject:"Dodaj projekt", editPortfolio:"Zarządzaj portfolio", doneEditing:"Gotowe",
+         deleteProject:"Usuń", confirmDeleteTitle:"Usunąć ten projekt?", confirmDeleteDesc:"Zostanie usunięty z portfolio. Nie można tego cofnąć.", cancelBtn:"Anuluj",
+         moveUp:"W lewo", moveDown:"W prawo", moveFirst:"Na początek", moveLast:"Na koniec", videoLinkLabel:"Link do wideo (YouTube, Vimeo lub bezpośredni .mp4)", videoFileLabel:"Lub prześlij plik wideo",
+         thumbLabel:"Własna miniatura (opcjonalnie)", tagsLabel:"Tagi wyszukiwania (ukryte przed klientami)", tagsPlaceholder:"np. ślub, dron, korekcja kolorów", titleOptional:"Tytuł (opcjonalnie)",
+         saveProject:"Zapisz projekt", projectAdded:"Projekt dodany.", projectDeleted:"Projekt usunięty.", needVideo:"Najpierw dodaj link lub plik wideo.", thumbsHeading:"Miniatury", linkedTo:"Powiązana z wideo {n}",
+         unlinkedThumb:"Niepowiązana", addThumb:"Dodaj miniaturę", thumbLinkLabel:"Powiąż z wideo (opcjonalnie)", noLink:"Bez powiązania", noProjects:"Brak projektów. Dodaj pierwsze wideo.",
+         videoOf:"Wideo {i} z {n}", prevVideo:"Poprzednie wideo", nextVideo:"Następne wideo", hoverHint:"Najedź, aby podejrzeć · kliknij, aby otworzyć", ownAbout:"Nowy na Cuvori. Dodaj krótkie bio w Ustawieniach.", countryLithuania:"Litwa", pinProject:"Przypnij", unpinProject:"Odepnij" },
+    uk:{ myProfileBtn:"Мій профіль монтажера", ownerNote:"Це ваше портфоліо. Кнопки редагування бачите лише ви.", addProject:"Додати проєкт", editPortfolio:"Керувати портфоліо", doneEditing:"Готово",
+         deleteProject:"Видалити", confirmDeleteTitle:"Видалити цей проєкт?", confirmDeleteDesc:"Його буде прибрано з портфоліо. Це не можна скасувати.", cancelBtn:"Скасувати",
+         moveUp:"Ліворуч", moveDown:"Праворуч", moveFirst:"На початок", moveLast:"У кінець", videoLinkLabel:"Посилання на відео (YouTube, Vimeo або пряме .mp4)", videoFileLabel:"Або завантажте відеофайл",
+         thumbLabel:"Власна обкладинка (необов'язково)", tagsLabel:"Теги для пошуку (приховані від клієнтів)", tagsPlaceholder:"напр.: весілля, дрон, кольорокорекція", titleOptional:"Назва (необов'язково)",
+         saveProject:"Зберегти проєкт", projectAdded:"Проєкт додано.", projectDeleted:"Проєкт видалено.", needVideo:"Спочатку додайте посилання або файл відео.", thumbsHeading:"Обкладинки", linkedTo:"Пов'язано з відео {n}",
+         unlinkedThumb:"Не пов'язано", addThumb:"Додати обкладинку", thumbLinkLabel:"Пов'язати з відео (необов'язково)", noLink:"Без зв'язку", noProjects:"Проєктів поки немає. Додайте перше відео.",
+         videoOf:"Відео {i} з {n}", prevVideo:"Попереднє відео", nextVideo:"Наступне відео", hoverHint:"Наведіть для перегляду · натисніть, щоб відкрити", ownAbout:"Новачок на Cuvori. Додайте короткий опис у налаштуваннях.", countryLithuania:"Литва", pinProject:"Закріпити", unpinProject:"Відкріпити" }
+  };
+  for(const code in T_GAL){ if(T[code]) Object.assign(T[code], T_GAL[code]); }
+
+  const OWN_PROFILE = "Egidijus";
+  PROFILES[OWN_PROFILE] = {
+    initials:"EC", roleKey:"roleEditor", city:"Vilnius", countryKey:"countryLithuania", langs:"English, Lithuanian",
+    rate:"€25", unitKey:"perHour", rating:"–", reviewCount:0, completed:0, since:2026, responds:4, days:5, revisions:2,
+    aboutKey:"ownAbout", specs:["catShorts","catMusic"], tools:["Premiere Pro","DaVinci Resolve"],
+    projects:[
+      {title:"Showreel 2026", catKey:"catShorts", len:"1:05", tone:"one", video:"demo"},
+      {title:"Live session — acoustic", catKey:"catMusic", len:"3:40", tone:"two", video:"demo"}
+    ],
+    thumbs:[], reviews:[]
+  };
+
+  // A tiny SVG placeholder thumbnail so demo projects can show linked thumbnails without external files.
+  function svgThumb(label, c1, c2){
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/><text x="16" y="160" font-family="Inter,Arial" font-size="15" font-weight="700" fill="#fff" opacity=".9">${label.replace(/[<>&]/g,"")}</text></svg>`;
+    return "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);
+  }
+  // Seed demo data: every project plays the built-in clip; a few have custom thumbnails; one standalone thumbnail per profile.
+  (function seedPortfolios(){
+    const palettes={one:["#1e3a5f","#2a1f4a"],two:["#3b2a1d","#4a3b2a"],three:["#173a30","#173a4a"]};
+    for(const name in PROFILES){
+      const p=PROFILES[name];
+      p.projects.forEach((w,i)=>{
+        if(!("video" in w)) w.video="demo";
+        if(!("tags" in w)) w.tags=[];
+        if(!("thumb" in w)) w.thumb = (i%2===0) ? svgThumb(w.title,...(palettes[w.tone]||palettes.one)) : null;
+      });
+      if(!p.thumbs) p.thumbs=[{img:svgThumb("Behind the scenes","#41506b","#7d8aa3")}];
+    }
+  })();
+
+  function loadPortfolio(){
+    try{ const d=JSON.parse(localStorage.getItem("cuvoriPortfolio"))||{}; for(const n in d){ if(PROFILES[n]){ PROFILES[n].projects=d[n].projects||PROFILES[n].projects; PROFILES[n].thumbs=d[n].thumbs||PROFILES[n].thumbs; } } }catch{}
+  }
+  function savePortfolio(name){
+    let d={}; try{ d=JSON.parse(localStorage.getItem("cuvoriPortfolio"))||{}; }catch{}
+    // Uploaded files (object URLs) cannot be persisted; keep them for this session only.
+    const clean=PROFILES[name].projects.map(w=>({...w, video: (w.video&&w.video.startsWith("blob:"))?"demo":w.video}));
+    d[name]={projects:clean, thumbs:PROFILES[name].thumbs};
+    try{ localStorage.setItem("cuvoriPortfolio",JSON.stringify(d)); }catch{}
+  }
+  function isOwner(name){ return isEditor() && name===OWN_PROFILE; }
+  function ytId(url){ const m=(url||"").match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/)([\w-]{11})/); return m?m[1]:null; }
+  function vimeoId(url){ const m=(url||"").match(/vimeo\.com\/(?:video\/)?(\d+)/); return m?m[1]:null; }
+  function projectThumb(w){ if(w.thumb) return w.thumb; const id=ytId(w.video); if(id) return `https://img.youtube.com/vi/${id}/hqdefault.jpg`; return null; }
+  function videoSrc(w){ if(!w.video) return null; if(w.video==="demo") return DEMO_VIDEO; if(ytId(w.video)||vimeoId(w.video)) return null; return w.video; }
+  function embedSrc(w){ const y=ytId(w.video); if(y) return `https://www.youtube.com/embed/${y}`; const v=vimeoId(w.video); if(v) return `https://player.vimeo.com/video/${v}`; return null; }
+  function mediaStyle(w){ const th=projectThumb(w); return th?`style="background-image:url('${th}');background-size:cover;background-position:center"`:""; }
+  function canHoverPreview(){ return window.matchMedia("(hover:hover) and (pointer:fine)").matches; }
+
+  // Generic horizontal carousel: native scroll-snap (touch swipe + trackpad), mouse drag, and end-aware arrows.
+  function makeCarousel(host, opts){
+    const {items, render, perView="many", onIndex, start=0, arrowLabels} = opts;
+    host.innerHTML=`<div class="car ${perView==="one"?"car-one":"car-many"}"><div class="car-track">${items.map((it,i)=>`<div class="car-item" data-i="${i}">${render(it,i)}</div>`).join("")}</div>
+      <button type="button" class="car-arrow car-prev" aria-label="${arrowLabels?arrowLabels[0]:t("prevVideo")}">‹</button><button type="button" class="car-arrow car-next" aria-label="${arrowLabels?arrowLabels[1]:t("nextVideo")}">›</button></div>`;
+    const car=$(".car",host), track=$(".car-track",car), prev=$(".car-prev",car), next=$(".car-next",car);
+    const n=items.length; let index=0, target=0, dragged=false, quiet=0, userScrolled=true;
+    const itemW=()=>{ const it=track.firstElementChild; if(!it) return track.clientWidth; const gap=parseFloat(getComputedStyle(track).columnGap||getComputedStyle(track).gap)||0; return it.getBoundingClientRect().width+gap; };
+    function currentIndex(){ return perView==="one" ? Math.round(track.scrollLeft/Math.max(1,track.clientWidth)) : Math.round(track.scrollLeft/Math.max(1,itemW())); }
+    function update(){
+      const i=Math.max(0,Math.min(n-1,currentIndex()));
+      const atStart=track.scrollLeft<=4, atEnd=track.scrollLeft>=track.scrollWidth-track.clientWidth-4;
+      prev.classList.toggle("hidden", perView==="one" ? (Date.now()<quiet ? target===0 : i===0) : atStart);
+      next.classList.toggle("hidden", perView==="one" ? (Date.now()<quiet ? target>=n-1 : i>=n-1) : (atEnd || n<=1));
+      if(Date.now()<quiet) return;                 // programmatic scroll still settling
+      if(perView==="many" && !userScrolled) return; // keep the requested item selected after a clamped scroll
+      if(i!==index){ index=i; target=i; if(onIndex) onIndex(i); }
+    }
+    function goTo(i, smooth=true){
+      i=Math.max(0,Math.min(n-1,i)); target=i; userScrolled=false;
+      quiet=Date.now()+(smooth?700:0);
+      if(index!==i){ index=i; if(onIndex) onIndex(i); }
+      const left = perView==="one" ? i*track.clientWidth : i*itemW();
+      track.scrollTo({left, behavior: smooth?"smooth":"auto"});
+      setTimeout(()=>{ quiet=0; update(); }, smooth?720:0);
+    }
+    ["wheel","touchstart","pointerdown"].forEach(ev=>track.addEventListener(ev,()=>{ userScrolled=true; quiet=0; },{passive:true}));
+    prev.addEventListener("click",e=>{e.stopPropagation(); goTo(perView==="one"?target-1:currentIndex()-1);});
+    next.addEventListener("click",e=>{e.stopPropagation(); goTo(perView==="one"?target+1:currentIndex()+1);});
+    let raf=null; track.addEventListener("scroll",()=>{ if(raf) return; raf=requestAnimationFrame(()=>{raf=null;update();}); });
+    // Mouse drag to scroll (desktop). Touch uses native scrolling.
+    let down=false,sx=0,sl=0;
+    track.addEventListener("pointerdown",e=>{ if(e.pointerType!=="mouse"||e.button!==0) return; down=true;dragged=false;sx=e.clientX;sl=track.scrollLeft;track.classList.add("grabbing"); });
+    track.addEventListener("pointermove",e=>{ if(!down) return; const dx=e.clientX-sx; if(Math.abs(dx)>5){dragged=true; track.style.scrollSnapType="none";} track.scrollLeft=sl-dx; });
+    const end=()=>{ if(!down) return; down=false; track.classList.remove("grabbing"); track.style.scrollSnapType=""; if(dragged && perView==="one") goTo(currentIndex()); setTimeout(()=>dragged=false,0); };
+    track.addEventListener("pointerup",end); track.addEventListener("pointercancel",end); track.addEventListener("mouseleave",end);
+    track.addEventListener("click",e=>{ if(dragged){ e.stopPropagation(); e.preventDefault(); } },true);
+    if(start) goTo(start,false); else update();
+    requestAnimationFrame(update);
+    return {goTo, update, get index(){return target;}, track, car};
+  }
+
+  // ----- Browse cards: small per-editor gallery inside the existing price-first card -----
+  function buildCardGalleries(){
+    $$(".profile-card").forEach(card=>{
+      const name=card.dataset.person, p=PROFILES[name]; if(!p) return;
+      let host=$(".card-gallery",card);
+      if(!host){ const old=$(".media",card); host=document.createElement("div"); host.className="card-gallery"; old.replaceWith(host); }
+      const ws=p.projects, n=ws.length;
+      // hidden search tags feed the card's search text without showing on the card
+      const tags=ws.flatMap(w=>w.tags||[]).join(" ").toLowerCase();
+      card.dataset.search=(card.dataset.search.split(" | ")[0])+(tags?" | "+tags:"");
+      if(!n){ host.innerHTML=`<div class="media ${"one"}"><div class="media-label">${t(p.roleKey)}</div></div>`; return; }
+      const counter=document.createElement("div"); counter.className="media-counter"; counter.textContent=`1 / ${n}`;
+      const api=makeCarousel(host,{items:ws, perView:"one",
+        render:(w)=>`<div class="media ${w.tone}" ${mediaStyle(w)}><div class="media-label">${t(p.roleKey)}</div><div class="play">▶</div></div>`,
+        onIndex:i=>counter.textContent=`${i+1} / ${n}`});
+      api.car.append(counter);
+      $$(".car-item",host).forEach(it=>it.addEventListener("click",e=>{ e.stopPropagation(); openViewer(name,+it.dataset.i); }));
+    });
+  }
+
+  // ----- Profile page: small video row + thumbnail row, owner controls -----
+  function renderPortfolioPane(name, root){
+    const p=PROFILES[name], ws=p.projects, owner=isOwner(name), pane=$("[data-pane='portfolio']",root);
+    if(!pane) return;
+    const ownerBar = owner ? `<div class="pf-ownerbar"><span class="muted">${t("ownerNote")}</span><div style="display:flex;gap:8px"><button class="secondary" data-pf-add-thumb>${t("addThumb")}</button><button class="primary" data-pf-add>${t("addProject")}</button></div></div>` : "";
+    if(!ws.length){ pane.innerHTML=ownerBar+`<div class="empty-state"><strong>${t("noProjects")}</strong></div>`; bindOwner(); return; }
+    pane.innerHTML=ownerBar+`<div class="pf-videos" id="pfVideos"></div><div class="muted small pf-hint">${canHoverPreview()?t("hoverHint"):""}</div>
+      <div class="pf-thumbs-wrap"><div class="pf-thumbs-head"><strong>${t("thumbsHeading")}</strong><span class="muted small" id="pfLinkInfo"></span></div><div class="pf-thumbs" id="pfThumbs"></div></div>`;
+    const ctl=(i)=> owner ? `<div class="pf-ctl" data-ctl>
+        <button title="${t("moveFirst")}" data-mv="first" data-i="${i}" ${i===0?"disabled":""}>⇤</button><button title="${t("moveUp")}" data-mv="up" data-i="${i}" ${i===0?"disabled":""}>‹</button>
+        <button title="${t("moveDown")}" data-mv="down" data-i="${i}" ${i===ws.length-1?"disabled":""}>›</button><button title="${t("moveLast")}" data-mv="last" data-i="${i}" ${i===ws.length-1?"disabled":""}>⇥</button>
+        <button title="${ws[i].pinned?t("unpinProject"):t("pinProject")}" data-pin="${i}">${ws[i].pinned?"★":"☆"}</button><button title="${t("deleteProject")}" data-del="${i}" class="danger-btn">🗑</button></div>` : "";
+    const vids=makeCarousel($("#pfVideos",pane),{items:ws, perView:"many",
+      render:(w,i)=>`<article class="work" data-work="${i}">
+        <div class="media ${w.tone}" ${mediaStyle(w)}>${w.pinned?`<div class="pin">${t("pinnedLabel").toUpperCase()}</div>`:""}<div class="media-label">${t(w.catKey)}</div><div class="play">▶</div><div class="media-counter">${w.len||""}</div></div>
+        <div class="work-body"><div class="work-title">${escapeHtml(w.title||"")}</div><div class="work-meta"><span class="mini-tag">${t(w.catKey)}</span><span>${i+1} / ${ws.length}</span></div></div>${ctl(i)}
+      </article>`,
+      onIndex:i=>syncThumbs(i)});
+    // thumbnails: linked (from projects with a thumbnail) + standalone
+    const thumbs=[]; ws.forEach((w,i)=>{ const th=projectThumb(w); if(th) thumbs.push({img:th,link:i}); }); (p.thumbs||[]).forEach((x,k)=>thumbs.push({img:x.img,link:(typeof x.link==="number")?x.link:null,standalone:k}));
+    const thumbsHost=$("#pfThumbs",pane);
+    let thumbApi=null;
+    if(thumbs.length){
+      thumbApi=makeCarousel(thumbsHost,{items:thumbs, perView:"many", render:(th,k)=>`<div class="thumb ${th.link!==null?"linked":""}" data-k="${k}" data-link="${th.link===null?"":th.link}" style="background-image:url('${th.img}')">${th.link!==null?`<span class="thumb-badge">${th.link+1}</span>`:`<span class="thumb-badge muted-badge">${t("unlinkedThumb")}</span>`}${owner&&th.standalone!==undefined?`<button class="thumb-del" data-tdel="${th.standalone}" title="${t("deleteProject")}">×</button>`:""}</div>`});
+      $$(".thumb",thumbsHost).forEach(el=>el.addEventListener("click",e=>{
+        if(e.target.closest("[data-tdel]")) return;
+        const link=el.dataset.link; if(link!==""){ vids.goTo(+link); highlightThumb(+link); } else openImage(el.style.backgroundImage.slice(5,-2));
+      }));
+      $$("[data-tdel]",thumbsHost).forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();confirmDelete(()=>{p.thumbs.splice(+b.dataset.tdel,1);savePortfolio(name);renderPortfolioPane(name,root);});}));
+    } else { $(".pf-thumbs-wrap",pane).classList.add("hidden"); }
+    function highlightThumb(i){ $$(".thumb",thumbsHost).forEach(el=>el.classList.toggle("active",el.dataset.link===String(i))); const info=$("#pfLinkInfo",pane); if(info) info.textContent=fill(t("videoOf"),{i:i+1,n:ws.length}); }
+    function syncThumbs(i){ highlightThumb(i); const el=$(`.thumb[data-link="${i}"]`,thumbsHost); if(el&&thumbApi){ const tr=thumbApi.track; const left=el.offsetLeft-(tr.clientWidth-el.clientWidth)/2; tr.scrollTo({left:Math.max(0,left),behavior:"smooth"}); } }
+    highlightThumb(0);
+    // open viewer on click; hover preview on desktop
+    $$(".work",pane).forEach(w=>{
+      w.addEventListener("click",e=>{ if(e.target.closest("[data-ctl]")) return; openViewer(name,+w.dataset.work); });
+      if(canHoverPreview()){
+        w.addEventListener("mouseenter",()=>{ const src=videoSrc(ws[+w.dataset.work]); if(!src) return; const m=$(".media",w); const v=document.createElement("video"); v.muted=true; v.playsInline=true; v.loop=true; v.preload="metadata"; v.src=src; v.className="hover-preview"; m.append(v); v.play().catch(()=>{}); });
+        w.addEventListener("mouseleave",()=>{ const v=$(".hover-preview",w); if(v){ v.pause(); v.remove(); } });
+      }
+    });
+    function bindOwner(){
+      if(!owner) return;
+      const add=$("[data-pf-add]",pane); if(add) add.addEventListener("click",()=>addProjectModal(name,root));
+      const addT=$("[data-pf-add-thumb]",pane); if(addT) addT.addEventListener("click",()=>addThumbModal(name,root));
+      $$("[data-mv]",pane).forEach(b=>b.addEventListener("click",e=>{e.stopPropagation(); const i=+b.dataset.i, mv=b.dataset.mv; const it=ws.splice(i,1)[0];
+        const j = mv==="first"?0 : mv==="last"?ws.length : mv==="up"?i-1 : i+1; ws.splice(j,0,it); fixThumbLinks(p,i,j); savePortfolio(name); renderPortfolioPane(name,root); }));
+      $$("[data-pin]",pane).forEach(b=>b.addEventListener("click",e=>{e.stopPropagation(); const i=+b.dataset.pin; ws[i].pinned=!ws[i].pinned; savePortfolio(name); renderPortfolioPane(name,root);}));
+      $$("[data-del]",pane).forEach(b=>b.addEventListener("click",e=>{e.stopPropagation(); const i=+b.dataset.del; confirmDelete(()=>{ ws.splice(i,1); (p.thumbs||[]).forEach(x=>{ if(x.link===i) x.link=null; else if(x.link>i) x.link--; }); savePortfolio(name); renderPortfolioPane(name,root); toast(t("projectDeleted")); $(".ep-tab[data-tab='portfolio']",root).textContent=`${t("portfolioHeading")} · ${ws.length}`; }); }));
+    }
+    bindOwner();
+  }
+  function fixThumbLinks(p,from,to){ (p.thumbs||[]).forEach(x=>{ if(typeof x.link!=="number") return; if(x.link===from) x.link=to; else if(from<to && x.link>from && x.link<=to) x.link--; else if(from>to && x.link>=to && x.link<from) x.link++; }); }
+  function confirmDelete(onYes){
+    openModal(t("confirmDeleteTitle"),`<p class="muted">${t("confirmDeleteDesc")}</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="secondary" data-close-modal>${t("cancelBtn")}</button><button class="primary" id="confirmDel" style="background:var(--danger)">${t("deleteProject")}</button></div>`,root=>{
+      $("#confirmDel",root).addEventListener("click",()=>{closeModal();onYes();});
+    });
+  }
+  function openImage(src){ openModal("", `<img src="${src}" style="width:100%;border-radius:12px;display:block">`); }
+
+  function addProjectModal(name, root){
+    const p=PROFILES[name];
+    const cats=["catCommercial","catDocumentary","catShorts","catPodcasts","catMusic","catOther"];
+    openModal(t("addProject"),`
+      <div class="form-grid">
+        <div style="grid-column:1/-1"><label>${t("videoLinkLabel")}</label><input id="npUrl" placeholder="https://"></div>
+        <div style="grid-column:1/-1"><label>${t("videoFileLabel")}</label><input id="npFile" type="file" accept="video/*"></div>
+        <div><label>${t("titleOptional")}</label><input id="npTitle"></div>
+        <div><label>${t("categoryLabel")}</label><select id="npCat">${cats.map(c=>`<option value="${c}">${t(c)}</option>`).join("")}</select></div>
+        <div><label>${t("thumbLabel")}</label><input id="npThumb" type="file" accept="image/*"></div>
+        <div><label>${t("tagsLabel")}</label><input id="npTags" placeholder="${t("tagsPlaceholder")}"></div>
+      </div>
+      <button class="primary" id="npSave" style="margin-top:14px">${t("saveProject")}</button>`,m=>{
+        $("#npSave",m).addEventListener("click",async()=>{
+          const url=$("#npUrl",m).value.trim(), f=$("#npFile",m).files[0];
+          if(!url && !f){ toast(t("needVideo")); return; }
+          const w={title:$("#npTitle",m).value.trim()||"", catKey:$("#npCat",m).value, len:"", tone:["one","two","three"][p.projects.length%3], video: f?URL.createObjectURL(f):url, thumb:null, tags:$("#npTags",m).value.split(",").map(x=>x.trim()).filter(Boolean)};
+          const tf=$("#npThumb",m).files[0]; if(tf) w.thumb=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(tf);});
+          p.projects.push(w); savePortfolio(name); closeModal(); toast(t("projectAdded"));
+          $(".ep-tab[data-tab='portfolio']",root).textContent=`${t("portfolioHeading")} · ${p.projects.length}`;
+          renderPortfolioPane(name,root);
+        });
+      });
+  }
+  function addThumbModal(name, root){
+    const p=PROFILES[name];
+    openModal(t("addThumb"),`
+      <div class="form-grid">
+        <div style="grid-column:1/-1"><label>${t("thumbLabel")}</label><input id="ntFile" type="file" accept="image/*"></div>
+        <div style="grid-column:1/-1"><label>${t("thumbLinkLabel")}</label><select id="ntLink"><option value="">${t("noLink")}</option>${p.projects.map((w,i)=>`<option value="${i}">${i+1} · ${escapeHtml(w.title||t(w.catKey))}</option>`).join("")}</select></div>
+      </div><button class="primary" id="ntSave" style="margin-top:14px">${t("saveProject")}</button>`,m=>{
+        $("#ntSave",m).addEventListener("click",async()=>{
+          const f=$("#ntFile",m).files[0]; if(!f) return;
+          const img=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f);});
+          const link=$("#ntLink",m).value; p.thumbs=p.thumbs||[];
+          if(link!==""){ p.projects[+link].thumb=img; } else p.thumbs.push({img,link:null});
+          savePortfolio(name); closeModal(); renderPortfolioPane(name,root);
+        });
+      });
+  }
+
+  // ----- Expanded viewer: one video per view, arrows + swipe, only this professional's videos, no looping -----
+  function openViewer(name, idx){
+    const p=PROFILES[name], ws=p.projects, n=ws.length; if(!n) return;
+    const titleOf=i=>escapeHtml(ws[i].title||t(ws[i].catKey));
+    openModal(titleOf(idx), `
+      <div class="viewer" id="viewerCar"></div>
+      <div class="viewer-bar"><div><strong id="viewerTitle">${titleOf(idx)}</strong><div class="muted small" id="viewerCount">${fill(t("videoOf"),{i:idx+1,n})}</div></div>
+        <div style="display:flex;gap:8px"><span class="mini-tag" id="viewerCat">${t(ws[idx].catKey)}</span><button class="primary" data-work-msg>${t("messageBtn")}</button></div></div>`, root=>{
+        const api=makeCarousel($("#viewerCar",root),{items:ws, perView:"one", start:idx,
+          render:(w,i)=>{ const src=videoSrc(w), emb=embedSrc(w), th=projectThumb(w);
+            if(src) return `<div class="slide"><video controls playsinline preload="metadata" data-i="${i}" src="${src}" ${th?`poster="${th}"`:""}></video></div>`;
+            if(emb) return `<div class="slide"><iframe src="${emb}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+            return `<div class="slide"><div class="media ${w.tone}" ${mediaStyle(w)}><div class="play">▶</div></div></div>`; },
+          onIndex:i=>{ $$("video",root).forEach(v=>{ if(+v.dataset.i!==i) v.pause(); }); $("#viewerTitle",root).textContent=ws[i].title||t(ws[i].catKey); $("#viewerCount",root).textContent=fill(t("videoOf"),{i:i+1,n}); $("#viewerCat",root).textContent=t(ws[i].catKey); $(".modal-head strong",root).textContent=ws[i].title||t(ws[i].catKey); }});
+        const key=e=>{ if(e.key==="ArrowLeft") api.goTo(api.index-1); else if(e.key==="ArrowRight") api.goTo(api.index+1); else if(e.key==="Escape") closeModal(); };
+        document.addEventListener("keydown",key);
+        new MutationObserver((m,o)=>{ if(!document.body.contains(root)){ document.removeEventListener("keydown",key); o.disconnect(); } }).observe($("#modalRoot"),{childList:true});
+        $("[data-work-msg]",root).addEventListener("click",()=>{closeModal();openChat(name);});
+      }, "wide viewer-modal");
+  }
+
   function openProfile(name){
     const p = PROFILES[name];
     if(!p){ openChat(name); return; }
     state.currentProfile = name;
     const root = $("#page-profile");
     const specs = p.specs.map(k=>`<span class="mini-tag">${t(k)}</span>`).join("");
-    const works = p.projects.map((w,i)=>`
-      <article class="work" data-work="${i}">
-        <div class="media ${w.tone}">${w.pinned?`<div class="pin">${t("pinnedLabel").toUpperCase()}</div>`:""}<div class="media-label">${t(w.catKey)}</div><div class="play">▶</div><div class="media-counter">${w.len}</div></div>
-        <div class="work-body"><div class="work-title">${escapeHtml(w.title)}</div><div class="work-meta"><span class="mini-tag">${t(w.catKey)}</span><span>${t("projLenLabel")} · ${w.len}</span></div></div>
-      </article>`).join("");
     const reviews = p.reviews.map(r=>`
       <div class="review-item">
         <div class="review-top"><div><strong>${escapeHtml(r.who)}</strong><span class="verified">${t("verifiedClient")}</span></div><div class="muted"><span class="stars" style="color:var(--warn)">${stars(r.stars)}</span> · ${r.when}</div></div>
@@ -3048,7 +3432,7 @@
           <div class="ep-head">
             <div class="avatar">${p.initials}</div>
             <div>
-              <div class="ep-title-row"><h1>${name}</h1><span class="status">${t("statusAvailable")}</span></div>
+              <div class="ep-title-row"><h1>${name}</h1><span class="status">${t("statusAvailable")}</span>${isOwner(name)?`<span class="mini-tag">${t("editPortfolio")}</span>`:""}</div>
               <div class="ep-meta"><span>${t(p.roleKey)}</span><span>${p.city}, ${t(p.countryKey)}</span><span>${p.langs}</span></div>
               <div class="ep-stats">
                 <span><span class="stars">${stars(5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}</span>
@@ -3065,12 +3449,12 @@
               <button class="ep-tab" data-tab="about">${t("aboutLabel")}</button>
               <button class="ep-tab" data-tab="reviews">${t("reviewsLabel")} · ${p.reviewCount}</button>
             </div>
-            <div class="ep-pane active" data-pane="portfolio"><div class="portfolio-grid">${works}</div></div>
+            <div class="ep-pane active" data-pane="portfolio"></div>
             <div class="ep-pane" data-pane="about">
               <div class="panel ep-about" style="margin-bottom:14px"><h3 style="margin-bottom:10px">${t("aboutLabel")}</h3><p>${t(p.aboutKey)}</p></div>
               <div class="panel"><h3 style="margin-bottom:12px">${t("toolsLabel")}</h3><div class="skill-list">${p.tools.map(x=>`<span class="skill">${escapeHtml(x)}</span>`).join("")}</div></div>
             </div>
-            <div class="ep-pane" data-pane="reviews"><div class="panel">${reviews}<button class="link-btn" style="margin-top:10px">${t("showAllReviews")} (${p.reviewCount})</button></div></div>
+            <div class="ep-pane" data-pane="reviews"><div class="panel">${reviews}<div class="muted small" style="margin-top:12px">${fill(t("showingReviews"),{a:p.reviews.length,b:p.reviewCount})}</div></div></div>
           </div>
         </div>
 
@@ -3102,23 +3486,14 @@
     $$("[data-route]",root).forEach(el=>el.addEventListener("click",e=>{e.preventDefault();route(el.dataset.route);}));
     ["#epMessage","#epMessageM"].forEach(s=>$(s,root).addEventListener("click",()=>openChat(name)));
     ["#epQuote","#epQuoteM"].forEach(s=>$(s,root).addEventListener("click",()=>requestQuote(name)));
-    $$(".work",root).forEach(w=>w.addEventListener("click",()=>openWork(name, +w.dataset.work)));
+    renderPortfolioPane(name, root);
     if(!root.classList.contains("active")) route("profile");
   }
 
-  function openWork(name, idx){
-    const w = PROFILES[name].projects[idx];
-    openModal(escapeHtml(w.title), `
-      <div class="video-review" style="font-size:40px"><div class="media-label" style="position:absolute;left:14px;top:14px">${t(w.catKey)}</div>▶</div>
-      <div class="review-tools" style="margin-top:14px;justify-content:space-between">
-        <div class="muted">${name} · ${t("projLenLabel")} ${w.len}</div>
-        <button class="primary" data-work-msg>${t("messageBtn")}</button>
-      </div>`, root=>{
-        $("[data-work-msg]",root).addEventListener("click",()=>{closeModal();openChat(name);});
-      });
-  }
+  function openWork(name, idx){ openViewer(name, idx); }
 
   function requestQuote(name){
+    if(!requireAuth()) return;
     openModal(fill(t("quoteTitle"),{name}), `
       <p class="muted">${fill(t("quoteDesc"),{name})}</p>
       <div class="form-grid">
@@ -3155,6 +3530,7 @@
   }
 
   function openChat(name){
+    if(!signedIn()){ toast(t("a_signInToMessage")); route("create-account"); return; }
     if(!isDesktopDock()) sidebar(false);
     if(state.openChats.has(name)){
       state.openChats.get(name).style.zIndex=99;
@@ -3317,8 +3693,185 @@
     });
   }
 
+  // ---------- Real accounts (Supabase). Falls back to demo mode when not configured. ----------
+  const T_AUTH = {
+    en:{ signOut:"Sign out", signedInAs:"Signed in as", a_checkEmail:"Almost there — check your email and click the confirmation link, then sign in.", a_welcomeBack:"Welcome back.", a_signedOut:"Signed out.",
+         a_needSignIn:"Please sign in first.", a_fillAll:"Fill in every field.", a_passShort:"Password must be at least 8 characters.", a_badLogin:"Wrong email or password.", a_exists:"An account with this email already exists. Sign in instead.",
+         a_error:"Something went wrong. Try again.", a_resetSent:"Reset link sent. Check your inbox.", a_newPassTitle:"Set a new password", a_passUpdated:"Password updated.", a_saved:"Saved.",
+         a_roleByInvite:"Your account type is set by an invite code. Redeem one on the Join as an editor page.", a_comingSoon:"Google and Facebook sign-in are coming soon. Use email for now.",
+         a_demoBanner:"Demo mode — accounts are not saved yet. The live site will use real accounts.", a_signInToMessage:"Sign in to message professionals.", a_guest:"Guest" },
+    de:{ signOut:"Abmelden", signedInAs:"Angemeldet als", a_checkEmail:"Fast geschafft – prüfe deine E-Mails, klicke auf den Bestätigungslink und melde dich dann an.", a_welcomeBack:"Willkommen zurück.", a_signedOut:"Abgemeldet.",
+         a_needSignIn:"Bitte melde dich zuerst an.", a_fillAll:"Fülle alle Felder aus.", a_passShort:"Das Passwort braucht mindestens 8 Zeichen.", a_badLogin:"E-Mail oder Passwort ist falsch.", a_exists:"Mit dieser E-Mail gibt es schon ein Konto. Melde dich stattdessen an.",
+         a_error:"Etwas ist schiefgelaufen. Versuch es noch einmal.", a_resetSent:"Link zum Zurücksetzen gesendet. Prüfe dein Postfach.", a_newPassTitle:"Neues Passwort festlegen", a_passUpdated:"Passwort aktualisiert.", a_saved:"Gespeichert.",
+         a_roleByInvite:"Dein Kontotyp wird über einen Einladungscode festgelegt. Löse ihn auf der Seite „Als Editor beitreten“ ein.", a_comingSoon:"Anmeldung mit Google und Facebook kommt bald. Nutze vorerst E-Mail.",
+         a_demoBanner:"Demo-Modus – Konten werden noch nicht gespeichert. Die Live-Seite nutzt echte Konten.", a_signInToMessage:"Melde dich an, um Profis zu schreiben.", a_guest:"Gast" },
+    ru:{ signOut:"Выйти", signedInAs:"Вы вошли как", a_checkEmail:"Почти готово — проверьте почту, нажмите ссылку подтверждения и войдите.", a_welcomeBack:"С возвращением.", a_signedOut:"Вы вышли.",
+         a_needSignIn:"Сначала войдите.", a_fillAll:"Заполните все поля.", a_passShort:"Пароль должен быть не короче 8 символов.", a_badLogin:"Неверный email или пароль.", a_exists:"Аккаунт с этим email уже есть. Войдите.",
+         a_error:"Что-то пошло не так. Попробуйте ещё раз.", a_resetSent:"Ссылка для сброса отправлена. Проверьте почту.", a_newPassTitle:"Задайте новый пароль", a_passUpdated:"Пароль обновлён.", a_saved:"Сохранено.",
+         a_roleByInvite:"Тип аккаунта задаётся кодом приглашения. Введите его на странице «Стать монтажёром».", a_comingSoon:"Вход через Google и Facebook скоро появится. Пока используйте email.",
+         a_demoBanner:"Демо-режим — аккаунты пока не сохраняются. На живом сайте будут настоящие аккаунты.", a_signInToMessage:"Войдите, чтобы писать специалистам.", a_guest:"Гость" },
+    lt:{ signOut:"Atsijungti", signedInAs:"Prisijungta kaip", a_checkEmail:"Beveik viskas – patikrinkite el. paštą, spustelėkite patvirtinimo nuorodą ir prisijunkite.", a_welcomeBack:"Sveiki sugrįžę.", a_signedOut:"Atsijungta.",
+         a_needSignIn:"Pirmiausia prisijunkite.", a_fillAll:"Užpildykite visus laukus.", a_passShort:"Slaptažodis turi būti bent 8 simbolių.", a_badLogin:"Neteisingas el. paštas arba slaptažodis.", a_exists:"Paskyra su šiuo el. paštu jau yra. Prisijunkite.",
+         a_error:"Kažkas nepavyko. Bandykite dar kartą.", a_resetSent:"Atkūrimo nuoroda išsiųsta. Patikrinkite paštą.", a_newPassTitle:"Nustatykite naują slaptažodį", a_passUpdated:"Slaptažodis atnaujintas.", a_saved:"Išsaugota.",
+         a_roleByInvite:"Paskyros tipą nustato pakvietimo kodas. Įveskite jį puslapyje „Tapti editoriumi“.", a_comingSoon:"Prisijungimas per Google ir Facebook – netrukus. Kol kas naudokite el. paštą.",
+         a_demoBanner:"Demo režimas – paskyros dar nesaugomos. Tikroje svetainėje bus tikros paskyros.", a_signInToMessage:"Prisijunkite, kad rašytumėte specialistams.", a_guest:"Svečias" },
+    es:{ signOut:"Cerrar sesión", signedInAs:"Sesión iniciada como", a_checkEmail:"Casi listo: revisa tu correo, haz clic en el enlace de confirmación y luego inicia sesión.", a_welcomeBack:"Bienvenido de nuevo.", a_signedOut:"Sesión cerrada.",
+         a_needSignIn:"Inicia sesión primero.", a_fillAll:"Rellena todos los campos.", a_passShort:"La contraseña debe tener al menos 8 caracteres.", a_badLogin:"Email o contraseña incorrectos.", a_exists:"Ya existe una cuenta con este email. Inicia sesión.",
+         a_error:"Algo salió mal. Inténtalo de nuevo.", a_resetSent:"Enlace de restablecimiento enviado. Revisa tu correo.", a_newPassTitle:"Crea una nueva contraseña", a_passUpdated:"Contraseña actualizada.", a_saved:"Guardado.",
+         a_roleByInvite:"El tipo de cuenta se define con un código de invitación. Canjéalo en la página Unirse como editor.", a_comingSoon:"El acceso con Google y Facebook llegará pronto. Usa el email por ahora.",
+         a_demoBanner:"Modo demo: las cuentas aún no se guardan. El sitio real usará cuentas de verdad.", a_signInToMessage:"Inicia sesión para escribir a los profesionales.", a_guest:"Invitado" },
+    pl:{ signOut:"Wyloguj się", signedInAs:"Zalogowano jako", a_checkEmail:"Prawie gotowe – sprawdź e-mail, kliknij link potwierdzający i zaloguj się.", a_welcomeBack:"Witaj ponownie.", a_signedOut:"Wylogowano.",
+         a_needSignIn:"Najpierw się zaloguj.", a_fillAll:"Wypełnij wszystkie pola.", a_passShort:"Hasło musi mieć co najmniej 8 znaków.", a_badLogin:"Nieprawidłowy e-mail lub hasło.", a_exists:"Konto z tym e-mailem już istnieje. Zaloguj się.",
+         a_error:"Coś poszło nie tak. Spróbuj ponownie.", a_resetSent:"Link do resetu wysłany. Sprawdź skrzynkę.", a_newPassTitle:"Ustaw nowe hasło", a_passUpdated:"Hasło zaktualizowane.", a_saved:"Zapisano.",
+         a_roleByInvite:"Typ konta ustala kod zaproszenia. Wykorzystaj go na stronie Dołącz jako montażysta.", a_comingSoon:"Logowanie przez Google i Facebook wkrótce. Na razie użyj e-maila.",
+         a_demoBanner:"Tryb demo – konta nie są jeszcze zapisywane. Prawdziwa strona będzie używać prawdziwych kont.", a_signInToMessage:"Zaloguj się, aby pisać do specjalistów.", a_guest:"Gość" },
+    uk:{ signOut:"Вийти", signedInAs:"Ви увійшли як", a_checkEmail:"Майже готово — перевірте пошту, натисніть посилання підтвердження та увійдіть.", a_welcomeBack:"З поверненням.", a_signedOut:"Ви вийшли.",
+         a_needSignIn:"Спершу увійдіть.", a_fillAll:"Заповніть усі поля.", a_passShort:"Пароль має бути не коротший за 8 символів.", a_badLogin:"Неправильний email або пароль.", a_exists:"Акаунт із цим email уже є. Увійдіть.",
+         a_error:"Щось пішло не так. Спробуйте ще раз.", a_resetSent:"Посилання для скидання надіслано. Перевірте пошту.", a_newPassTitle:"Задайте новий пароль", a_passUpdated:"Пароль оновлено.", a_saved:"Збережено.",
+         a_roleByInvite:"Тип акаунта задається кодом запрошення. Введіть його на сторінці «Стати монтажером».", a_comingSoon:"Вхід через Google і Facebook незабаром. Поки що використовуйте email.",
+         a_demoBanner:"Демо-режим — акаунти поки не зберігаються. На живому сайті будуть справжні акаунти.", a_signInToMessage:"Увійдіть, щоб писати фахівцям.", a_guest:"Гість" }
+  };
+  for(const code in T_AUTH){ if(T[code]) Object.assign(T[code], T_AUTH[code]); }
+
+  const CFG = window.CUVORI_CONFIG || {};
+  const sb = (window.supabase && CFG.supabaseUrl && CFG.supabaseAnonKey) ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
+  const REAL = !!sb;
+  state.auth = { session:null, profile:null };
+
+  function signedIn(){ return REAL ? !!state.auth.session : true; }
+  function requireAuth(){ if(signedIn()) return true; toast(t("a_needSignIn")); route("create-account"); return false; }
+  function displayName(){ const p=state.auth.profile; return (p && (p.first_name||p.email)) || (REAL ? t("a_guest") : "Egidijus"); }
+  function initials(){ const n=displayName(); return n.split(/[\s@.]+/).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join("") || "C"; }
+
+  async function loadProfile(){
+    if(!REAL || !state.auth.session) { state.auth.profile=null; return; }
+    const uid=state.auth.session.user.id;
+    let { data } = await sb.from("profiles").select("*").eq("id",uid).maybeSingle();
+    if(!data){ // trigger may lag on a brand-new account
+      await new Promise(r=>setTimeout(r,600));
+      ({ data } = await sb.from("profiles").select("*").eq("id",uid).maybeSingle());
+    }
+    state.auth.profile = data || { id:uid, email:state.auth.session.user.email, first_name:state.auth.session.user.user_metadata?.first_name||"", role:"client" };
+  }
+  function applyAuthUI(){
+    const on = signedIn();
+    if(REAL){
+      state.user.role = state.auth.profile ? state.auth.profile.role : "client";
+      $("#demoBanner")?.classList.add("hidden");
+    }
+    $("#signInBtn")?.classList.toggle("hidden", on);
+    if(REAL){ $("#messagesBtn").classList.toggle("hidden", !on); $("#notificationsBtn").classList.toggle("hidden", !on); document.body.classList.toggle("sidebar-collapsed", !on); if(!on) $("#peopleSidebar").classList.remove("open"); }
+    $("#createAccountBtn")?.classList.toggle("hidden", on);
+    $$(".account-btn").forEach(b=>b.classList.toggle("hidden", !on));
+    $("#signOutBtnM")?.classList.toggle("hidden", !on);
+    $("#signOutBtn")?.classList.toggle("hidden", !on);
+    $$("[data-route='create-account'].mobile-nav-btn").forEach(b=>b.classList.toggle("hidden", on));
+    const nm=$("#accountName"); if(nm) nm.textContent=displayName();
+    const em=$("#accountEmail"); if(em) em.textContent=(state.auth.profile&&state.auth.profile.email)||(REAL?"":"egidijusss159@gmail.com");
+    $$(".account-avatar").forEach(a=>a.textContent=initials());
+    const sel=$("#accountTypeSelect"); if(sel){ sel.disabled=REAL; sel.closest("div").querySelector(".role-note")?.remove(); if(REAL){ const n=document.createElement("div"); n.className="muted small role-note"; n.style.marginTop="6px"; n.textContent=t("a_roleByInvite"); sel.closest("div").append(n);} }
+    const pf=$("#profileFirstName"); if(pf && state.auth.profile) pf.value=state.auth.profile.first_name||"";
+    const pe=$("#profileEmail"); if(pe && state.auth.profile) pe.value=state.auth.profile.email||"";
+    refreshReco();
+  }
+  async function refreshAuth(){
+    if(!REAL) { applyAuthUI(); return; }
+    const { data } = await sb.auth.getSession();
+    state.auth.session = data.session;
+    await loadProfile();
+    applyAuthUI();
+  }
+  function authError(e){
+    const m=(e&&e.message||"").toLowerCase();
+    if(m.includes("invalid login")) return t("a_badLogin");
+    if(m.includes("already registered")||m.includes("already exists")) return t("a_exists");
+    if(m.includes("password")&&m.includes("least")) return t("a_passShort");
+    return t("a_error");
+  }
+  async function doSignUp(){
+    const name=$("#suName").value.trim(), email=$("#suEmail").value.trim(), pass=$("#suPass").value;
+    if(!name||!email||!pass){ toast(t("a_fillAll")); return; }
+    if(pass.length<8){ toast(t("a_passShort")); return; }
+    if(!REAL){ toast(t("p_welcomeToast")); route("account"); return; }
+    const { data, error } = await sb.auth.signUp({ email, password:pass, options:{ data:{ first_name:name } } });
+    if(error){ toast(authError(error)); return; }
+    if(data.session){ await refreshAuth(); toast(t("p_welcomeToast")); route("account"); }
+    else { $("#authNotice").innerHTML=`<div class="notice success">${t("a_checkEmail")}</div>`; }
+  }
+  async function doSignIn(){
+    const email=$("#siEmail").value.trim(), pass=$("#siPass").value;
+    if(!email||!pass){ toast(t("a_fillAll")); return; }
+    if(!REAL){ toast(t("p_welcomeToast")); route("account"); return; }
+    const { error } = await sb.auth.signInWithPassword({ email, password:pass });
+    if(error){ toast(authError(error)); return; }
+    await refreshAuth(); toast(t("a_welcomeBack")); route("account");
+  }
+  async function doSignOut(){
+    if(REAL){ await sb.auth.signOut(); state.auth.session=null; state.auth.profile=null; }
+    applyAuthUI(); closeMobileMenu(); toast(t("a_signedOut")); route("home");
+  }
+  async function doReset(email){
+    if(!REAL){ toast(t("p_resetSent")); return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    toast(error ? authError(error) : t("a_resetSent"));
+  }
+  async function doUpdatePassword(pass){
+    if(pass.length<8){ toast(t("a_passShort")); return false; }
+    if(!REAL){ toast(t("a_passUpdated")); return true; }
+    const { error } = await sb.auth.updateUser({ password: pass });
+    if(error){ toast(authError(error)); return false; }
+    toast(t("a_passUpdated")); return true;
+  }
+  async function doSaveProfile(){
+    if(!REAL){ toast(t("p_savedToast")); return; }
+    if(!requireAuth()) return;
+    const first_name=$("#profileFirstName").value.trim();
+    const { error } = await sb.from("profiles").update({ first_name, updated_at:new Date().toISOString() }).eq("id", state.auth.session.user.id);
+    if(error){ toast(t("a_error")); return; }
+    await loadProfile(); applyAuthUI(); toast(t("a_saved"));
+  }
+  async function redeemInviteReal(code){
+    if(!signedIn()){ return "not_signed_in"; }
+    const { data, error } = await sb.rpc("redeem_invite", { code });
+    if(error) return "error";
+    if(data==="ok"){ await loadProfile(); applyAuthUI(); }
+    return data;
+  }
+  function newPasswordModal(){
+    openModal(t("a_newPassTitle"),`<label>${t("newPasswordPlaceholder")}</label><input type="password" id="npw"><button class="primary" style="margin-top:14px" id="npwSave">${t("p_updatePassword")}</button>`,root=>{
+      $("#npwSave",root).addEventListener("click",async()=>{ if(await doUpdatePassword($("#npw",root).value)) closeModal(); });
+    });
+  }
+  function initAuth(){
+    $$("[data-auth-signup]").forEach(b=>b.addEventListener("click",doSignUp));
+    $$("[data-auth-signin]").forEach(b=>b.addEventListener("click",doSignIn));
+    $$("[data-auth-social]").forEach(b=>b.addEventListener("click",()=>{ if(REAL) toast(t("a_comingSoon")); else { toast(t("p_welcomeToast")); route("account"); } }));
+    ["#signOutBtn","#signOutBtnM"].forEach(s=>$(s)?.addEventListener("click",doSignOut));
+    $("#suPass").addEventListener("keydown",e=>{ if(e.key==="Enter") doSignUp(); });
+    $("#siPass").addEventListener("keydown",e=>{ if(e.key==="Enter") doSignIn(); });
+    $("#savePasswordBtn").addEventListener("click",async()=>{
+      const a=$("#pwNew").value, b=$("#pwRepeat").value;
+      if(a!==b){ toast(t("a_fillAll")); return; }
+      if(await doUpdatePassword(a)){ $("#pwNew").value=$("#pwRepeat").value=$("#pwCurrent").value=""; }
+    });
+    $("#saveProfileBtn").addEventListener("click",doSaveProfile);
+    if(REAL){
+      $("#demoBanner")?.classList.add("hidden");
+      sb.auth.onAuthStateChange(async (event, session)=>{
+        state.auth.session=session;
+        if(event==="PASSWORD_RECOVERY"){ await loadProfile(); applyAuthUI(); newPasswordModal(); return; }
+        if(event==="SIGNED_IN"||event==="TOKEN_REFRESHED"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); }
+      });
+    } else {
+      $("#demoBanner")?.classList.remove("hidden");
+    }
+    refreshAuth();
+  }
+
   function init(){
     loadReco();
+    if(REAL) state.user.role="client";
+    loadPortfolio();
     buildLanguageMenu();setLanguage(state.language);
 
     $$("[data-route]").forEach(el=>el.addEventListener("click",e=>{
@@ -3375,10 +3928,22 @@
     }));
 
     $("#inviteBtn").addEventListener("click",()=>{
-      const code=$("#inviteCode").value.trim();
-      $("#inviteResult").innerHTML=code
-        ? (setRole("editor",true), `<div class="notice success"><strong>${t("invitePassedTitle")}</strong><br>${t("invitePassedDesc")}</div>`)
-        : `<div class="notice danger">${t("inviteEnterCode")}</div>`;
+      const raw=$("#inviteCode").value.trim().toUpperCase().replace(/\s+/g,"");
+      const res=$("#inviteResult");
+      if(!raw){ res.innerHTML=`<div class="notice danger">${t("inviteEnterCode")}</div>`; return; }
+      if(!/^CUV-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(raw)){ res.innerHTML=`<div class="notice danger">${t("inviteBadFormat")}</div>`; return; }
+      if(REAL){
+        redeemInviteReal(raw).then(r=>{
+          const msg={ok:null, not_signed_in:t("a_needSignIn"), bad_format:t("inviteBadFormat"), invalid:t("inviteInvalid"), used:t("inviteUsed"), error:t("a_error")}[r]||t("a_error");
+          res.innerHTML = r==="ok" ? `<div class="notice success"><strong>${t("invitePassedTitle")}</strong><br>${t("invitePassedDesc")}</div>` : `<div class="notice danger">${msg}</div>`;
+          if(r==="not_signed_in") route("create-account");
+        });
+        return;
+      }
+      if(!isValidInvite(raw)){ res.innerHTML=`<div class="notice danger">${t("inviteInvalid")}</div>`; return; }
+      if(inviteUsed(raw)){ res.innerHTML=`<div class="notice danger">${t("inviteUsed")}</div>`; return; }
+      markInviteUsed(raw); setRole("editor",true);
+      res.innerHTML=`<div class="notice success"><strong>${t("invitePassedTitle")}</strong><br>${t("invitePassedDesc")}</div>`;
     });
 
     $("#demoContract").addEventListener("click",()=>openModal(t("contractDraftTitle"),`
@@ -3433,6 +3998,7 @@
   }
 
   function publishJobFromForm(){
+    if(!requireAuth()) return;
     const title=$("#jobTitle").value.trim();
     if(!title){toast(t("toastAddJobTitle"));$("#jobTitle").focus();return;}
     const role=$("#jobRole"), cat=$("#jobCat"), pricing=$("#jobPricing");
@@ -3505,19 +4071,32 @@
     // Join
     $("#requestInvite").addEventListener("click",requestInviteModal);
     // Auth
+    $$("[data-auth-open]").forEach(el=>el.addEventListener("click",()=>{ const which=el.dataset.authOpen; const b=$(`#authSeg [data-auth="${which}"]`); if(b) b.click(); }));
     $$("#authSeg .seg-btn").forEach(b=>b.addEventListener("click",()=>{
       $$("#authSeg .seg-btn").forEach(x=>x.classList.toggle("active",x===b));
       $$("[data-auth-pane]").forEach(p=>p.classList.toggle("hidden",p.dataset.authPane!==b.dataset.auth));
     }));
     $$("[data-auth-submit]").forEach(b=>b.addEventListener("click",()=>{toast(t("p_welcomeToast"));route("account");}));
+    $$("[data-stat]").forEach(b=>b.addEventListener("click",()=>{
+      if(b.dataset.stat==="chats") sidebar(true);
+      else document.querySelector(".saved-list").scrollIntoView({behavior:"smooth",block:"center"});
+    }));
+    $("#forgotBtn").addEventListener("click",()=>openModal(t("p_resetTitle"),`
+      <p class="muted">${t("p_resetDesc")}</p><label>${t("emailLabel")}</label><input type="email">
+      <button class="primary" style="margin-top:14px" id="sendReset">${t("sendBtnLabel")}</button>`,root=>{
+        $("#sendReset",root).addEventListener("click",()=>{const em=$("input[type=email]",root).value.trim(); closeModal(); if(em) doReset(em); });
+      }));
   }
 
   init();
   initPages();
   runJobSearch();
   $("#accountTypeSelect").addEventListener("change",e=>setRole(e.target.value));
+  $("#myProfileBtn").addEventListener("click",()=>openProfile(OWN_PROFILE));
+  buildCardGalleries();
   $("#reminderToggle").addEventListener("change",e=>{state.reminderEnabled=e.target.checked;saveReco();refreshReco();});
   refreshReco();
+  initAuth();
   setInterval(refreshReco, 60000);
 })();
 </script>

@@ -1,0 +1,21 @@
+# Netlify: the whole repo is the site. The page lives in cuvori-index.html,
+# so "/" is served from it. Every other unknown path also goes there.
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/"
+  to = "/cuvori-index.html"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/cuvori-index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
