@@ -53,3 +53,24 @@ Codes must look like `CUV-XXXX-XXXX` (letters/numbers). Each code works once. No
 Real: sign up, sign in, sign out, password reset by email, change password, first name, client/editor role, invite codes.
 
 Still demo (next steps): the three example editors, jobs, messages, progress updates, contracts and portfolios are sample data shown to everyone and are not saved yet.
+
+## Part 5 — Protected payments (Stripe escrow)
+
+Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's Stripe balance until the client approves, Cuvori decides a dispute, or 7 days pass after delivery. Until this part is done the site uses **direct payments** (the client pays the editor's IBAN/PayPal and both confirm).
+
+1. Create a Stripe account at https://stripe.com (country: Lithuania; individual is fine to start). Finish the identity and bank checks Stripe asks for.
+2. Stripe dashboard → **Settings → Connect** → get started → choose **Express** accounts. Also set the platform name/branding ("Cuvori").
+3. Stripe → **Developers → API keys**: copy the **Secret key** (starts with `sk_test_` in test mode, `sk_live_` later).
+4. Stripe → **Developers → Webhooks → Add endpoint**: URL `https://cuvori.netlify.app/.netlify/functions/stripe-webhook`, events: `checkout.session.completed`, `account.updated`, `charge.refunded`. Copy the **Signing secret** (`whsec_...`).
+5. Supabase → **Project Settings → API**: copy the **service_role** key (secret! never put it in the page).
+6. Netlify → site → **Site configuration → Environment variables** → add:
+   - `STRIPE_SECRET_KEY` = sk_…
+   - `STRIPE_WEBHOOK_SECRET` = whsec_…
+   - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key
+   - optional: `FEE_PERCENT` (default 3), `FEE_FIXED_CENTS` (default 25), `AUTO_RELEASE_DAYS` (default 7)
+   Then **Deploys → Trigger deploy**. From now on new contracts are "Protected payment".
+7. Run `supabase/schema_v5.sql` … `schema_v8.sql` in the Supabase SQL editor, in order (already done for cuvori.netlify.app).
+8. Test in Stripe **test mode**: editor → Settings → Payout details → "Set up payouts with Stripe" (use Stripe's test data); client → contract → Pay now → card `4242 4242 4242 4242`, any future date, any CVC.
+9. Go live: switch the two Stripe keys to live keys in Netlify and trigger a deploy.
+
+How the money flows: client pays price + card fee → held → editor "Mark as delivered" → client "Approve & release" (or 7-day auto-release) → Stripe pays the editor's bank. Disputes (either side) stop the clock; you decide in Admin panel → Contracts & disputes: release, refund or split.
