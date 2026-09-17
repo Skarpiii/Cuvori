@@ -1,22 +1,29 @@
-// Runs every hour (Netlify scheduled function). Releases money for contracts that were
-// delivered and not approved, disputed or sent back within AUTO_RELEASE_DAYS.
-import { escrowEnabled, db, releaseToEditor, contractEvent, json } from "../lib/cuvori.mjs";
+// Hourly. Hardened copy: compare-and-set claim, skips banned editors, resumes stuck releases.
+import { escrowEnabled, db, settle, json, centsOf, isBanned, payoutAccount } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 
 export default async () => {
   if (!escrowEnabled()) return json(200, { skipped: "escrow not configured" });
   const now = new Date().toISOString();
-  const due = await db.select("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*`);
-  const done = [];
-  for (const c of due || []) {
+  const due = await db.select("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&order=auto_release_at.asc&limit=50`);
+  const stuck = await db.select("contracts", `status=eq.releasing&payment_mode=eq.escrow&select=*&limit=50`);
+  const done = [], failed = [];
+  for (const c of [...(due || []), ...(stuck || [])]) {
     try {
-      const cents = c.amount_cents || Math.round(Number(c.price) * 100);
-      const transferId = await releaseToEditor(c, cents);
-      const [u] = await db.update("contracts", `id=eq.${c.id}`, { status: "completed", completed_at: now, closed_at: now, resolution: "release", resolved_at: now, stripe_transfer_id: transferId, split_editor_cents: cents });
-      await contractEvent(u, "auto_release", c.editor);
+      const cents = centsOf(c);
+      if (!cents) throw new Error("amount missing");
+      let row = c;
+      if (c.status === "delivered") {
+        if (await isBanned(c.editor)) { failed.push({ id: c.id, why: "editor banned" }); continue; }
+        const acct = await payoutAccount(c.editor);
+        if (!acct || !acct.payouts_enabled) { failed.push({ id: c.id, why: "editor account not ready" }); continue; }
+        row = await db.claim(c.id, ["delivered"], { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_at: now, auto_release_at: null });
+        if (!row) continue;                                               // disputed / sent back meanwhile
+      }
+      await settle(row, c.editor, "auto_release");
       done.push(c.id);
-    } catch (e) { console.error("auto-release failed for", c.id, e.message); }
+    } catch (e) { failed.push({ id: c.id, why: e.message }); console.error("auto-release failed for", c.id, e.message); }
   }
-  return json(200, { released: done });
+  return json(200, { released: done, failed: failed.length });
 };
