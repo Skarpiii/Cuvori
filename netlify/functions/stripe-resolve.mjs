@@ -1,40 +1,47 @@
-// POST /.netlify/functions/stripe-resolve { contract_id, decision: "release"|"refund"|"split", editor_percent, note }
-// Admin only. Ends a disputed (or stuck) escrow contract.
-import { escrowEnabled, db, userFromRequest, json, bad, releaseToEditor, refundToClient, contractEvent } from "../lib/cuvori.mjs";
+// POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, centsOf } from "../lib/cuvori.mjs";
 
-export default async (req) => {
+export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
   if (!escrowEnabled()) return bad("Escrow payments are not configured yet", 503);
   const me = await userFromRequest(req);
-  if (!me || !me.is_admin) return bad("Admins only", 403);
-  let body = {}; try { body = await req.json(); } catch {}
-  const id = String(body.contract_id || "");
-  if (!/^[0-9a-f-]{36}$/.test(id)) return bad("Bad contract id");
-  const c = await db.one("contracts", `id=eq.${id}&select=*`);
-  if (!c) return bad("Not found", 404);
-  if (c.payment_mode !== "escrow" || !["funded", "delivered", "disputed"].includes(c.status)) return bad("This contract is not holding money", 409);
-
-  const total = c.amount_cents || Math.round(Number(c.price) * 100);
+  if (!me || !me.is_admin || me.banned) return bad("Admins only", 403);
+  const body = await readJson(req);
   const decision = body.decision;
-  let editorCents = 0, refundCents = 0;
-  if (decision === "release") editorCents = total;
-  else if (decision === "refund") refundCents = total;
-  else if (decision === "split") { const p = Math.max(0, Math.min(100, Number(body.editor_percent))); editorCents = Math.round(total * p / 100); refundCents = total - editorCents; }
-  else return bad("decision must be release, refund or split");
+  if (!["release", "refund", "split"].includes(decision)) return bad("decision must be release, refund or split");
+  const note = typeof body.note === "string" ? body.note.slice(0, 2000) : "";
+  const c = await db.contract(body.contract_id);
+  if (!c) return bad("Not found", 404);
+  if (c.payment_mode !== "escrow") return bad("This contract is not holding money", 409);
+  const total = centsOf(c);
+  if (!total) return bad("Contract amount missing", 409);
 
-  let transferId = null, refundId = null;
-  if (editorCents > 0) transferId = await releaseToEditor(c, editorCents);
-  if (refundCents > 0) refundId = await refundToClient(c, refundCents);
-  const now = new Date().toISOString();
-  const status = editorCents > 0 ? "completed" : "refunded";
-  const [u] = await db.update("contracts", `id=eq.${id}`, { status, resolution: decision, split_editor_cents: editorCents, resolved_at: now, resolved_by: me.id,
-    stripe_transfer_id: transferId, stripe_refund_id: refundId, completed_at: editorCents > 0 ? now : null, closed_at: now, auto_release_at: null });
-  await contractEvent(u, `resolved_${decision}`, me.id);
-  // the side that lost a dispute goes on the watch list automatically
-  if (c.status === "disputed") {
-    const loser = decision === "refund" ? c.editor : decision === "release" ? c.client : null;
-    if (loser) await db.insert("user_flags", { user_id: loser, kind: "dispute_lost", reason: `Lost dispute on "${c.title}"${body.note ? ": " + body.note : ""}`, contract_id: c.id, created_by: me.id });
+  let row;
+  if (c.status === "resolving") {                                        // resume: the recorded decision wins
+    if (c.resolution !== decision) return bad(`A '${c.resolution}' decision is already in progress for this contract`, 409);
+    row = c;
+  } else {
+    let editorCents;
+    if (decision === "release") editorCents = total;
+    else if (decision === "refund") editorCents = 0;
+    else {
+      const p = typeof body.editor_percent === "number" ? body.editor_percent : NaN;
+      if (!Number.isFinite(p) || p <= 0 || p >= 100) return bad("editor_percent must be a number between 0 and 100 (exclusive) for a split");
+      editorCents = Math.round(total * p / 100);
+    }
+    const refundCents = total - editorCents;
+    const now = new Date().toISOString();
+    row = await db.claim(c.id, ["funded", "delivered", "disputed"], { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null });
+    if (!row) return bad("This contract is not holding money", 409);
+    row.was_disputed = c.status === "disputed";
   }
-  if (body.note) await db.insert("messages", { conversation_id: c.conversation_id, sender: me.id, kind: "text", body: `Cuvori decision: ${body.note}` });
-  return json(200, { ok: true, status, editorCents, refundCents });
-};
+  const u = await settle(row, me.id, `resolved_${decision}`);
+  if (row.disputed_at || row.was_disputed) {
+    const loser = decision === "refund" ? c.editor : decision === "release" ? c.client : null;
+    // a retried decision must not flag the same person twice for the same contract
+    const already = loser ? await db.one("user_flags", `user_id=eq.${loser}&contract_id=eq.${c.id}&kind=eq.dispute_lost&select=id`) : null;
+    if (loser && !already) await db.insert("user_flags", { user_id: loser, kind: "dispute_lost", reason: `Lost dispute on "${String(c.title).slice(0, 200)}"${note ? ": " + note : ""}`, contract_id: c.id, created_by: me.id });
+  }
+  if (note) await db.insert("messages", { conversation_id: c.conversation_id, sender: me.id, kind: "text", body: `Cuvori decision: ${note}` });
+  return json(200, { ok: true, status: u && u.status, editorCents: row.split_editor_cents, refundCents: row.refund_cents });
+});

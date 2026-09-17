@@ -1,42 +1,43 @@
-// POST /.netlify/functions/stripe-checkout { contract_id } (client) → { url } to Stripe Checkout.
-// The client pays price + processing fee. Money lands in Cuvori's Stripe balance and is
-// held there until release (approval, admin decision or auto-release).
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, feeFor } from "../lib/cuvori.mjs";
+// POST { contract_id } (client) → { url }. Hardened copy.
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, feeFor, readJson, safe, payoutAccount, isBanned, centsOf, MIN_CENTS, MAX_CENTS } from "../lib/cuvori.mjs";
 
-export default async (req) => {
+export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
   if (!escrowEnabled()) return bad("Escrow payments are not configured yet", 503);
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
-  let body = {}; try { body = await req.json(); } catch {}
-  const id = String(body.contract_id || "");
-  if (!/^[0-9a-f-]{36}$/.test(id)) return bad("Bad contract id");
-
-  const c = await db.one("contracts", `id=eq.${id}&select=*`);
+  const { contract_id: id } = await readJson(req);
+  const c = await db.contract(id);
   if (!c || c.client !== me.id) return bad("Not your contract", 403);
   if (c.payment_mode !== "escrow") return bad("This contract is paid directly, not through Cuvori");
   if (c.status !== "accepted") return bad("The contract must be accepted before it can be paid");
-  const payout = await db.one("payout_details", `id=eq.${c.editor}&select=stripe_account_id,stripe_payouts_enabled`);
-  if (!payout || !payout.stripe_payouts_enabled) return bad("The editor has not finished setting up payouts yet. Ask them to connect Stripe in Settings → Payout details.", 409);
+  if (c.pricing && c.pricing !== "project") return bad("Escrow is only available for fixed-price contracts", 409);
+  const amount = centsOf(c);
+  if (!amount || amount < MIN_CENTS || amount > MAX_CENTS) return bad("Amount out of range", 409);
+  if (await isBanned(c.editor)) return bad("This editor cannot receive payments", 409);
+  const acct = await payoutAccount(c.editor);
+  if (!acct || !acct.payouts_enabled) return bad("The editor has not finished setting up payouts yet. Ask them to connect Stripe in Settings → Payout details.", 409);
 
-  const amount = c.amount_cents || Math.round(Number(c.price) * 100);
   const fee = feeFor(amount);
   const currency = (c.currency || "EUR").toLowerCase();
   const session = await stripe("POST", "/checkout/sessions", {
     mode: "payment",
     client_reference_id: c.id,
     customer_email: me.email,
+    expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    payment_method_types: ["card"],
     success_url: `${SITE_URL}/#contracts?paid=${c.id}`,
     cancel_url: `${SITE_URL}/#contracts?cancelled=${c.id}`,
     line_items: [
-      { quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: c.title, description: "Held by Cuvori until you approve the delivery. The editor receives 100% of this amount." } } },
-      { quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing", description: "Card processing costs (Stripe). Cuvori takes no commission." } } },
+      { quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: String(c.title || "Contract").slice(0, 200) || "Contract" } } },
+      { quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing" } } },
     ],
-    payment_intent_data: { transfer_group: `contract_${c.id}`, description: `Cuvori contract: ${c.title}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client } },
-    metadata: { contract_id: c.id },
-  }, { idempotency: `checkout_${c.id}_${amount}_${fee}` });
+    payment_intent_data: { transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client } },
+    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee) },
+  }, { idempotency: `checkout_${c.id}_${amount}_${fee}_${me.id}_${Math.floor(Date.now() / 1800e3)}` });
 
-  await db.update("contracts", `id=eq.${c.id}`, { stripe_checkout_id: session.id, amount_cents: amount, fee_cents: fee });
+  const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.accepted`, { stripe_checkout_id: session.id, fee_cents: fee });
+  if (!rows || !rows.length) { await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {}); return bad("The contract changed, reload", 409); }
   return json(200, { url: session.url, amount, fee });
-};
+});
