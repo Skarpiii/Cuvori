@@ -30,6 +30,11 @@ export default async (req) => {
   const [u] = await db.update("contracts", `id=eq.${id}`, { status, resolution: decision, split_editor_cents: editorCents, resolved_at: now, resolved_by: me.id,
     stripe_transfer_id: transferId, stripe_refund_id: refundId, completed_at: editorCents > 0 ? now : null, closed_at: now, auto_release_at: null });
   await contractEvent(u, `resolved_${decision}`, me.id);
+  // the side that lost a dispute goes on the watch list automatically
+  if (c.status === "disputed") {
+    const loser = decision === "refund" ? c.editor : decision === "release" ? c.client : null;
+    if (loser) await db.insert("user_flags", { user_id: loser, kind: "dispute_lost", reason: `Lost dispute on "${c.title}"${body.note ? ": " + body.note : ""}`, contract_id: c.id, created_by: me.id });
+  }
   if (body.note) await db.insert("messages", { conversation_id: c.conversation_id, sender: me.id, kind: "text", body: `Cuvori decision: ${body.note}` });
   return json(200, { ok: true, status, editorCents, refundCents });
 };
