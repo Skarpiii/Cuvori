@@ -19,6 +19,12 @@ export default async (req) => {
         if (c && c.status === "accepted") {
           const [u] = await db.update("contracts", `id=eq.${id}`, { status: "funded", funded_at: new Date().toISOString(), stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id });
           await contractEvent(u, "funded", c.client);
+          // remember which card paid (fingerprint only), so a flagged person is recognised on a new account
+          try {
+            const pi = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge" });
+            const card = pi.latest_charge && pi.latest_charge.payment_method_details && pi.latest_charge.payment_method_details.card;
+            if (card && card.fingerprint) await db.rpc("record_card", { uid: c.client, fingerprint: card.fingerprint, label: `${card.brand || "card"} ••${card.last4 || "????"}` });
+          } catch (e) { console.error("card fingerprint", e.message); }
         }
       }
     } else if (event.type === "account.updated") {
