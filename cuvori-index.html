@@ -3440,7 +3440,7 @@
             <div class="avatar">${p.initials}</div>
             <div>
               <div class="ep-title-row"><h1>${escapeHtml(p.name||name)}</h1>${p.available===false?"":`<span class="status">${t("statusAvailable")}</span>`}${isOwner(name)?`<button class="secondary" data-edit-profile style="padding:6px 12px">${t("d_editProfile")}</button>`:""}</div>
-              ${isOwner(name)&&REAL&&!p.is_public?`<div class="notice" style="margin:8px 0">${t("d_draftNotPublic")}</div>`:""}
+              ${isOwner(name)&&REAL&&!p.is_public?`<div class="notice" style="margin:8px 0"><strong>${t("d_setupTitle")}</strong><br>${t("d_setupSteps")}<br><button class="primary" data-edit-profile style="margin-top:10px;padding:8px 14px">${t("d_setupBtn")}</button></div>`:""}
               <div class="ep-meta"><span>${t(p.roleKey)}</span><span>${escapeHtml(pLocation(p))}</span><span>${escapeHtml(p.langs||"")}</span></div>
               <div class="ep-stats">
                 <span>${p.reviewCount?`<span class="stars">${stars(5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}`:t("p_noReviewsTitle")}</span>
@@ -3495,7 +3495,7 @@
     ["#epMessage","#epMessageM"].forEach(s=>$(s,root).addEventListener("click",()=>openChat(name)));
     ["#epQuote","#epQuoteM"].forEach(s=>$(s,root).addEventListener("click",()=>requestQuote(name)));
     renderPortfolioPane(name, root);
-    const epb=$("[data-edit-profile]",root); if(epb) epb.addEventListener("click",()=>editProfileModal(name));
+    $$("[data-edit-profile]",root).forEach(epb=>epb.addEventListener("click",()=>editProfileModal(name)));
     if(!root.classList.contains("active")) route("profile");
   }
 
@@ -3913,49 +3913,49 @@
          d_respondsHours:"Usually respond within (hours)", d_turnaround:"Typical turnaround (days)", d_revisions:"Revision rounds included", d_exampleProfile:"Example profile — real editors appear here as they join.",
          d_exampleCantMessage:"This is an example profile. Message a real professional instead.", d_noConversations:"No conversations yet. Message a professional from their profile.", d_client:"Client",
          d_uploading:"Uploading…", d_uploadFailed:"Upload failed. Try a smaller file.", d_jobPosted:"Job posted.", d_noJobs:"No jobs posted yet. Be the first.", d_you:"You", d_examples:"Example profiles",
-         d_realEditors:"Professionals", d_draftNotPublic:"Your profile is not public yet. Open Edit profile and turn on \"Show my profile in search\".", d_newMessageFrom:"New message from {name}", d_changesRequested:"Changes requested", d_approved:"Approved",
+         d_realEditors:"Professionals", d_setupTitle:"Set up your editor profile", d_setupSteps:"1. Fill in your profile (bio, price, city). 2. Turn on \"Show my profile in search\". 3. Add your videos with \"Add project\" below.", d_setupBtn:"Fill in my profile", d_draftNotPublic:"Your profile is not public yet. Open Edit profile and turn on \"Show my profile in search\".", d_newMessageFrom:"New message from {name}", d_changesRequested:"Changes requested", d_approved:"Approved",
          d_yourJobs:"Your jobs", d_closeJob:"Close job", d_jobClosed:"Job closed." },
     de:{ d_editProfile:"Profil bearbeiten", d_profileSaved:"Profil gespeichert.", d_displayName:"Anzeigename", d_roleLabel:"Was du machst", d_city:"Stadt", d_country:"Land", d_languages:"Sprachen (mit Komma getrennt)",
          d_tools:"Tools & Fähigkeiten (mit Komma getrennt)", d_bio:"Über dich", d_rate:"Preis", d_rateUnit:"Pro", d_public:"Mein Profil in der Suche anzeigen", d_publicHint:"Schalte das ein, wenn Profil und Portfolio fertig sind.",
          d_respondsHours:"Antwortet meist innerhalb von (Stunden)", d_turnaround:"Typische Bearbeitungszeit (Tage)", d_revisions:"Korrekturrunden inklusive", d_exampleProfile:"Beispielprofil – echte Editoren erscheinen hier, sobald sie beitreten.",
          d_exampleCantMessage:"Das ist ein Beispielprofil. Schreib stattdessen einer echten Fachkraft.", d_noConversations:"Noch keine Unterhaltungen. Schreib einer Fachkraft über ihr Profil.", d_client:"Kunde",
          d_uploading:"Wird hochgeladen…", d_uploadFailed:"Upload fehlgeschlagen. Versuch eine kleinere Datei.", d_jobPosted:"Job veröffentlicht.", d_noJobs:"Noch keine Jobs. Sei der Erste.", d_you:"Du", d_examples:"Beispielprofile",
-         d_realEditors:"Fachkräfte", d_draftNotPublic:"Dein Profil ist noch nicht öffentlich. Öffne „Profil bearbeiten“ und schalte „Mein Profil in der Suche anzeigen“ ein.", d_newMessageFrom:"Neue Nachricht von {name}", d_changesRequested:"Änderungen angefragt", d_approved:"Freigegeben",
+         d_realEditors:"Fachkräfte", d_setupTitle:"Richte dein Editor-Profil ein", d_setupSteps:"1. Profil ausfüllen (Bio, Preis, Stadt). 2. „Mein Profil in der Suche anzeigen“ einschalten. 3. Videos unten mit „Projekt hinzufügen“ ergänzen.", d_setupBtn:"Profil ausfüllen", d_draftNotPublic:"Dein Profil ist noch nicht öffentlich. Öffne „Profil bearbeiten“ und schalte „Mein Profil in der Suche anzeigen“ ein.", d_newMessageFrom:"Neue Nachricht von {name}", d_changesRequested:"Änderungen angefragt", d_approved:"Freigegeben",
          d_yourJobs:"Deine Jobs", d_closeJob:"Job schließen", d_jobClosed:"Job geschlossen." },
     ru:{ d_editProfile:"Редактировать профиль", d_profileSaved:"Профиль сохранён.", d_displayName:"Отображаемое имя", d_roleLabel:"Чем вы занимаетесь", d_city:"Город", d_country:"Страна", d_languages:"Языки (через запятую)",
          d_tools:"Инструменты и навыки (через запятую)", d_bio:"О себе", d_rate:"Ставка", d_rateUnit:"За", d_public:"Показывать профиль в поиске", d_publicHint:"Включите, когда профиль и портфолио готовы.",
          d_respondsHours:"Обычно отвечаю в течение (часов)", d_turnaround:"Типичный срок (дней)", d_revisions:"Раундов правок включено", d_exampleProfile:"Пример профиля — настоящие монтажёры появятся здесь по мере регистрации.",
          d_exampleCantMessage:"Это пример профиля. Напишите настоящему специалисту.", d_noConversations:"Диалогов пока нет. Напишите специалисту из его профиля.", d_client:"Клиент",
          d_uploading:"Загрузка…", d_uploadFailed:"Не удалось загрузить. Попробуйте файл меньше.", d_jobPosted:"Вакансия опубликована.", d_noJobs:"Вакансий пока нет. Будьте первым.", d_you:"Вы", d_examples:"Примеры профилей",
-         d_realEditors:"Специалисты", d_draftNotPublic:"Ваш профиль пока не публичный. Откройте «Редактировать профиль» и включите «Показывать профиль в поиске».", d_newMessageFrom:"Новое сообщение от {name}", d_changesRequested:"Запрошены правки", d_approved:"Одобрено",
+         d_realEditors:"Специалисты", d_setupTitle:"Настройте профиль монтажёра", d_setupSteps:"1. Заполните профиль (о себе, цена, город). 2. Включите «Показывать профиль в поиске». 3. Добавьте видео кнопкой «Добавить проект» ниже.", d_setupBtn:"Заполнить профиль", d_draftNotPublic:"Ваш профиль пока не публичный. Откройте «Редактировать профиль» и включите «Показывать профиль в поиске».", d_newMessageFrom:"Новое сообщение от {name}", d_changesRequested:"Запрошены правки", d_approved:"Одобрено",
          d_yourJobs:"Ваши вакансии", d_closeJob:"Закрыть вакансию", d_jobClosed:"Вакансия закрыта." },
     lt:{ d_editProfile:"Redaguoti profilį", d_profileSaved:"Profilis išsaugotas.", d_displayName:"Rodomas vardas", d_roleLabel:"Ką darote", d_city:"Miestas", d_country:"Šalis", d_languages:"Kalbos (atskirtos kableliais)",
          d_tools:"Įrankiai ir įgūdžiai (atskirti kableliais)", d_bio:"Apie jus", d_rate:"Įkainis", d_rateUnit:"Už", d_public:"Rodyti mano profilį paieškoje", d_publicHint:"Įjunkite, kai profilis ir portfolio bus paruošti.",
          d_respondsHours:"Paprastai atsakau per (val.)", d_turnaround:"Įprastas atlikimo laikas (d.)", d_revisions:"Įskaičiuoti pataisymų ratai", d_exampleProfile:"Pavyzdinis profilis – tikri editoriai atsiras čia, kai prisijungs.",
          d_exampleCantMessage:"Tai pavyzdinis profilis. Rašykite tikram specialistui.", d_noConversations:"Pokalbių dar nėra. Parašykite specialistui iš jo profilio.", d_client:"Klientas",
          d_uploading:"Įkeliama…", d_uploadFailed:"Įkelti nepavyko. Pabandykite mažesnį failą.", d_jobPosted:"Darbas paskelbtas.", d_noJobs:"Darbų dar nėra. Būkite pirmas.", d_you:"Jūs", d_examples:"Pavyzdiniai profiliai",
-         d_realEditors:"Specialistai", d_draftNotPublic:"Jūsų profilis dar neviešas. Atidarykite „Redaguoti profilį“ ir įjunkite „Rodyti mano profilį paieškoje“.", d_newMessageFrom:"Nauja žinutė nuo {name}", d_changesRequested:"Paprašyta pataisymų", d_approved:"Patvirtinta",
+         d_realEditors:"Specialistai", d_setupTitle:"Susikurkite editoriaus profilį", d_setupSteps:"1. Užpildykite profilį (aprašymas, kaina, miestas). 2. Įjunkite „Rodyti mano profilį paieškoje“. 3. Pridėkite vaizdo įrašus žemiau mygtuku „Pridėti projektą“.", d_setupBtn:"Užpildyti profilį", d_draftNotPublic:"Jūsų profilis dar neviešas. Atidarykite „Redaguoti profilį“ ir įjunkite „Rodyti mano profilį paieškoje“.", d_newMessageFrom:"Nauja žinutė nuo {name}", d_changesRequested:"Paprašyta pataisymų", d_approved:"Patvirtinta",
          d_yourJobs:"Jūsų darbai", d_closeJob:"Uždaryti darbą", d_jobClosed:"Darbas uždarytas." },
     es:{ d_editProfile:"Editar perfil", d_profileSaved:"Perfil guardado.", d_displayName:"Nombre visible", d_roleLabel:"A qué te dedicas", d_city:"Ciudad", d_country:"País", d_languages:"Idiomas (separados por comas)",
          d_tools:"Herramientas y habilidades (separadas por comas)", d_bio:"Sobre ti", d_rate:"Tarifa", d_rateUnit:"Por", d_public:"Mostrar mi perfil en la búsqueda", d_publicHint:"Actívalo cuando tu perfil y portafolio estén listos.",
          d_respondsHours:"Suelo responder en (horas)", d_turnaround:"Plazo habitual (días)", d_revisions:"Rondas de revisión incluidas", d_exampleProfile:"Perfil de ejemplo: los editores reales aparecerán aquí al unirse.",
          d_exampleCantMessage:"Este es un perfil de ejemplo. Escribe a un profesional real.", d_noConversations:"Aún no hay conversaciones. Escribe a un profesional desde su perfil.", d_client:"Cliente",
          d_uploading:"Subiendo…", d_uploadFailed:"Error al subir. Prueba con un archivo más pequeño.", d_jobPosted:"Trabajo publicado.", d_noJobs:"Aún no hay trabajos. Sé el primero.", d_you:"Tú", d_examples:"Perfiles de ejemplo",
-         d_realEditors:"Profesionales", d_draftNotPublic:"Tu perfil aún no es público. Abre Editar perfil y activa \"Mostrar mi perfil en la búsqueda\".", d_newMessageFrom:"Nuevo mensaje de {name}", d_changesRequested:"Cambios solicitados", d_approved:"Aprobado",
+         d_realEditors:"Profesionales", d_setupTitle:"Configura tu perfil de editor", d_setupSteps:"1. Rellena tu perfil (bio, precio, ciudad). 2. Activa \"Mostrar mi perfil en la búsqueda\". 3. Añade tus vídeos con \"Añadir proyecto\" abajo.", d_setupBtn:"Rellenar mi perfil", d_draftNotPublic:"Tu perfil aún no es público. Abre Editar perfil y activa \"Mostrar mi perfil en la búsqueda\".", d_newMessageFrom:"Nuevo mensaje de {name}", d_changesRequested:"Cambios solicitados", d_approved:"Aprobado",
          d_yourJobs:"Tus trabajos", d_closeJob:"Cerrar trabajo", d_jobClosed:"Trabajo cerrado." },
     pl:{ d_editProfile:"Edytuj profil", d_profileSaved:"Profil zapisany.", d_displayName:"Wyświetlana nazwa", d_roleLabel:"Czym się zajmujesz", d_city:"Miasto", d_country:"Kraj", d_languages:"Języki (oddzielone przecinkami)",
          d_tools:"Narzędzia i umiejętności (oddzielone przecinkami)", d_bio:"O Tobie", d_rate:"Stawka", d_rateUnit:"Za", d_public:"Pokazuj mój profil w wyszukiwaniu", d_publicHint:"Włącz, gdy profil i portfolio będą gotowe.",
          d_respondsHours:"Zwykle odpowiadam w ciągu (godzin)", d_turnaround:"Typowy czas realizacji (dni)", d_revisions:"Rundy poprawek w cenie", d_exampleProfile:"Profil przykładowy – prawdziwi montażyści pojawią się tutaj, gdy dołączą.",
          d_exampleCantMessage:"To profil przykładowy. Napisz do prawdziwego specjalisty.", d_noConversations:"Brak rozmów. Napisz do specjalisty z jego profilu.", d_client:"Klient",
          d_uploading:"Przesyłanie…", d_uploadFailed:"Przesyłanie nie powiodło się. Spróbuj mniejszy plik.", d_jobPosted:"Zlecenie opublikowane.", d_noJobs:"Brak zleceń. Bądź pierwszy.", d_you:"Ty", d_examples:"Profile przykładowe",
-         d_realEditors:"Specjaliści", d_draftNotPublic:"Twój profil nie jest jeszcze publiczny. Otwórz Edytuj profil i włącz „Pokazuj mój profil w wyszukiwaniu”.", d_newMessageFrom:"Nowa wiadomość od {name}", d_changesRequested:"Poproszono o zmiany", d_approved:"Zatwierdzono",
+         d_realEditors:"Specjaliści", d_setupTitle:"Skonfiguruj profil montażysty", d_setupSteps:"1. Uzupełnij profil (bio, cena, miasto). 2. Włącz „Pokazuj mój profil w wyszukiwaniu”. 3. Dodaj filmy przyciskiem „Dodaj projekt” poniżej.", d_setupBtn:"Uzupełnij profil", d_draftNotPublic:"Twój profil nie jest jeszcze publiczny. Otwórz Edytuj profil i włącz „Pokazuj mój profil w wyszukiwaniu”.", d_newMessageFrom:"Nowa wiadomość od {name}", d_changesRequested:"Poproszono o zmiany", d_approved:"Zatwierdzono",
          d_yourJobs:"Twoje zlecenia", d_closeJob:"Zamknij zlecenie", d_jobClosed:"Zlecenie zamknięte." },
     uk:{ d_editProfile:"Редагувати профіль", d_profileSaved:"Профіль збережено.", d_displayName:"Відображуване ім'я", d_roleLabel:"Чим ви займаєтеся", d_city:"Місто", d_country:"Країна", d_languages:"Мови (через кому)",
          d_tools:"Інструменти та навички (через кому)", d_bio:"Про себе", d_rate:"Ставка", d_rateUnit:"За", d_public:"Показувати профіль у пошуку", d_publicHint:"Увімкніть, коли профіль і портфоліо готові.",
          d_respondsHours:"Зазвичай відповідаю протягом (годин)", d_turnaround:"Типовий термін (днів)", d_revisions:"Раундів правок включено", d_exampleProfile:"Приклад профілю — справжні монтажери з'являться тут після реєстрації.",
          d_exampleCantMessage:"Це приклад профілю. Напишіть справжньому фахівцю.", d_noConversations:"Діалогів поки немає. Напишіть фахівцю з його профілю.", d_client:"Клієнт",
          d_uploading:"Завантаження…", d_uploadFailed:"Не вдалося завантажити. Спробуйте менший файл.", d_jobPosted:"Вакансію опубліковано.", d_noJobs:"Вакансій поки немає. Будьте першим.", d_you:"Ви", d_examples:"Приклади профілів",
-         d_realEditors:"Фахівці", d_draftNotPublic:"Ваш профіль ще не публічний. Відкрийте «Редагувати профіль» і увімкніть «Показувати профіль у пошуку».", d_newMessageFrom:"Нове повідомлення від {name}", d_changesRequested:"Запитано правки", d_approved:"Схвалено",
+         d_realEditors:"Фахівці", d_setupTitle:"Налаштуйте профіль монтажера", d_setupSteps:"1. Заповніть профіль (про себе, ціна, місто). 2. Увімкніть «Показувати профіль у пошуку». 3. Додайте відео кнопкою «Додати проєкт» нижче.", d_setupBtn:"Заповнити профіль", d_draftNotPublic:"Ваш профіль ще не публічний. Відкрийте «Редагувати профіль» і увімкніть «Показувати профіль у пошуку».", d_newMessageFrom:"Нове повідомлення від {name}", d_changesRequested:"Запитано правки", d_approved:"Схвалено",
          d_yourJobs:"Ваші вакансії", d_closeJob:"Закрити вакансію", d_jobClosed:"Вакансію закрито." }
   };
   for(const code in T_DATA){ if(T[code]) Object.assign(T[code], T_DATA[code]); }
@@ -4330,6 +4330,7 @@
           const msg={ok:null, not_signed_in:t("a_needSignIn"), bad_format:t("inviteBadFormat"), invalid:t("inviteInvalid"), used:t("inviteUsed"), error:t("a_error")}[r]||t("a_error");
           res.innerHTML = r==="ok" ? `<div class="notice success"><strong>${t("invitePassedTitle")}</strong><br>${t("invitePassedDesc")}</div>` : `<div class="notice danger">${msg}</div>`;
           if(r==="not_signed_in") route("create-account");
+          if(r==="ok") setTimeout(goSetupProfile, 900);
         });
         return;
       }
@@ -4337,6 +4338,7 @@
       if(inviteUsed(raw)){ res.innerHTML=`<div class="notice danger">${t("inviteUsed")}</div>`; return; }
       markInviteUsed(raw); setRole("editor",true);
       res.innerHTML=`<div class="notice success"><strong>${t("invitePassedTitle")}</strong><br>${t("invitePassedDesc")}</div>`;
+      setTimeout(goSetupProfile, 900);
     });
 
     $("#demoContract").addEventListener("click",()=>openModal(t("contractDraftTitle"),`
@@ -4489,6 +4491,8 @@
   runJobSearch();
   $("#accountTypeSelect").addEventListener("change",e=>setRole(e.target.value));
   $("#myProfileBtn").addEventListener("click",async()=>{ if(REAL){ await loadOwnEditorProfile(); } openProfile(ownKey()); });
+  async function goSetupProfile(){ if(!isEditor()) return; if(REAL){ if(!signedIn()) return; await loadOwnEditorProfile(); } if(!PROFILES[ownKey()]) return; openProfile(ownKey()); window.scrollTo({top:0}); if(REAL) setTimeout(()=>{ if(PROFILES[ownKey()]) editProfileModal(ownKey()); },350); }
+  window.goSetupProfile=goSetupProfile;
   buildCardGalleries();
   $("#reminderToggle").addEventListener("change",e=>{state.reminderEnabled=e.target.checked;saveReco();refreshReco();});
   refreshReco();
