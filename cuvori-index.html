@@ -699,6 +699,7 @@
     }
 
     .demo-banner{background:#fff7e0;color:#6b4e00;border-bottom:1px solid #f1dfa3;font-size:13px;font-weight:700;text-align:center;padding:7px 12px}
+    .demo-hidden{display:none!important}
     /* ---------- Responsive ---------- */
     @media(min-width:1240px){
       body:not(.sidebar-collapsed) .right-sidebar{transform:translateX(0)}
@@ -1431,6 +1432,7 @@
       const text = input.value.trim(); if(!text) return;
       const sec = video.currentTime || 0;
       comments.push({time:fmtTime(sec), seconds:sec, text, author:opts.authorLabel});
+      if(opts.onChange) opts.onChange();
       comments.sort((a,b)=>a.seconds-b.seconds);
       renderList(); input.value=""; lastActive=-1; update();
       const idx = comments.findIndex(c=>c.seconds===sec && c.text===text); if(idx>=0) pulseMarker(idx);
@@ -1442,7 +1444,7 @@
       const f = e.target.files[0]; if(!f) return;
       const url = URL.createObjectURL(f);
       video.src = url; nameEl.textContent = f.name;
-      if(opts.onVideoLoaded) opts.onVideoLoaded(url, f.name);
+      if(opts.onVideoLoaded) opts.onVideoLoaded(url, f.name, f);
     });
 
     renderList();
@@ -2850,13 +2852,14 @@
   function recoChainHtml(){
     return `<div class="reco-chain"><span>${t("recoChain1")}</span><i>→</i><span>${t("recoChain2")}</span><i>→</i><span>${t("recoChain3")}</span></div>`;
   }
-  function sendRecoUpdate(name){
-    closeModal(); openChat(name);
-    setTimeout(()=>createProgressUpdate(state.openChats.get(name)),120);
+  async function sendRecoUpdate(name){
+    closeModal(); await openChat(name);
+    const w=state.openChats.get(name); if(w) createProgressUpdate(w);
   }
   function snoozeReco(name){ state.snooze[name]=Date.now()+DAY; saveReco(); refreshReco(); toast(t("recoSnoozed")); }
   function updateNotifBadge(){
-    const unread=state.notifications.filter(n=>n.unread).length + dueReminders().length;
+    const unread=state.notifications.filter(n=>n.unread).length + dueReminders().length + (state.unreadMsgs||0);
+    const mb=$("#messageBadge"); if(REAL && mb){ mb.textContent=state.unreadMsgs||0; mb.classList.toggle("hidden",!(state.unreadMsgs>0)); $("#messagesBtn").classList.toggle("attention",state.unreadMsgs>0); }
     $("#notifBadge").textContent=unread; $("#notifBadge").classList.toggle("hidden",unread===0);
     $("#notificationsBtn").classList.toggle("attention",unread>0);
   }
@@ -2869,7 +2872,7 @@
         <div class="reco-ico">💡</div>
         <div class="reco-body">
           <div class="reco-badge">${t("recoBadge")}</div>
-          <h3>${fill(t("recoTitle"),{name:r.name})}</h3>
+          <h3>${fill(t("recoTitle"),{name:escapeHtml(displayOf(r.name))})}</h3>
           <p>${fill(t("recoDesc"),{n:r.days})}</p>
           ${recoChainHtml()}
           <div class="reco-tag">${t("recoTagline")}</div>
@@ -2887,7 +2890,7 @@
       <div class="job-avatar alt">💡</div>
       <div class="job-content">
         <div class="reco-badge">${t("recoBadge")}</div>
-        <strong>${fill(t("notifNoUpdate"),{name:r.name,n:r.days})}</strong>
+        <strong>${fill(t("notifNoUpdate"),{name:escapeHtml(displayOf(r.name)),n:r.days})}</strong>
         ${recoChainHtml()}
         <div class="muted small" style="margin:6px 0 10px">${t("recoTagline")}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="primary" data-reco-send>${t("recoSend")}</button><button class="secondary" data-reco-later>${t("recoLater")}</button></div>
@@ -2895,7 +2898,7 @@
   }
   function chatNudgeHtml(name){
     const r=reminderFor(name); if(!r) return "";
-    return `<div class="chat-nudge" data-reco-name="${escapeHtml(name)}"><span>⏱ ${fill(t("chatNudge"),{n:r.days,name})}</span><button class="link-btn" data-reco-send>${t("recoSend")}</button></div>`;
+    return `<div class="chat-nudge" data-reco-name="${escapeHtml(name)}"><span>⏱ ${fill(t("chatNudge"),{n:r.days,name:escapeHtml(displayOf(name))})}</span><button class="link-btn" data-reco-send>${t("recoSend")}</button></div>`;
   }
   function setRole(role, silent){
     state.user.role=role; saveReco(); refreshReco();
@@ -3024,6 +3027,7 @@
     if(typeof refreshReco==="function" && state.user) refreshReco();
     if(typeof buildCardGalleries==="function" && state.user) buildCardGalleries();
     if(typeof applyAuthUI==="function" && state.auth) applyAuthUI();
+    if(REAL && typeof renderRealCards==="function"){ renderRealCards(); renderRealJobs(); renderContacts(); }
   }
 
   function buildLanguageMenu(){
@@ -3218,8 +3222,9 @@
     const clean=PROFILES[name].projects.map(w=>({...w, video: (w.video&&w.video.startsWith("blob:"))?"demo":w.video}));
     d[name]={projects:clean, thumbs:PROFILES[name].thumbs};
     try{ localStorage.setItem("cuvoriPortfolio",JSON.stringify(d)); }catch{}
+    if(REAL) dbSyncProjects(name);
   }
-  function isOwner(name){ return isEditor() && name===OWN_PROFILE; }
+  function isOwner(name){ return REAL ? (isEditor() && !!ownKey() && name===ownKey()) : (isEditor() && name===OWN_PROFILE); }
   function ytId(url){ const m=(url||"").match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/)([\w-]{11})/); return m?m[1]:null; }
   function vimeoId(url){ const m=(url||"").match(/vimeo\.com\/(?:video\/)?(\d+)/); return m?m[1]:null; }
   function projectThumb(w){ if(w.thumb) return w.thumb; const id=ytId(w.video); if(id) return `https://img.youtube.com/vi/${id}/hqdefault.jpg`; return null; }
@@ -3368,6 +3373,7 @@
           if(!url && !f){ toast(t("needVideo")); return; }
           const w={title:$("#npTitle",m).value.trim()||"", catKey:$("#npCat",m).value, len:"", tone:["one","two","three"][p.projects.length%3], video: f?URL.createObjectURL(f):url, thumb:null, tags:$("#npTags",m).value.split(",").map(x=>x.trim()).filter(Boolean)};
           const tf=$("#npThumb",m).files[0]; if(tf) w.thumb=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(tf);});
+          if(REAL){ if(f){ const u=await uploadFile(f,"video"); if(!u) return; w.video=u; } if(tf){ const u=await uploadFile(tf,"thumb"); if(u) w.thumb=u; } }
           p.projects.push(w); savePortfolio(name); closeModal(); toast(t("projectAdded"));
           $(".ep-tab[data-tab='portfolio']",root).textContent=`${t("portfolioHeading")} · ${p.projects.length}`;
           renderPortfolioPane(name,root);
@@ -3384,8 +3390,9 @@
         $("#ntSave",m).addEventListener("click",async()=>{
           const f=$("#ntFile",m).files[0]; if(!f) return;
           const img=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f);});
+          let imgUrl=img; if(REAL){ imgUrl=await uploadFile(f,"thumb"); if(!imgUrl) return; }
           const link=$("#ntLink",m).value; p.thumbs=p.thumbs||[];
-          if(link!==""){ p.projects[+link].thumb=img; } else p.thumbs.push({img,link:null});
+          if(link!==""){ p.projects[+link].thumb=imgUrl; } else p.thumbs.push({img:imgUrl,link:null});
           savePortfolio(name); closeModal(); renderPortfolioPane(name,root);
         });
       });
@@ -3432,10 +3439,11 @@
           <div class="ep-head">
             <div class="avatar">${p.initials}</div>
             <div>
-              <div class="ep-title-row"><h1>${name}</h1><span class="status">${t("statusAvailable")}</span>${isOwner(name)?`<span class="mini-tag">${t("editPortfolio")}</span>`:""}</div>
-              <div class="ep-meta"><span>${t(p.roleKey)}</span><span>${p.city}, ${t(p.countryKey)}</span><span>${p.langs}</span></div>
+              <div class="ep-title-row"><h1>${escapeHtml(p.name||name)}</h1>${p.available===false?"":`<span class="status">${t("statusAvailable")}</span>`}${isOwner(name)?`<button class="secondary" data-edit-profile style="padding:6px 12px">${t("d_editProfile")}</button>`:""}</div>
+              ${isOwner(name)&&REAL&&!p.is_public?`<div class="notice" style="margin:8px 0">${t("d_draftNotPublic")}</div>`:""}
+              <div class="ep-meta"><span>${t(p.roleKey)}</span><span>${escapeHtml(pLocation(p))}</span><span>${escapeHtml(p.langs||"")}</span></div>
               <div class="ep-stats">
-                <span><span class="stars">${stars(5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}</span>
+                <span>${p.reviewCount?`<span class="stars">${stars(5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}`:t("p_noReviewsTitle")}</span>
                 <span>${fill(t("completedProjects"),{n:p.completed})}</span>
                 <span>${fill(t("memberSince"),{y:p.since})}</span>
               </div>
@@ -3451,7 +3459,7 @@
             </div>
             <div class="ep-pane active" data-pane="portfolio"></div>
             <div class="ep-pane" data-pane="about">
-              <div class="panel ep-about" style="margin-bottom:14px"><h3 style="margin-bottom:10px">${t("aboutLabel")}</h3><p>${t(p.aboutKey)}</p></div>
+              <div class="panel ep-about" style="margin-bottom:14px"><h3 style="margin-bottom:10px">${t("aboutLabel")}</h3><p>${pAbout(p)}</p></div>
               <div class="panel"><h3 style="margin-bottom:12px">${t("toolsLabel")}</h3><div class="skill-list">${p.tools.map(x=>`<span class="skill">${escapeHtml(x)}</span>`).join("")}</div></div>
             </div>
             <div class="ep-pane" data-pane="reviews"><div class="panel">${reviews}<div class="muted small" style="margin-top:12px">${fill(t("showingReviews"),{a:p.reviews.length,b:p.reviewCount})}</div></div></div>
@@ -3487,6 +3495,7 @@
     ["#epMessage","#epMessageM"].forEach(s=>$(s,root).addEventListener("click",()=>openChat(name)));
     ["#epQuote","#epQuoteM"].forEach(s=>$(s,root).addEventListener("click",()=>requestQuote(name)));
     renderPortfolioPane(name, root);
+    const epb=$("[data-edit-profile]",root); if(epb) epb.addEventListener("click",()=>editProfileModal(name));
     if(!root.classList.contains("active")) route("profile");
   }
 
@@ -3494,8 +3503,9 @@
 
   function requestQuote(name){
     if(!requireAuth()) return;
-    openModal(fill(t("quoteTitle"),{name}), `
-      <p class="muted">${fill(t("quoteDesc"),{name})}</p>
+    const dn=displayOf(name);
+    openModal(fill(t("quoteTitle"),{name:dn}), `
+      <p class="muted">${fill(t("quoteDesc"),{name:dn})}</p>
       <div class="form-grid">
         <div><label>${t("quoteBudgetLabel")}</label><input placeholder="${t("budgetPlaceholder")}"></div>
         <div><label>${t("quoteDeadlineLabel")}</label><input type="date"></div>
@@ -3507,7 +3517,7 @@
           closeModal();
           openChat(name);
           if(text){ const win=state.openChats.get(name); const b=document.createElement("div");b.className="bubble mine";b.textContent=text;$(".chat-messages",win).append(b); }
-          toast(fill(t("quoteSentToast"),{name}));
+          toast(fill(t("quoteSentToast"),{name:dn}));
         });
       });
   }
@@ -3531,6 +3541,7 @@
 
   function openChat(name){
     if(!signedIn()){ toast(t("a_signInToMessage")); route("create-account"); return; }
+    if(REAL) return openChatReal(name);
     if(!isDesktopDock()) sidebar(false);
     if(state.openChats.has(name)){
       state.openChats.get(name).style.zIndex=99;
@@ -3572,6 +3583,7 @@
   }
 
   function sendChatMessage(win){
+    if(REAL) return sendChatReal(win);
     const input=$(".chat-input input",win);const text=input.value.trim();if(!text)return;
     const b=document.createElement("div");b.className="bubble mine";b.textContent=text;
     $(".chat-messages",win).append(b);input.value="";
@@ -3584,7 +3596,7 @@
     openModal(t("sendProgressUpdateTitle"), `
       <div class="form-grid">
         <div><label>${t("updateTitleLabel")}</label><input id="rTitle" value="${t("progressUpdateLabel")}"></div>
-        <div><label>${t("mediaLinkLabel")}</label><input placeholder="${t("mediaLinkPlaceholder")}"></div>
+        <div><label>${t("mediaLinkLabel")}</label><input id="rLink" placeholder="${t("mediaLinkPlaceholder")}"></div>
         <div style="grid-column:1/-1"><label>${t("updateMessageLabel")}</label><textarea id="rText" placeholder="${t("updateMessagePlaceholder")}" style="min-height:80px"></textarea></div>
       </div>
       <button class="secondary" id="toggleReview" style="margin-top:14px">${t("reviewAndCommentBtn")}</button>
@@ -3597,11 +3609,16 @@
             mountReview($("#draftReviewArea",root), {
               comments: draftComments,
               authorLabel: t("youLabel"),
-              onVideoLoaded: (url,fname)=>{ draftVideo = {url, fname}; }
+              onVideoLoaded: (url,fname,file)=>{ draftVideo = {url, fname, file}; }
             });
           }
         });
-        $("#sendProgress",root).addEventListener("click",()=>{
+        $("#sendProgress",root).addEventListener("click",async()=>{
+          if(REAL){
+            const ok=await sendReportReal(win,{ title:$("#rTitle",root).value||t("progressUpdateLabel"), message:$("#rText",root).value||t("defaultUpdateMsg"), comments:draftComments, videoLink:$("#rLink",root).value.trim() }, draftVideo?draftVideo.file:null);
+            if(ok){ closeModal(); toast(t("lastUpdateSent")); }
+            return;
+          }
           const reportId = makeReportId();
           const report = {
             title: $("#rTitle",root).value||t("progressUpdateLabel"),
@@ -3644,13 +3661,16 @@
   function varNum(name){return parseInt(getComputedStyle(document.documentElement).getPropertyValue(name))||72;}
 
   function openReview(name, reportId){
-    const report = reportId ? state.reports.get(reportId) : null;
+    let report = reportId ? state.reports.get(reportId) : null;
+    let msgId = null;
+    if(REAL && report && report.payload){ msgId=reportId; const pl=report.payload; report={ title:pl.title||t("progressUpdateLabel"), comments:(pl.comments||[]).map(c=>({...c})), videoSrc:pl.video_url||null, status:pl.status }; }
+    if(REAL && !report) return;
     // Fallback demo comments for the pre-seeded chat/notification (no real report behind it yet)
     const comments = report ? report.comments : [
       {time:"00:42", seconds:42, text:t("comment1"), author:null},
       {time:"01:51", seconds:111, text:t("comment2"), author:null}
     ];
-    openModal(t("progressUpdateLabel")+" · "+name, `
+    openModal(t("progressUpdateLabel")+" · "+escapeHtml(displayOf(name)), `
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         <div><strong>${report ? escapeHtml(report.title) : t("version2Label")}</strong><div class="muted">${t("reviewDesc")}</div></div>
         <div style="display:flex;gap:8px"><button class="secondary" id="requestChanges">${t("requestChangesBtn")}</button><button class="primary" id="approveVersion">${t("approveBtn")}</button></div>
@@ -3661,10 +3681,12 @@
           videoSrc: report && report.videoSrc,
           videoName: report && report.videoName,
           authorLabel: t("youLabel"),
-          onVideoLoaded: (url,fname)=>{ if(report){ report.videoSrc=url; report.videoName=fname; } }
+          onVideoLoaded: (url,fname)=>{ if(report){ report.videoSrc=url; report.videoName=fname; } },
+          onChange: ()=>{ if(msgId) updateReportReal(msgId,{comments:report.comments}); }
         });
-        $("#approveVersion",root).addEventListener("click",()=>{if(report) report.status="approved";toast(t("toastApproved"));closeModal();});
-        $("#requestChanges",root).addEventListener("click",()=>{if(report) report.status="changes_requested";requestChanges(name);});
+        if(REAL && report.videoSrc && /youtube|youtu\.be|vimeo/.test(report.videoSrc)){ const v=$(".review-video",root); if(v){ v.outerHTML=`<iframe class="review-video" src="${embedSrc({video:report.videoSrc})}" allow="autoplay; fullscreen" allowfullscreen style="aspect-ratio:16/9;width:100%;border:0"></iframe>`; } }
+        $("#approveVersion",root).addEventListener("click",()=>{if(report) report.status="approved"; if(msgId) updateReportReal(msgId,{status:"approved"}); toast(t("toastApproved"));closeModal();});
+        $("#requestChanges",root).addEventListener("click",()=>{if(report) report.status="changes_requested"; if(msgId) updateReportReal(msgId,{status:"changes_requested"}); requestChanges(name);});
       }, "wide");
   }
 
@@ -3673,13 +3695,25 @@
       <p class="muted">${t("requestChangesDesc")}</p>
       <textarea id="changesText" placeholder="${t("requestChangesPlaceholder")}"></textarea>
       <button class="primary" id="sendChanges" style="margin-top:13px">${t("sendRequestBtn")}</button>`,root=>{
-        $("#sendChanges",root).addEventListener("click",()=>{toast(t("toastChangesSent")+name+".");closeModal();});
+        $("#sendChanges",root).addEventListener("click",()=>{ const txt=$("#changesText",root).value.trim(); if(REAL && txt) sendChangeRequestReal(name, txt); toast(t("toastChangesSent")+displayOf(name)+".");closeModal();});
       });
   }
 
   function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]));}
 
+  async function showNotificationsReal(){
+    const rem=dueReminders().map(recoNotifHtml).join("");
+    const msgs=await realNotifications();
+    const items=rem+msgs.map(m=>`<div class="job" style="margin-bottom:9px;cursor:pointer" data-notif-target="${m.key}"><div class="job-content"><strong>${fill(t("d_newMessageFrom"),{name:escapeHtml(m.name)})}</strong><div class="muted" style="font-size:12px;margin-top:5px">${t("clickToOpen")}</div></div></div>`).join("");
+    openModal(t("notificationsTitle"),items||`<p class="muted">${t("noNotifications")}</p>`,root=>{
+      $$("[data-notif-target]",root).forEach(x=>x.addEventListener("click",()=>{ closeModal(); openChat(x.dataset.notifTarget); }));
+      bindRecoButtons(root);
+      const seen=JSON.parse(localStorage.getItem("cuvoriSeenConvs")||"{}"); Object.values(state.convs).forEach(c=>seen[c.id]=new Date().toISOString()); localStorage.setItem("cuvoriSeenConvs",JSON.stringify(seen));
+      state.unreadMsgs=0; updateNotifBadge();
+    });
+  }
   function showNotifications(){
+    if(REAL) return showNotificationsReal();
     const items=dueReminders().map(recoNotifHtml).join("")+state.notifications.map(n=>
       `<div class="job" style="margin-bottom:9px;cursor:pointer" data-notif-target="${n.target}"><div class="job-content"><strong>${t(n.textKey).replace("{name}",n.target)}</strong><div class="muted" style="font-size:12px;margin-top:5px">${t("clickToOpen")}</div></div></div>`).join("");
     openModal(t("notificationsTitle"),items||`<p class="muted">${t("noNotifications")}</p>`,root=>{
@@ -3757,6 +3791,9 @@
     const on = signedIn();
     if(REAL){
       state.user.role = state.auth.profile ? state.auth.profile.role : "client";
+      const act=$(".activity"); if(act) act.closest(".panel").classList.add("hidden");
+      const sv=$(".saved-list"); if(sv) sv.closest(".panel").classList.add("hidden");
+      const ss=$("[data-stat='saved']"); if(ss) ss.classList.add("hidden");
       $("#demoBanner")?.classList.add("hidden");
     }
     $("#signInBtn")?.classList.toggle("hidden", on);
@@ -3780,6 +3817,7 @@
     state.auth.session = data.session;
     await loadProfile();
     applyAuthUI();
+    loadRealData();
   }
   function authError(e){
     const m=(e&&e.message||"").toLowerCase();
@@ -3807,7 +3845,7 @@
     await refreshAuth(); toast(t("a_welcomeBack")); route("account");
   }
   async function doSignOut(){
-    if(REAL){ await sb.auth.signOut(); state.auth.session=null; state.auth.profile=null; }
+    if(REAL){ await sb.auth.signOut(); state.auth.session=null; state.auth.profile=null; state.openChats.forEach(w=>w.remove()); state.openChats.clear(); Object.values(state.chatSubs||{}).forEach(ch=>sb.removeChannel(ch)); state.chatSubs={}; state.convs={}; state.lastUpdates={}; renderContacts(); Object.keys(PROFILES).forEach(k=>{ if(k.startsWith("u:") && !PROFILES[k].is_public) delete PROFILES[k]; }); }
     applyAuthUI(); closeMobileMenu(); toast(t("a_signedOut")); route("home");
   }
   async function doReset(email){
@@ -3860,7 +3898,7 @@
       sb.auth.onAuthStateChange(async (event, session)=>{
         state.auth.session=session;
         if(event==="PASSWORD_RECOVERY"){ await loadProfile(); applyAuthUI(); newPasswordModal(); return; }
-        if(event==="SIGNED_IN"||event==="TOKEN_REFRESHED"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); }
+        if(event==="SIGNED_IN"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); if(event!=="TOKEN_REFRESHED") loadRealData(); }
       });
     } else {
       $("#demoBanner")?.classList.remove("hidden");
@@ -3868,8 +3906,363 @@
     refreshAuth();
   }
 
+  // ---------- Real data layer (Supabase): editor profiles, portfolios, jobs, messaging ----------
+  const T_DATA = {
+    en:{ d_editProfile:"Edit profile", d_profileSaved:"Profile saved.", d_displayName:"Display name", d_roleLabel:"What you do", d_city:"City", d_country:"Country", d_languages:"Languages (comma separated)",
+         d_tools:"Tools & skills (comma separated)", d_bio:"About you", d_rate:"Rate", d_rateUnit:"Per", d_public:"Show my profile in search", d_publicHint:"Turn this on when your profile and portfolio are ready.",
+         d_respondsHours:"Usually respond within (hours)", d_turnaround:"Typical turnaround (days)", d_revisions:"Revision rounds included", d_exampleProfile:"Example profile — real editors appear here as they join.",
+         d_exampleCantMessage:"This is an example profile. Message a real professional instead.", d_noConversations:"No conversations yet. Message a professional from their profile.", d_client:"Client",
+         d_uploading:"Uploading…", d_uploadFailed:"Upload failed. Try a smaller file.", d_jobPosted:"Job posted.", d_noJobs:"No jobs posted yet. Be the first.", d_you:"You", d_examples:"Example profiles",
+         d_realEditors:"Professionals", d_draftNotPublic:"Your profile is not public yet. Open Edit profile and turn on \"Show my profile in search\".", d_newMessageFrom:"New message from {name}", d_changesRequested:"Changes requested", d_approved:"Approved",
+         d_yourJobs:"Your jobs", d_closeJob:"Close job", d_jobClosed:"Job closed." },
+    de:{ d_editProfile:"Profil bearbeiten", d_profileSaved:"Profil gespeichert.", d_displayName:"Anzeigename", d_roleLabel:"Was du machst", d_city:"Stadt", d_country:"Land", d_languages:"Sprachen (mit Komma getrennt)",
+         d_tools:"Tools & Fähigkeiten (mit Komma getrennt)", d_bio:"Über dich", d_rate:"Preis", d_rateUnit:"Pro", d_public:"Mein Profil in der Suche anzeigen", d_publicHint:"Schalte das ein, wenn Profil und Portfolio fertig sind.",
+         d_respondsHours:"Antwortet meist innerhalb von (Stunden)", d_turnaround:"Typische Bearbeitungszeit (Tage)", d_revisions:"Korrekturrunden inklusive", d_exampleProfile:"Beispielprofil – echte Editoren erscheinen hier, sobald sie beitreten.",
+         d_exampleCantMessage:"Das ist ein Beispielprofil. Schreib stattdessen einer echten Fachkraft.", d_noConversations:"Noch keine Unterhaltungen. Schreib einer Fachkraft über ihr Profil.", d_client:"Kunde",
+         d_uploading:"Wird hochgeladen…", d_uploadFailed:"Upload fehlgeschlagen. Versuch eine kleinere Datei.", d_jobPosted:"Job veröffentlicht.", d_noJobs:"Noch keine Jobs. Sei der Erste.", d_you:"Du", d_examples:"Beispielprofile",
+         d_realEditors:"Fachkräfte", d_draftNotPublic:"Dein Profil ist noch nicht öffentlich. Öffne „Profil bearbeiten“ und schalte „Mein Profil in der Suche anzeigen“ ein.", d_newMessageFrom:"Neue Nachricht von {name}", d_changesRequested:"Änderungen angefragt", d_approved:"Freigegeben",
+         d_yourJobs:"Deine Jobs", d_closeJob:"Job schließen", d_jobClosed:"Job geschlossen." },
+    ru:{ d_editProfile:"Редактировать профиль", d_profileSaved:"Профиль сохранён.", d_displayName:"Отображаемое имя", d_roleLabel:"Чем вы занимаетесь", d_city:"Город", d_country:"Страна", d_languages:"Языки (через запятую)",
+         d_tools:"Инструменты и навыки (через запятую)", d_bio:"О себе", d_rate:"Ставка", d_rateUnit:"За", d_public:"Показывать профиль в поиске", d_publicHint:"Включите, когда профиль и портфолио готовы.",
+         d_respondsHours:"Обычно отвечаю в течение (часов)", d_turnaround:"Типичный срок (дней)", d_revisions:"Раундов правок включено", d_exampleProfile:"Пример профиля — настоящие монтажёры появятся здесь по мере регистрации.",
+         d_exampleCantMessage:"Это пример профиля. Напишите настоящему специалисту.", d_noConversations:"Диалогов пока нет. Напишите специалисту из его профиля.", d_client:"Клиент",
+         d_uploading:"Загрузка…", d_uploadFailed:"Не удалось загрузить. Попробуйте файл меньше.", d_jobPosted:"Вакансия опубликована.", d_noJobs:"Вакансий пока нет. Будьте первым.", d_you:"Вы", d_examples:"Примеры профилей",
+         d_realEditors:"Специалисты", d_draftNotPublic:"Ваш профиль пока не публичный. Откройте «Редактировать профиль» и включите «Показывать профиль в поиске».", d_newMessageFrom:"Новое сообщение от {name}", d_changesRequested:"Запрошены правки", d_approved:"Одобрено",
+         d_yourJobs:"Ваши вакансии", d_closeJob:"Закрыть вакансию", d_jobClosed:"Вакансия закрыта." },
+    lt:{ d_editProfile:"Redaguoti profilį", d_profileSaved:"Profilis išsaugotas.", d_displayName:"Rodomas vardas", d_roleLabel:"Ką darote", d_city:"Miestas", d_country:"Šalis", d_languages:"Kalbos (atskirtos kableliais)",
+         d_tools:"Įrankiai ir įgūdžiai (atskirti kableliais)", d_bio:"Apie jus", d_rate:"Įkainis", d_rateUnit:"Už", d_public:"Rodyti mano profilį paieškoje", d_publicHint:"Įjunkite, kai profilis ir portfolio bus paruošti.",
+         d_respondsHours:"Paprastai atsakau per (val.)", d_turnaround:"Įprastas atlikimo laikas (d.)", d_revisions:"Įskaičiuoti pataisymų ratai", d_exampleProfile:"Pavyzdinis profilis – tikri editoriai atsiras čia, kai prisijungs.",
+         d_exampleCantMessage:"Tai pavyzdinis profilis. Rašykite tikram specialistui.", d_noConversations:"Pokalbių dar nėra. Parašykite specialistui iš jo profilio.", d_client:"Klientas",
+         d_uploading:"Įkeliama…", d_uploadFailed:"Įkelti nepavyko. Pabandykite mažesnį failą.", d_jobPosted:"Darbas paskelbtas.", d_noJobs:"Darbų dar nėra. Būkite pirmas.", d_you:"Jūs", d_examples:"Pavyzdiniai profiliai",
+         d_realEditors:"Specialistai", d_draftNotPublic:"Jūsų profilis dar neviešas. Atidarykite „Redaguoti profilį“ ir įjunkite „Rodyti mano profilį paieškoje“.", d_newMessageFrom:"Nauja žinutė nuo {name}", d_changesRequested:"Paprašyta pataisymų", d_approved:"Patvirtinta",
+         d_yourJobs:"Jūsų darbai", d_closeJob:"Uždaryti darbą", d_jobClosed:"Darbas uždarytas." },
+    es:{ d_editProfile:"Editar perfil", d_profileSaved:"Perfil guardado.", d_displayName:"Nombre visible", d_roleLabel:"A qué te dedicas", d_city:"Ciudad", d_country:"País", d_languages:"Idiomas (separados por comas)",
+         d_tools:"Herramientas y habilidades (separadas por comas)", d_bio:"Sobre ti", d_rate:"Tarifa", d_rateUnit:"Por", d_public:"Mostrar mi perfil en la búsqueda", d_publicHint:"Actívalo cuando tu perfil y portafolio estén listos.",
+         d_respondsHours:"Suelo responder en (horas)", d_turnaround:"Plazo habitual (días)", d_revisions:"Rondas de revisión incluidas", d_exampleProfile:"Perfil de ejemplo: los editores reales aparecerán aquí al unirse.",
+         d_exampleCantMessage:"Este es un perfil de ejemplo. Escribe a un profesional real.", d_noConversations:"Aún no hay conversaciones. Escribe a un profesional desde su perfil.", d_client:"Cliente",
+         d_uploading:"Subiendo…", d_uploadFailed:"Error al subir. Prueba con un archivo más pequeño.", d_jobPosted:"Trabajo publicado.", d_noJobs:"Aún no hay trabajos. Sé el primero.", d_you:"Tú", d_examples:"Perfiles de ejemplo",
+         d_realEditors:"Profesionales", d_draftNotPublic:"Tu perfil aún no es público. Abre Editar perfil y activa \"Mostrar mi perfil en la búsqueda\".", d_newMessageFrom:"Nuevo mensaje de {name}", d_changesRequested:"Cambios solicitados", d_approved:"Aprobado",
+         d_yourJobs:"Tus trabajos", d_closeJob:"Cerrar trabajo", d_jobClosed:"Trabajo cerrado." },
+    pl:{ d_editProfile:"Edytuj profil", d_profileSaved:"Profil zapisany.", d_displayName:"Wyświetlana nazwa", d_roleLabel:"Czym się zajmujesz", d_city:"Miasto", d_country:"Kraj", d_languages:"Języki (oddzielone przecinkami)",
+         d_tools:"Narzędzia i umiejętności (oddzielone przecinkami)", d_bio:"O Tobie", d_rate:"Stawka", d_rateUnit:"Za", d_public:"Pokazuj mój profil w wyszukiwaniu", d_publicHint:"Włącz, gdy profil i portfolio będą gotowe.",
+         d_respondsHours:"Zwykle odpowiadam w ciągu (godzin)", d_turnaround:"Typowy czas realizacji (dni)", d_revisions:"Rundy poprawek w cenie", d_exampleProfile:"Profil przykładowy – prawdziwi montażyści pojawią się tutaj, gdy dołączą.",
+         d_exampleCantMessage:"To profil przykładowy. Napisz do prawdziwego specjalisty.", d_noConversations:"Brak rozmów. Napisz do specjalisty z jego profilu.", d_client:"Klient",
+         d_uploading:"Przesyłanie…", d_uploadFailed:"Przesyłanie nie powiodło się. Spróbuj mniejszy plik.", d_jobPosted:"Zlecenie opublikowane.", d_noJobs:"Brak zleceń. Bądź pierwszy.", d_you:"Ty", d_examples:"Profile przykładowe",
+         d_realEditors:"Specjaliści", d_draftNotPublic:"Twój profil nie jest jeszcze publiczny. Otwórz Edytuj profil i włącz „Pokazuj mój profil w wyszukiwaniu”.", d_newMessageFrom:"Nowa wiadomość od {name}", d_changesRequested:"Poproszono o zmiany", d_approved:"Zatwierdzono",
+         d_yourJobs:"Twoje zlecenia", d_closeJob:"Zamknij zlecenie", d_jobClosed:"Zlecenie zamknięte." },
+    uk:{ d_editProfile:"Редагувати профіль", d_profileSaved:"Профіль збережено.", d_displayName:"Відображуване ім'я", d_roleLabel:"Чим ви займаєтеся", d_city:"Місто", d_country:"Країна", d_languages:"Мови (через кому)",
+         d_tools:"Інструменти та навички (через кому)", d_bio:"Про себе", d_rate:"Ставка", d_rateUnit:"За", d_public:"Показувати профіль у пошуку", d_publicHint:"Увімкніть, коли профіль і портфоліо готові.",
+         d_respondsHours:"Зазвичай відповідаю протягом (годин)", d_turnaround:"Типовий термін (днів)", d_revisions:"Раундів правок включено", d_exampleProfile:"Приклад профілю — справжні монтажери з'являться тут після реєстрації.",
+         d_exampleCantMessage:"Це приклад профілю. Напишіть справжньому фахівцю.", d_noConversations:"Діалогів поки немає. Напишіть фахівцю з його профілю.", d_client:"Клієнт",
+         d_uploading:"Завантаження…", d_uploadFailed:"Не вдалося завантажити. Спробуйте менший файл.", d_jobPosted:"Вакансію опубліковано.", d_noJobs:"Вакансій поки немає. Будьте першим.", d_you:"Ви", d_examples:"Приклади профілів",
+         d_realEditors:"Фахівці", d_draftNotPublic:"Ваш профіль ще не публічний. Відкрийте «Редагувати профіль» і увімкніть «Показувати профіль у пошуку».", d_newMessageFrom:"Нове повідомлення від {name}", d_changesRequested:"Запитано правки", d_approved:"Схвалено",
+         d_yourJobs:"Ваші вакансії", d_closeJob:"Закрити вакансію", d_jobClosed:"Вакансію закрито." }
+  };
+  for(const code in T_DATA){ if(T[code]) Object.assign(T[code], T_DATA[code]); }
+
+  state.people = {};          // user id -> {name}
+  state.convs = {};           // other user key -> {id, other, name, last}
+  state.chatSubs = {};        // conversation id -> realtime channel
+  state.jobsReal = [];
+
+  const ROLE_TO_KEY = { editor:"roleEditor", videographer:"roleVideographer", photographer:"optPhotographer", editor_photographer:"roleEditorPhotographer" };
+  const UNIT_TO_KEY = { hour:"perHour", project:"perProject", day:"perDay" };
+  const COUNTRY_NAME = { DE:"countryGermany", ES:"countrySpain", KR:"countrySouthKorea", LT:"countryLithuania" };
+  function myId(){ return state.auth.session ? state.auth.session.user.id : null; }
+  function ownKey(){ return REAL ? (myId() ? "u:"+myId() : null) : OWN_PROFILE; }
+  function keyToId(key){ return (key||"").startsWith("u:") ? key.slice(2) : null; }
+  function displayOf(key){ const p=PROFILES[key]; if(p&&p.name) return p.name; const id=keyToId(key); if(id&&state.people[id]) return state.people[id].name; return key; }
+  function initialsOf(name){ return (name||"?").split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join("")||"?"; }
+  function pLocation(p){ const c = p.countryText!=null ? p.countryText : (p.countryKey?t(p.countryKey):""); return [p.city,c].filter(Boolean).join(", "); }
+  function pAbout(p){ return p.aboutText!=null ? escapeHtml(p.aboutText) : t(p.aboutKey); }
+
+  function rowToProfile(row, projects){
+    const key="u:"+row.id;
+    const ws=(projects||[]).sort((a,b)=>a.position-b.position).map(r=>({ id:r.id, title:r.title||"", catKey:r.category||"catOther", len:r.length_label||"", tone:["one","two","three"][Math.abs(hashStr(r.id))%3], pinned:!!r.pinned, video:r.video_url||null, thumb:r.thumb_url||null, tags:r.tags||[] }));
+    return { real:true, id:row.id, name:row.display_name||t("roleGeneric"), initials:initialsOf(row.display_name), roleKey:ROLE_TO_KEY[row.role_label]||"roleEditor",
+      city:row.city||"", countryText:row.country||"", langs:(row.languages||[]).join(", "), rate: row.rate_amount!=null ? "€"+Number(row.rate_amount).toLocaleString("en-US",{maximumFractionDigits:0}) : "—",
+      unitKey:UNIT_TO_KEY[row.rate_unit]||"perHour", rating:"–", reviewCount:0, completed:0, since:new Date(row.created_at).getFullYear(), responds:row.responds_hours||24, days:row.turnaround_days||7, revisions:row.revisions||2,
+      aboutText:row.bio||"", specs:(row.specializations&&row.specializations.length)?row.specializations:["catOther"], tools:row.tools||[], projects:ws, thumbs:[], reviews:[], is_public:!!row.is_public, available:row.available!==false, raw:row };
+  }
+  function hashStr(s){ let h=0; for(const ch of String(s)) h=(h*31+ch.charCodeAt(0))|0; return h; }
+
+  async function loadEditors(){
+    if(!REAL) return;
+    const { data:rows } = await sb.from("editor_profiles").select("*").eq("is_public",true).order("created_at",{ascending:true});
+    const ids=(rows||[]).map(r=>r.id);
+    let projects=[]; if(ids.length){ const { data } = await sb.from("projects").select("*").in("owner",ids); projects=data||[]; }
+    (rows||[]).forEach(r=>{ PROFILES["u:"+r.id]=rowToProfile(r, projects.filter(p=>p.owner===r.id)); state.people[r.id]={name:r.display_name}; });
+    renderRealCards();
+  }
+  async function loadOwnEditorProfile(){
+    if(!REAL || !myId() || !isEditor()) return null;
+    const { data:row } = await sb.from("editor_profiles").select("*").eq("id",myId()).maybeSingle();
+    const { data:projects } = await sb.from("projects").select("*").eq("owner",myId());
+    const base = row || { id:myId(), display_name:displayName(), role_label:"editor", city:"", country:"", languages:[], specializations:[], tools:[], bio:"", rate_amount:null, rate_unit:"hour", available:true, responds_hours:24, turnaround_days:7, revisions:2, is_public:false, created_at:new Date().toISOString(), _draft:!row };
+    PROFILES[ownKey()]=rowToProfile(base, projects||[]); if(!row) PROFILES[ownKey()].draft=true;
+    return PROFILES[ownKey()];
+  }
+
+  // ----- browse cards from real editors -----
+  function cardHtml(key,p){
+    const specs=p.specs.map(k=>`<span class="mini-tag">${t(k).toUpperCase()}</span>`).join("");
+    const search=[p.name,p.city,p.countryText,p.langs,t(p.roleKey),...p.specs.map(t),...p.tools,...p.projects.flatMap(w=>w.tags||[])].join(" ").toLowerCase();
+    return `<article class="card profile-card real-card" data-search="${escapeHtml(search)}" data-person="${key}">
+      <div class="price-badge"><div class="price"><span class="from">${t("from")}</span>${p.rate}</div><div class="price-unit">/ <span>${t(p.unitKey)}</span></div></div>
+      <div class="card-body">
+        <div class="person-line"><div><div class="name">${escapeHtml(p.name)}</div><div class="muted">${escapeHtml(pLocation(p))}${p.langs?" · "+escapeHtml(p.langs):""}</div></div><div class="status">${p.available?t("statusAvailable"):""}</div></div>
+        <div class="media"></div>
+        <div class="tag-row">${specs}</div>
+        <p class="bio">${escapeHtml((p.aboutText||"").slice(0,110))}${(p.aboutText||"").length>110?"…":""}</p>
+        <div class="card-extra"><div class="muted">${escapeHtml(p.tools.slice(0,3).join(" · "))}</div><span style="display:flex;gap:8px;align-items:center"><button class="link-btn view-profile">${t("viewProfileBtn")}</button><button class="small-btn message-person" data-person="${key}">${t("messageBtn")}</button></span></div>
+      </div></article>`;
+  }
+  function renderRealCards(){
+    if(!REAL) return;
+    const grid=$("#profileGrid"); if(!grid) return;
+    $$(".real-card",grid).forEach(c=>c.remove());
+    const real=Object.entries(PROFILES).filter(([k,p])=>p.real && p.is_public);
+    const demo=$$(".profile-card:not(.real-card)",grid);
+    demo.forEach(c=>c.classList.toggle("demo-hidden", real.length>0));
+    $("#exampleNote")?.remove();
+    if(!real.length){ const n=document.createElement("div"); n.id="exampleNote"; n.className="muted small"; n.style.cssText="grid-column:1/-1;margin:-6px 0 4px"; n.textContent=t("d_exampleProfile"); grid.prepend(n); }
+    real.forEach(([k,p])=>grid.insertAdjacentHTML("afterbegin", cardHtml(k,p)));
+    $$(".real-card",grid).forEach(card=>{
+      card.addEventListener("click",e=>{ if(e.target.closest(".message-person")) return; openProfile(card.dataset.person); });
+      $(".message-person",card).addEventListener("click",e=>{e.stopPropagation();openChat(card.dataset.person);});
+    });
+    buildCardGalleries(); runProfileSearch();
+  }
+
+  // ----- profile editing (owner) -----
+  function editProfileModal(key){
+    const p=PROFILES[key]; const r=p.raw||{};
+    const cats=["catCommercial","catDocumentary","catShorts","catPodcasts","catMusic","catOther"];
+    openModal(t("d_editProfile"),`
+      <div class="form-grid">
+        <div><label>${t("d_displayName")}</label><input id="epName" value="${escapeHtml(r.display_name||p.name||"")}"></div>
+        <div><label>${t("d_roleLabel")}</label><select id="epRole">${Object.keys(ROLE_TO_KEY).map(k=>`<option value="${k}" ${r.role_label===k?"selected":""}>${t(ROLE_TO_KEY[k])}</option>`).join("")}</select></div>
+        <div><label>${t("d_city")}</label><input id="epCity" value="${escapeHtml(r.city||"")}"></div>
+        <div><label>${t("d_country")}</label><input id="epCountry" value="${escapeHtml(r.country||"")}"></div>
+        <div><label>${t("d_languages")}</label><input id="epLangs" value="${escapeHtml((r.languages||[]).join(", "))}" placeholder="English, Lithuanian"></div>
+        <div><label>${t("d_tools")}</label><input id="epTools" value="${escapeHtml((r.tools||[]).join(", "))}" placeholder="Premiere Pro, DaVinci Resolve"></div>
+        <div style="grid-column:1/-1"><label>${t("specializationsLabel")}</label><div class="chips" style="justify-content:flex-start">${cats.map(c=>`<button type="button" class="chip ep-spec ${(r.specializations||[]).includes(c)?"selected":""}" data-c="${c}">${t(c)}</button>`).join("")}</div></div>
+        <div style="grid-column:1/-1"><label>${t("d_bio")}</label><textarea id="epBio" style="min-height:90px">${escapeHtml(r.bio||"")}</textarea></div>
+        <div><label>${t("d_rate")} (€)</label><input id="epRate" type="number" min="0" step="1" value="${r.rate_amount!=null?Number(r.rate_amount):""}"></div>
+        <div><label>${t("d_rateUnit")}</label><select id="epUnit">${Object.keys(UNIT_TO_KEY).map(u=>`<option value="${u}" ${r.rate_unit===u?"selected":""}>${t(UNIT_TO_KEY[u])}</option>`).join("")}</select></div>
+        <div><label>${t("d_respondsHours")}</label><input id="epResp" type="number" min="1" value="${r.responds_hours||24}"></div>
+        <div><label>${t("d_turnaround")}</label><input id="epDays" type="number" min="1" value="${r.turnaround_days||7}"></div>
+        <div><label>${t("d_revisions")}</label><input id="epRev" type="number" min="0" value="${r.revisions!=null?r.revisions:2}"></div>
+        <div><label class="switch-row" style="border:0;padding:8px 0"><span><strong>${t("d_public")}</strong><span class="muted small">${t("d_publicHint")}</span></span><input type="checkbox" class="switch" id="epPublic" ${r.is_public?"checked":""}></label></div>
+      </div>
+      <button class="primary" id="epSave" style="margin-top:14px">${t("p_saveChanges")}</button>`, root=>{
+        $$(".ep-spec",root).forEach(b=>b.addEventListener("click",()=>b.classList.toggle("selected")));
+        $("#epSave",root).addEventListener("click",async()=>{
+          const split=v=>v.split(",").map(x=>x.trim()).filter(Boolean);
+          const rate=$("#epRate",root).value;
+          const upd={ id:myId(), display_name:$("#epName",root).value.trim()||displayName(), role_label:$("#epRole",root).value, city:$("#epCity",root).value.trim(), country:$("#epCountry",root).value.trim(),
+            languages:split($("#epLangs",root).value), tools:split($("#epTools",root).value), specializations:$$(".ep-spec.selected",root).map(b=>b.dataset.c), bio:$("#epBio",root).value.trim(),
+            rate_amount: rate===""?null:Number(rate), rate_unit:$("#epUnit",root).value, responds_hours:+$("#epResp",root).value||24, turnaround_days:+$("#epDays",root).value||7, revisions:+$("#epRev",root).value||0,
+            is_public:$("#epPublic",root).checked, updated_at:new Date().toISOString() };
+          const { error } = await sb.from("editor_profiles").upsert(upd);
+          if(error){ toast(t("a_error")); console.error(error); return; }
+          closeModal(); toast(t("d_profileSaved"));
+          await loadOwnEditorProfile(); await loadEditors(); openProfile(ownKey());
+        });
+      }, "wide");
+  }
+
+  // ----- portfolio persistence -----
+  async function uploadFile(file, kind){
+    const path=`${myId()}/${kind}_${Date.now()}_${file.name.replace(/[^\w.\-]+/g,"_")}`;
+    toast(t("d_uploading"));
+    const { error } = await sb.storage.from("portfolio").upload(path, file, { upsert:false, contentType:file.type||undefined });
+    if(error){ toast(t("d_uploadFailed")); console.error(error); return null; }
+    return sb.storage.from("portfolio").getPublicUrl(path).data.publicUrl;
+  }
+  async function dbSyncProjects(key){
+    const p=PROFILES[key]; if(!p||!REAL||key!==ownKey()) return;
+    const { data:existing } = await sb.from("projects").select("id").eq("owner",myId());
+    const keep=new Set();
+    for(let i=0;i<p.projects.length;i++){
+      const w=p.projects[i];
+      const row={ owner:myId(), title:w.title||"", category:w.catKey||"catOther", video_url:(w.video&&w.video!=="demo"&&!w.video.startsWith("blob:"))?w.video:null, thumb_url:(w.thumb&&!w.thumb.startsWith("data:"))?w.thumb:null, length_label:w.len||"", tags:w.tags||[], pinned:!!w.pinned, position:i };
+      if(w.id && String(w.id).length>20){ keep.add(w.id); await sb.from("projects").update(row).eq("id",w.id); }
+      else { const { data } = await sb.from("projects").insert(row).select("id").single(); if(data){ w.id=data.id; keep.add(data.id); } }
+    }
+    for(const e of (existing||[])){ if(!keep.has(e.id)) await sb.from("projects").delete().eq("id",e.id); }
+    if(p.is_public) renderRealCards();
+  }
+
+  // ----- jobs -----
+  async function loadJobs(){
+    if(!REAL) return;
+    const { data } = await sb.from("jobs").select("*").eq("status","open").order("created_at",{ascending:false});
+    state.jobsReal=data||[];
+    const sj=$(".stat[data-route='jobs'] .stat-num"); if(sj) sj.textContent=state.jobsReal.filter(j=>j.owner===myId()).length;
+    const owners=[...new Set(state.jobsReal.map(j=>j.owner))].filter(id=>!state.people[id]);
+    if(owners.length && signedIn()){ const { data:ps } = await sb.from("profiles").select("id,first_name").in("id",owners); (ps||[]).forEach(x=>state.people[x.id]={name:x.first_name||t("d_client")}); }
+    renderRealJobs();
+  }
+  function ago(ts){ const d=Math.floor((Date.now()-new Date(ts))/86400000); return d<1?"0d":d<7?d+"d":Math.floor(d/7)+"w"; }
+  function renderRealJobs(){
+    if(!REAL) return;
+    const list=$("#jobList"); if(!list) return;
+    $$(".job[data-job]:not(.real-job)",list).forEach(j=>j.classList.add("demo-hidden"));
+    $$(".real-job",list).forEach(j=>j.remove());
+    const roleKey={editor:"optEditor",videographer:"optVideographer",photographer:"optPhotographer"};
+    state.jobsReal.forEach(j=>{
+      const who=state.people[j.owner]?state.people[j.owner].name:t("d_client");
+      const el=document.createElement("div"); el.className="job real-job"; el.dataset.job=(j.title+" "+(j.description||"")+" "+(j.location||"")).toLowerCase();
+      el.dataset.role=j.role_needed; el.dataset.where=j.remote?"remote":"onsite"; el.dataset.pricing=j.pricing; el.dataset.owner=j.owner; el.dataset.id=j.id;
+      el.innerHTML=`<div class="job-avatar alt">${initialsOf(who)}</div><div class="job-content">
+        <div class="job-top"><div><h3>${escapeHtml(j.title)}</h3><div class="muted">${escapeHtml(who)} · ${escapeHtml(j.location||t("p_remote"))}</div></div><strong>${escapeHtml(j.budget||"€ —")}</strong></div>
+        <p class="muted">${escapeHtml(j.description||"")}</p>
+        <div class="job-meta"><span class="pill">${t(roleKey[j.role_needed]||"optEditor")}</span><span class="pill">${t(j.category)}</span>${j.owner===myId()?`<button class="link-btn" data-close-job="${j.id}" style="font-size:12px">${t("d_closeJob")}</button>`:""}<span class="job-time muted">${t("p_posted")} ${ago(j.created_at)}</span></div></div>`;
+      el.addEventListener("click",e=>{ if(e.target.closest("[data-close-job]")) return; openJob(el); });
+      list.prepend(el);
+    });
+    $$("[data-close-job]",list).forEach(b=>b.addEventListener("click",async e=>{e.stopPropagation(); await sb.from("jobs").update({status:"closed"}).eq("id",b.dataset.closeJob); toast(t("d_jobClosed")); loadJobs();}));
+    $("#jobsEmptyReal")?.remove();
+    if(!state.jobsReal.length){ const n=document.createElement("div"); n.id="jobsEmptyReal"; n.className="empty-state"; n.innerHTML=`<strong>${t("d_noJobs")}</strong>`; list.append(n); }
+    runJobSearch();
+  }
+  async function publishJobReal(){
+    const role=$("#jobRole"), cat=$("#jobCat"), pricing=$("#jobPricing");
+    const loc=$("#jobLoc").value.trim(), title=$("#jobTitle").value.trim();
+    const row={ owner:myId(), title, status:"open", role_needed:["editor","videographer","photographer"][role.selectedIndex], category:["catCommercial","catDocumentary","catShorts","catPodcasts","catMusic","catOther"][cat.selectedIndex]||"catOther",
+      description:$("#jobDesc").value.trim(), location:loc, remote:(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc)), pricing:pricing.selectedIndex===0?"project":"hourly", budget:$("#jobBudget").value.trim(), deadline:$("#jobDeadline").value||null };
+    const { error } = await sb.from("jobs").insert(row);
+    if(error){ toast(t("a_error")); console.error(error); return; }
+    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); updateJobPreview();
+    toast(t("d_jobPosted")); route("jobs"); loadJobs();
+  }
+
+  // ----- messaging -----
+  async function ensurePerson(id){
+    if(state.people[id]) return state.people[id];
+    const { data } = await sb.from("profiles").select("id,first_name").eq("id",id).maybeSingle();
+    state.people[id]={name:(data&&data.first_name)||t("d_client")}; return state.people[id];
+  }
+  async function loadConversations(){
+    if(!REAL || !signedIn()) return;
+    const me=myId();
+    const { data:convs } = await sb.from("conversations").select("*").order("last_message_at",{ascending:false});
+    state.convs={};
+    for(const c of (convs||[])){ const other=c.user_a===me?c.user_b:c.user_a; await ensurePerson(other); state.convs["u:"+other]={id:c.id, other, name:displayOf("u:"+other), last:c.last_message_at}; }
+    renderContacts();
+    if(isEditor()) await loadReminderData();
+    state.unreadMsgs=(await realNotifications()).length;
+    const sc=$("[data-stat='chats'] .stat-num"); if(sc) sc.textContent=Object.keys(state.convs).length;
+    updateNotifBadge();
+  }
+  function renderContacts(){
+    const list=$("#contactList"); if(!list||!REAL) return;
+    const entries=Object.entries(state.convs);
+    list.innerHTML = entries.length ? entries.map(([key,c])=>`<div class="contact" data-person="${key}"><div class="contact-avatar">${initialsOf(c.name)}</div><div><strong>${escapeHtml(c.name)}</strong><div class="muted" style="font-size:12px">${PROFILES[key]?t(PROFILES[key].roleKey):t("d_client")}</div></div></div>`).join("")
+      : `<div class="muted small" style="padding:8px">${t("d_noConversations")}</div>`;
+    $$(".contact",list).forEach(c=>c.addEventListener("click",()=>openChat(c.dataset.person)));
+  }
+  async function loadReminderData(){
+    const me=myId(); const { data } = await sb.from("messages").select("conversation_id,created_at").eq("sender",me).eq("kind","report").order("created_at",{ascending:false});
+    const byConv={}; (data||[]).forEach(m=>{ if(!byConv[m.conversation_id]) byConv[m.conversation_id]=new Date(m.created_at).getTime(); });
+    const lu={}; Object.entries(state.convs).forEach(([key,c])=>{ if(byConv[c.id]) lu[key]=byConv[c.id]; });
+    state.lastUpdates=lu; refreshReco();
+  }
+  function msgHtml(m){
+    const mine=m.sender===myId();
+    if(m.kind==="report"){ const p=m.payload||{}; const st=p.status==="approved"?` · ${t("d_approved")}`:p.status==="changes_requested"?` · ${t("d_changesRequested")}`:""; return `<div class="report-card" data-msg="${m.id}"><strong>${escapeHtml(p.title||t("progressUpdateLabel"))}${st}</strong><div class="muted">${escapeHtml(p.message||"")}</div></div>`; }
+    if(m.kind==="change_request") return `<div class="bubble ${mine?"mine":""}"><strong>${t("requestChangesTitle")}:</strong> ${escapeHtml(m.body||"")}</div>`;
+    return `<div class="bubble ${mine?"mine":""}">${escapeHtml(m.body||"")}</div>`;
+  }
+  async function openChatReal(key){
+    const id=keyToId(key);
+    if(!id){ toast(t("d_exampleCantMessage")); return; }
+    if(id===myId()) return;
+    if(!isDesktopDock()) sidebar(false);
+    if(state.openChats.has(key)){ state.openChats.get(key).style.zIndex=99; return; }
+    await ensurePerson(id); const name=displayOf(key);
+    const { data:cid, error } = await sb.rpc("open_conversation",{ other:id });
+    if(error||!cid){ toast(t("a_error")); console.error(error); return; }
+    state.convs[key]=state.convs[key]||{id:cid, other:id, name, last:new Date().toISOString()}; renderContacts();
+    const win=document.createElement("div"); win.className="chat-window"; win.dataset.person=key; win.dataset.conv=cid;
+    win.innerHTML=`
+      <div class="chat-head"><div class="contact-avatar" style="width:31px;height:31px">${initialsOf(name)}</div><strong>${escapeHtml(name)}</strong><button class="close">×</button></div>
+      ${chatNudgeHtml(key)}
+      <div class="chat-messages"></div>
+      <div class="chat-input"><div class="chat-input-row"><input placeholder="${t("messagePlaceholder")}"><button class="small-btn send-msg">${t("sendBtnLabel")}</button></div><div class="chat-input-actions">${isEditor()?`<button class="small-btn send-report" title="${t("sendProgressUpdateTitleAttr")}">${t("reportBtnLabel")}</button>`:""}</div></div>`;
+    document.body.append(win); state.openChats.set(key,win);
+    const pos=savedChatPos(key);
+    if(pos){ win.style.left=Math.min(pos.left,window.innerWidth-win.offsetWidth-8)+"px"; win.style.top=Math.min(pos.top,window.innerHeight-win.offsetHeight-8)+"px"; }
+    else { const i=state.openChats.size-1; win.style.left=Math.max(9,window.innerWidth-win.offsetWidth-300-(i*24))+"px"; win.style.top=Math.max(80,window.innerHeight-win.offsetHeight-18)+"px"; }
+    const box=$(".chat-messages",win);
+    const { data:msgs } = await sb.from("messages").select("*").eq("conversation_id",cid).order("created_at",{ascending:true}).limit(200);
+    (msgs||[]).forEach(m=>{ state.reports.set(m.id,m); box.insertAdjacentHTML("beforeend",msgHtml(m)); });
+    box.scrollTop=box.scrollHeight;
+    bindReportCards(win,key);
+    const ch=sb.channel("conv:"+cid).on("postgres_changes",{event:"INSERT",schema:"public",table:"messages",filter:`conversation_id=eq.${cid}`},payload=>{
+      const m=payload.new; if(box.querySelector(`[data-msg="${m.id}"]`)) return; if(m.sender===myId() && m.kind==="text" && win.dataset.lastSent===m.body){ return; }
+      state.reports.set(m.id,m); box.insertAdjacentHTML("beforeend",msgHtml(m)); box.scrollTop=box.scrollHeight; bindReportCards(win,key);
+    }).on("postgres_changes",{event:"UPDATE",schema:"public",table:"messages",filter:`conversation_id=eq.${cid}`},payload=>{
+      const m=payload.new; state.reports.set(m.id,m); const el=box.querySelector(`[data-msg="${m.id}"]`); if(el){ el.outerHTML=msgHtml(m); bindReportCards(win,key); }
+    }).subscribe();
+    state.chatSubs[cid]=ch;
+    $(".close",win).addEventListener("click",()=>{ state.openChats.delete(key); win.remove(); sb.removeChannel(ch); delete state.chatSubs[cid]; });
+    $(".send-msg",win).addEventListener("click",()=>sendChatReal(win));
+    $("input",win).addEventListener("keydown",e=>{ if(e.key==="Enter") sendChatReal(win); });
+    const rb=$(".send-report",win); if(rb) rb.addEventListener("click",()=>createProgressUpdate(win));
+    bindRecoButtons(win); makeDraggable(win,key);
+  }
+  function bindReportCards(win,key){
+    $$(".report-card[data-msg]",win).forEach(c=>{ if(c.dataset.bound) return; c.dataset.bound="1"; c.addEventListener("click",()=>openReview(key,c.dataset.msg)); });
+  }
+  async function sendChatReal(win){
+    const input=$(".chat-input input",win); const text=input.value.trim(); if(!text) return;
+    input.value=""; const box=$(".chat-messages",win);
+    const { data, error } = await sb.from("messages").insert({ conversation_id:win.dataset.conv, sender:myId(), kind:"text", body:text }).select("*").single();
+    if(error){ toast(t("a_error")); input.value=text; return; }
+    if(!box.querySelector(`[data-msg="${data.id}"]`)){ box.insertAdjacentHTML("beforeend",`<div class="bubble mine" data-msg="${data.id}">${escapeHtml(text)}</div>`); box.scrollTop=box.scrollHeight; }
+  }
+  async function sendReportReal(win, report, file){
+    let video_url=null;
+    if(file){ video_url=await uploadFile(file,"review"); if(!video_url) return false; }
+    else if(report.videoLink) video_url=report.videoLink;
+    const payload={ title:report.title, message:report.message, video_url, comments:report.comments.map(c=>({seconds:c.seconds,time:c.time,text:c.text,author:c.author||null})), status:"pending" };
+    const { data, error } = await sb.from("messages").insert({ conversation_id:win.dataset.conv, sender:myId(), kind:"report", body:report.title, payload }).select("*").single();
+    if(error){ toast(t("a_error")); console.error(error); return false; }
+    state.reports.set(data.id,data);
+    const box=$(".chat-messages",win); if(!box.querySelector(`[data-msg="${data.id}"]`)){ box.insertAdjacentHTML("beforeend",msgHtml(data)); box.scrollTop=box.scrollHeight; bindReportCards(win,win.dataset.person); }
+    recordUpdateSent(win.dataset.person);
+    return true;
+  }
+  async function updateReportReal(msgId, patch){
+    const m=state.reports.get(msgId); if(!m) return;
+    const payload={...(m.payload||{}),...patch};
+    await sb.from("messages").update({payload}).eq("id",msgId); m.payload=payload;
+  }
+  async function sendChangeRequestReal(key, text){
+    const c=state.convs[key]; if(!c) return;
+    await sb.from("messages").insert({ conversation_id:c.id, sender:myId(), kind:"change_request", body:text });
+  }
+  async function realNotifications(){
+    const items=[]; const seen=JSON.parse(localStorage.getItem("cuvoriSeenConvs")||"{}");
+    for(const [key,c] of Object.entries(state.convs)){
+      const { data } = await sb.from("messages").select("sender,created_at").eq("conversation_id",c.id).order("created_at",{ascending:false}).limit(1);
+      const m=data&&data[0]; if(m && m.sender!==myId() && (!seen[c.id] || new Date(m.created_at)>new Date(seen[c.id]))) items.push({key,name:c.name});
+    }
+    return items;
+  }
+
+  async function loadRealData(){
+    if(!REAL) return;
+    await loadEditors();
+    await loadJobs();
+    if(signedIn()){ await loadOwnEditorProfile(); await loadConversations(); }
+  }
+
   function init(){
     loadReco();
+    if(REAL) state.notifications=[];
     if(REAL) state.user.role="client";
     loadPortfolio();
     buildLanguageMenu();setLanguage(state.language);
@@ -3958,16 +4351,18 @@
   }
 
   function openJob(j){
+    const owner=j.dataset.owner; const target=owner?"u:"+owner:"Jonas Weber"; const who=owner?((state.people[owner]&&state.people[owner].name)||t("d_client")):"Jonas Weber"; const mine=!!owner && owner===myId();
     const title=$("h3",j).textContent, meta=$(".job-top .muted",j).textContent, price=$(".job-top strong",j).textContent, desc=$("p.muted",j).textContent;
     const pills=$$(".pill",j).map(p=>"<span class=\"pill\">"+p.textContent+"</span>").join("");
     openModal(t("jobDetailsTitle"), `
       <div class="job-top" style="margin-bottom:10px"><div><h2 style="margin:0 0 4px">${escapeHtml(title)}</h2><div class="muted">${escapeHtml(meta)}</div></div><strong style="font-size:20px">${escapeHtml(price)}</strong></div>
       <p style="line-height:1.6;color:#3a4453">${escapeHtml(desc)}</p>
       <div class="job-meta" style="margin-bottom:18px">${pills}</div>
-      <div class="notice" style="margin-bottom:16px"><strong>${t("postedByLabel")}:</strong> Jonas Weber · ${t("roleClient")}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="primary" id="applyJob">${t("applyBtn")}</button><button class="secondary" id="msgClient">${t("messageClientBtn")}</button></div>`, root=>{
-        $("#msgClient",root).addEventListener("click",()=>{closeModal();openChat("Jonas Weber");});
-        $("#applyJob",root).addEventListener("click",()=>{closeModal();openChat("Jonas Weber");toast(fill(t("applySentToast"),{name:"Jonas Weber"}));});
+      <div class="notice" style="margin-bottom:16px"><strong>${t("postedByLabel")}:</strong> ${escapeHtml(who)} · ${t("roleClient")}</div>
+      ${mine?"":`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="primary" id="applyJob">${t("applyBtn")}</button><button class="secondary" id="msgClient">${t("messageClientBtn")}</button></div>`}`, root=>{
+        if(mine) return;
+        $("#msgClient",root).addEventListener("click",()=>{closeModal();openChat(target);});
+        $("#applyJob",root).addEventListener("click",()=>{closeModal();openChat(target);toast(fill(t("applySentToast"),{name:who}));});
       });
   }
 
@@ -3999,6 +4394,7 @@
 
   function publishJobFromForm(){
     if(!requireAuth()) return;
+    if(REAL){ if(!$("#jobTitle").value.trim()){ toast(t("toastAddJobTitle")); return; } return publishJobReal(); }
     const title=$("#jobTitle").value.trim();
     if(!title){toast(t("toastAddJobTitle"));$("#jobTitle").focus();return;}
     const role=$("#jobRole"), cat=$("#jobCat"), pricing=$("#jobPricing");
@@ -4092,7 +4488,7 @@
   initPages();
   runJobSearch();
   $("#accountTypeSelect").addEventListener("change",e=>setRole(e.target.value));
-  $("#myProfileBtn").addEventListener("click",()=>openProfile(OWN_PROFILE));
+  $("#myProfileBtn").addEventListener("click",async()=>{ if(REAL){ await loadOwnEditorProfile(); } openProfile(ownKey()); });
   buildCardGalleries();
   $("#reminderToggle").addEventListener("change",e=>{state.reminderEnabled=e.target.checked;saveReco();refreshReco();});
   refreshReco();
