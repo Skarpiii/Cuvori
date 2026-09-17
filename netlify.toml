@@ -1,4 +1,4 @@
-# Netlify: the whole repo is the site. The page lives in cuvori-index.html,
+# Netlify: the whole repo is the site. The page lives in index.html,
 # so "/" is served from it. Every other unknown path also goes there.
 [build]
   publish = "."
@@ -15,12 +15,12 @@
 
 [[redirects]]
   from = "/"
-  to = "/cuvori-index.html"
+  to = "/index.html"
   status = 200
 
 [[redirects]]
   from = "/*"
-  to = "/cuvori-index.html"
+  to = "/index.html"
   status = 200
 
 [[headers]]

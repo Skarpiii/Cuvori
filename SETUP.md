@@ -14,7 +14,7 @@ Follow these steps once. About 20 minutes. Nothing here needs coding.
 
 ## Part 2 — Put the keys into the site
 
-Open `cuvori-index.html` and find this line near the bottom (search for `CUVORI_CONFIG`):
+Open `index.html` and find this line near the bottom (search for `CUVORI_CONFIG`):
 
 ```
 window.CUVORI_CONFIG = { supabaseUrl: "", supabaseAnonKey: "" };
@@ -61,7 +61,7 @@ Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's 
 1. Create a Stripe account at https://stripe.com (country: Lithuania; individual is fine to start). Finish the identity and bank checks Stripe asks for.
 2. Stripe dashboard → **Settings → Connect** → get started → choose **Express** accounts. Also set the platform name/branding ("Cuvori").
 3. Stripe → **Developers → API keys**: copy the **Secret key** (starts with `sk_test_` in test mode, `sk_live_` later).
-4. Stripe → **Developers → Webhooks → Add endpoint**: URL `https://cuvori.netlify.app/.netlify/functions/stripe-webhook`, events: `checkout.session.completed`, `account.updated`, `charge.refunded`. Copy the **Signing secret** (`whsec_...`).
+4. Stripe → **Developers → Webhooks → Add endpoint**: URL `https://cuvori.netlify.app/.netlify/functions/stripe-webhook`, events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `account.updated`, `charge.refunded`, `charge.dispute.created`. Copy the **Signing secret** (`whsec_...`). If Stripe puts `account.updated` on a separate "Connected accounts" endpoint, give that endpoint the same URL and add its signing secret as `STRIPE_CONNECT_WEBHOOK_SECRET`.
 5. Supabase → **Project Settings → API**: copy the **service_role** key (secret! never put it in the page).
 6. Netlify → site → **Site configuration → Environment variables** → add:
    - `STRIPE_SECRET_KEY` = sk_…
@@ -69,8 +69,17 @@ Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's 
    - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key
    - optional: `FEE_PERCENT` (default 3), `FEE_FIXED_CENTS` (default 25), `AUTO_RELEASE_DAYS` (default 7)
    Then **Deploys → Trigger deploy**. From now on new contracts are "Protected payment".
-7. Run `supabase/schema_v5.sql` … `schema_v8.sql` in the Supabase SQL editor, in order (already done for cuvori.netlify.app).
+7. Run `supabase/schema_v5.sql` … `schema_v9.sql` in the Supabase SQL editor, in order (already done for the live database).
 8. Test in Stripe **test mode**: editor → Settings → Payout details → "Set up payouts with Stripe" (use Stripe's test data); client → contract → Pay now → card `4242 4242 4242 4242`, any future date, any CVC.
 9. Go live: switch the two Stripe keys to live keys in Netlify and trigger a deploy.
 
 How the money flows: client pays price + card fee → held → editor "Mark as delivered" → client "Approve & release" (or 7-day auto-release) → Stripe pays the editor's bank. Disputes (either side) stop the clock; you decide in Admin panel → Contracts & disputes: release, refund or split.
+
+## Part 6 — Security checks (keep these working)
+
+The database rules were attacked from every side (visitor, client, editor, banned user, admin) and hardened in `supabase/schema_v9.sql` and `schema_v10.sql`.
+
+1. Run `supabase/schema_v9.sql` in the Supabase SQL editor, then `supabase/check_v9.sql` (it lists existing rows that break the new limits; they keep working but must be fixed before they can be saved again).
+2. Run `supabase/schema_v10.sql` **only after the new page is live** (it hides other people's e-mails; the old page would lose its sign-in role).
+3. The page has a Content-Security-Policy that allows only its own scripts, by fingerprint. **After any change to `index.html` run `python3 tools/csp.py index.html`**, otherwise the page will not start.
+4. The full test kit is stored as `tests/test-kit.tar.gz` (unpack it in the repo folder with `tar xzf tests/test-kit.tar.gz`). Then `tests/run-all.sh` runs every check: 178 database attacks, payment-function attacks, stored-XSS proofs, the browser policy test, the UI fuzz test (7 languages × 4 screen widths) and all site flows.
