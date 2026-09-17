@@ -705,6 +705,7 @@
     .payout-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}.payout-row select{max-width:170px}.payout-row input{flex:1}
     .c-row{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:8px;cursor:pointer}.c-right{text-align:right}.c-status{font-size:12px;font-weight:800}.st-proposed{color:var(--warn)}.st-accepted,.st-paid_marked{color:var(--accent-dark)}.st-paid,.st-completed{color:var(--success)}.st-declined,.st-cancelled{color:var(--muted)}
     .open-contract{border-color:var(--success);color:#0f7a3c}
+    .flag-line{margin:3px 0;font-size:13px}.mini-tag.tag-red{background:#ffe3e3;color:#7a1414}
     .banned-banner{background:#ffe3e3;color:#7a1414;border-bottom:1px solid #f3b4b4;font-size:13px;font-weight:700;text-align:center;padding:8px 12px}
     .star-row{display:flex;gap:4px}.star-pick{background:transparent;border:0;font-size:30px;line-height:1;color:#d6d9df;cursor:pointer;padding:0 2px}.star-pick.on{color:var(--warn)}
     .danger-text{color:var(--danger)!important}.ok-text{color:var(--success)}
@@ -1139,7 +1140,7 @@
     <!-- ===================== ADMIN ===================== -->
     <section id="page-admin" class="page">
       <div class="page-head"><div><h1 data-i18n="adminPanel">Admin panel</h1><p class="muted">Only you can see this page. Actions here take effect immediately.</p></div></div>
-      <div class="admin-tabs"><button class="admin-tab active" data-atab="users">Users</button><button class="admin-tab" data-atab="invites">Invite codes</button><button class="admin-tab" data-atab="reviews">Reviews</button><button class="admin-tab" data-atab="contracts">Contracts &amp; disputes</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" data-atab="users">Users</button><button class="admin-tab" data-atab="invites">Invite codes</button><button class="admin-tab" data-atab="reviews">Reviews</button><button class="admin-tab" data-atab="contracts">Contracts &amp; disputes</button><button class="admin-tab" data-atab="bad">Bad actors</button></div>
       <div class="panel" id="adminBody"></div>
     </section>
 
@@ -4413,6 +4414,7 @@
     try{
       if(ADMIN.tab==="users"){ const { data, error } = await sb.rpc("admin_list_users"); if(error) throw error; ADMIN.users=data||[]; renderAdminUsers(); }
       else if(ADMIN.tab==="invites"){ const { data, error } = await sb.rpc("admin_list_invites"); if(error) throw error; ADMIN.invites=data||[]; renderAdminInvites(); }
+      else if(ADMIN.tab==="bad"){ const { data, error } = await sb.rpc("admin_list_bad_actors"); if(error) throw error; ADMIN.bad=data||[]; renderAdminBadActors(); }
       else if(ADMIN.tab==="contracts"){ const { data, error } = await sb.rpc("admin_list_contracts"); if(error) throw error; ADMIN.contracts=data||[]; renderAdminContracts(); }
       else { const { data, error } = await sb.rpc("admin_list_reviews"); if(error) throw error; ADMIN.reviews=data||[]; renderAdminReviews(); }
     }catch(e){ console.error(e); host.innerHTML=`<div class="notice danger">${escapeHtml(e.message||"Error")}</div>`; }
@@ -4427,13 +4429,13 @@
         <div class="admin-row ${u.banned?"is-banned":""}" data-uid="${u.id}">
           <div class="admin-main">
             <div><strong>${escapeHtml(u.display_name||u.first_name||"(no name)")}</strong> <span class="muted small">${escapeHtml(u.email||"")}</span></div>
-            <div class="muted small">${u.role==="editor"?"Editor":"Client"}${u.is_admin?" · admin":""}${u.is_public?" · public profile":""} · joined ${fmtDate(u.created_at)} · ${u.projects} videos · ${u.reviews} reviews${u.avg_stars?" · ★ "+u.avg_stars:""}${u.banned?` · <span class="danger-text">BANNED${u.ban_reason?": "+escapeHtml(u.ban_reason):""}</span>`:""}</div>
+            <div class="muted small">${u.role==="editor"?"Editor":"Client"}${u.is_admin?" · admin":""}${u.is_public?" · public profile":""} · joined ${fmtDate(u.created_at)} · ${u.projects} videos · ${u.reviews} reviews${u.avg_stars?" · ★ "+u.avg_stars:""}${u.banned?` · <span class="danger-text">BANNED${u.ban_reason?": "+escapeHtml(u.ban_reason):""}</span>`:""}${u.flags?` · <span class="danger-text">⚑ ${u.flags} flag${u.flags>1?"s":""}</span>`:""}</div>
           </div>
           <div class="admin-actions">
             ${u.role==="editor"&&u.is_public?`<button class="link-btn" data-aview="${u.id}">View profile</button>`:""}
             ${u.role==="editor"?`<button class="link-btn" data-arole="client">Make client</button>`:`<button class="link-btn" data-arole="editor">Make editor</button>`}
             ${u.id===myId()?`<span class="muted small">(you)</span>`:u.banned?`<button class="link-btn" data-aunban>Unban</button>`:`<button class="link-btn" data-aban>Ban</button>`}
-            ${u.id===myId()?"":`<button class="link-btn danger-text" data-adelete>Delete user</button>`}
+            ${u.id===myId()?"":`<button class="link-btn" data-aflag>Flag</button><button class="link-btn danger-text" data-adelete>Delete user</button>`}
           </div>
         </div>`).join("")}</div>`:`<div class="muted">No users match.</div>`);
     $("#adminSearch").addEventListener("input",e=>{ ADMIN.q=e.target.value; renderAdminUsers(); $("#adminSearch").focus(); const v=$("#adminSearch"); v.setSelectionRange(v.value.length,v.value.length); });
@@ -4441,6 +4443,7 @@
       const uid=row.dataset.uid; const u=ADMIN.users.find(x=>x.id===uid); const label=u.display_name||u.first_name||u.email;
       row.querySelector("[data-aview]")?.addEventListener("click",async()=>{ await loadEditors(); if(PROFILES["u:"+uid]) openProfile("u:"+uid); else toast("Profile is not public"); });
       row.querySelector("[data-arole]")?.addEventListener("click",async e=>{ const r=e.target.dataset.arole; const { data } = await sb.rpc("admin_set_role",{ target:uid, new_role:r }); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("Role updated"); openAdmin(); });
+      row.querySelector("[data-aflag]")?.addEventListener("click",()=>flagUserModal(uid,label,null,()=>openAdmin()));
       row.querySelector("[data-aban]")?.addEventListener("click",()=>{
         openModal("Ban "+escapeHtml(label), `<p class="muted" style="margin-bottom:10px">A banned user stays registered but can no longer message, post jobs or show a profile. Their profile and videos are hidden immediately. You can unban later.</p><label>Reason (shown to the user)</label><input id="banReason" placeholder="e.g. spam, abusive messages"><button class="primary danger-btn" id="banGo" style="margin-top:14px">Ban user</button>`, root=>{
           $("#banGo",root).addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_set_ban",{ target:uid, ban:true, reason:$("#banReason",root).value.trim()||null }); closeModal(); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("User banned"); openAdmin(); });
@@ -4738,7 +4741,8 @@
         <div><strong>${escapeHtml(r.title)}</strong> <span class="muted small">${money(r.price,r.currency)} · ${r.payment_mode} · <span class="c-status st-${r.status}">${t(C_STATUS[r.status]||r.status)}</span></span></div>
         <div class="muted small">${escapeHtml(r.client_name||r.client_email||"?")} → ${escapeHtml(r.editor_name||r.editor_email||"?")} · ${fmtDate(r.created_at)}${r.delivered_at?" · delivered "+fmtDate(r.delivered_at):""}${r.auto_release_at&&r.status==="delivered"?" · auto-release "+fmtDate(r.auto_release_at):""}</div>
         ${r.status==="disputed"?`<div class="notice danger" style="margin-top:6px"><strong>Dispute by ${r.dispute_by===r.editor?"editor":"client"}:</strong> ${escapeHtml(r.dispute_reason||"")}${r.delivery_url?`<br>Delivery: <a href="${escapeHtml(r.delivery_url)}" target="_blank" rel="noopener">${escapeHtml(r.delivery_url)}</a>`:""}${r.delivery_note?`<br>Note: ${escapeHtml(r.delivery_note)}`:""}</div>`:""}
-      </div><div class="admin-actions">${["funded","delivered","disputed"].includes(r.status)&&r.payment_mode==="escrow"?`<button class="link-btn" data-res="release">Release to editor</button><button class="link-btn" data-res="split">Split</button><button class="link-btn danger-text" data-res="refund">Refund client</button>`:""}</div></div>`).join("")||`<div class="muted">No contracts yet.</div>`}</div>`;
+      </div><div class="admin-actions">${["funded","delivered","disputed"].includes(r.status)&&r.payment_mode==="escrow"?`<button class="link-btn" data-res="release">Release to editor</button><button class="link-btn" data-res="split">Split</button><button class="link-btn danger-text" data-res="refund">Refund client</button>`:""}<button class="link-btn" data-cflag="${r.editor}" data-cname="${escapeHtml(r.editor_name||r.editor_email||"editor")}">Flag editor</button><button class="link-btn" data-cflag="${r.client}" data-cname="${escapeHtml(r.client_name||r.client_email||"client")}">Flag client</button></div></div>`).join("")||`<div class="muted">No contracts yet.</div>`}</div>`;
+    $$("[data-cflag]",host).forEach(b=>b.addEventListener("click",()=>flagUserModal(b.dataset.cflag,b.dataset.cname,b.closest(".admin-row").dataset.cid,()=>openAdmin("contracts"))));
     $$("[data-res]",host).forEach(b=>b.addEventListener("click",()=>{
       const row=b.closest(".admin-row"); const r=rows.find(x=>x.id===row.dataset.cid); const d=b.dataset.res;
       openModal("Decide: "+escapeHtml(r.title), `<p class="muted">${d==="release"?"Release the full amount to the editor.":d==="refund"?"Refund the full amount to the client.":"Split the money between both."}</p>${d==="split"?`<label style="margin-top:10px">Editor receives (%)</label><input id="resPct" type="number" min="0" max="100" value="50">`:""}<label style="margin-top:10px">Note to both sides (optional)</label><textarea id="resNote" style="min-height:70px"></textarea><button class="primary ${d==="refund"?"danger-btn":""}" id="resGo" style="margin-top:14px">Confirm</button>`, root=>{
@@ -4746,6 +4750,47 @@
       });
     }));
   }
+  // ----- admin: bad actors (watch list) -----
+  const FLAG_KINDS={ scam:"Scam / fraud", dispute_lost:"Lost a dispute", abuse:"Abusive behaviour", fake:"Fake profile or reviews", other:"Other" };
+  function flagUserModal(uid, label, contractId, done){
+    openModal("Flag "+escapeHtml(label), `<p class="muted" style="margin-bottom:10px">Adds this user to the Bad actors list. They are not notified and nothing changes for them until you ban or delete them.</p><label>Type</label><select id="flKind">${Object.entries(FLAG_KINDS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><label style="margin-top:10px">What happened</label><textarea id="flReason" style="min-height:80px" placeholder="Short factual note for yourself"></textarea><button class="primary danger-btn" id="flGo" style="margin-top:14px">Add to bad actors</button>`, root=>{
+      $("#flGo",root).addEventListener("click",async()=>{ const { data, error } = await sb.rpc("admin_flag_user",{ target:uid, kind:$("#flKind",root).value, reason:$("#flReason",root).value.trim()||null, contract:contractId||null }); if(error||data!=="ok"){ toast((error&&error.message)||data||t("a_error")); return; } closeModal(); toast("Flagged"); if(done) done(); });
+    });
+  }
+  function renderAdminBadActors(){
+    const host=$("#adminBody"); const rows=ADMIN.bad||[];
+    host.innerHTML=`<div class="admin-stats"><span><strong>${rows.length}</strong> on the list</span><span><strong>${rows.filter(r=>r.banned).length}</strong> banned</span><span><strong>${rows.filter(r=>r.disputes_lost>0).length}</strong> lost disputes</span></div>
+      <p class="muted small" style="margin:8px 0 12px">People land here when you flag them or when they lose a dispute. Nobody outside the admin panel can see this list. Ban stops them acting; Delete removes them entirely.</p>
+      <div class="admin-table">${rows.map(u=>`
+        <div class="admin-row ${u.banned?"is-banned":""}" data-uid="${u.id}"><div class="admin-main">
+          <div><strong>${escapeHtml(u.display_name||u.first_name||"(no name)")}</strong> <span class="muted small">${escapeHtml(u.email||"")}</span> ${u.banned?`<span class="danger-text small">BANNED${u.ban_reason?": "+escapeHtml(u.ban_reason):""}</span>`:""}</div>
+          <div class="muted small">${u.role==="editor"?"Editor":"Client"} · joined ${fmtDate(u.created_at)} · disputes lost <strong>${u.disputes_lost}</strong> · won ${u.disputes_won}${u.disputes_open?` · <span class="danger-text">${u.disputes_open} open</span>`:""}</div>
+          <div style="margin-top:6px">${(u.flags||[]).map(f=>`<div class="flag-line"><span class="mini-tag ${f.kind==="scam"||f.kind==="fake"?"tag-red":""}">${FLAG_KINDS[f.kind]||f.kind}</span> <span>${escapeHtml(f.reason||"")}</span> <span class="muted small">· ${fmtDate(f.created_at)}</span> <button class="link-btn small" data-unflag="${f.id}">remove</button></div>`).join("")}</div>
+        </div><div class="admin-actions">
+          <button class="link-btn" data-bflag>Add note</button>
+          ${u.banned?`<button class="link-btn" data-bunban>Unban</button>`:`<button class="link-btn danger-text" data-bban>Ban</button>`}
+          <button class="link-btn danger-text" data-bdelete>Delete user</button>
+        </div></div>`).join("")||`<div class="muted">Nobody on the list. Flag someone from the Users tab, or it fills automatically when a dispute is lost.</div>`}</div>`;
+    $$(".admin-row",host).forEach(row=>{
+      const uid=row.dataset.uid; const u=rows.find(x=>x.id===uid); const label=u.display_name||u.first_name||u.email;
+      row.querySelector("[data-bflag]")?.addEventListener("click",()=>flagUserModal(uid,label,null,()=>openAdmin("bad")));
+      row.querySelector("[data-bban]")?.addEventListener("click",()=>{
+        openModal("Ban "+escapeHtml(label), `<label>Reason (shown to the user)</label><input id="banReason" value="${escapeHtml((u.flags&&u.flags[0]&&FLAG_KINDS[u.flags[0].kind])||"")}"><button class="primary danger-btn" id="banGo" style="margin-top:14px">Ban user</button>`, root=>{
+          $("#banGo",root).addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_set_ban",{ target:uid, ban:true, reason:$("#banReason",root).value.trim()||null }); closeModal(); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("User banned"); openAdmin("bad"); });
+        });
+      });
+      row.querySelector("[data-bunban]")?.addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_set_ban",{ target:uid, ban:false }); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("User unbanned"); openAdmin("bad"); });
+      row.querySelector("[data-bdelete]")?.addEventListener("click",()=>{
+        confirmTyped("Delete user", `This permanently deletes <strong>${escapeHtml(label)}</strong> and everything they made. This cannot be undone.`, "DELETE", async()=>{
+          const { data, error } = await sb.rpc("admin_delete_user",{ target:uid }); closeModal();
+          if(error||data!=="ok"){ toast((error&&error.message)||data||t("a_error")); return; }
+          toast("User deleted"); delete PROFILES["u:"+uid]; openAdmin("bad");
+        });
+      });
+      $$("[data-unflag]",row).forEach(b=>b.addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_unflag",{ flag:b.dataset.unflag }); if(data!=="ok"){ toast(data||t("a_error")); return; } openAdmin("bad"); }));
+    });
+  }
+
   function initEscrow(){ loadEscrowStatus(); window.__reloadEscrow=async()=>{ await loadEscrowStatus(); await loadStripeMe(); }; }
 
   function initContracts(){
