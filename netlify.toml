@@ -3,6 +3,16 @@
 [build]
   publish = "."
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Serverless functions (Stripe escrow) must not be caught by the page redirect below.
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
 [[redirects]]
   from = "/"
   to = "/cuvori-index.html"
