@@ -698,6 +698,15 @@
       .pf-ownerbar>div{display:grid;grid-template-columns:1fr 1fr}
     }
 
+    .banned-banner{background:#ffe3e3;color:#7a1414;border-bottom:1px solid #f3b4b4;font-size:13px;font-weight:700;text-align:center;padding:8px 12px}
+    .star-row{display:flex;gap:4px}.star-pick{background:transparent;border:0;font-size:30px;line-height:1;color:#d6d9df;cursor:pointer;padding:0 2px}.star-pick.on{color:var(--warn)}
+    .danger-text{color:var(--danger)!important}.ok-text{color:var(--success)}
+    .primary.danger-btn{background:var(--danger);border-color:var(--danger)}
+    .admin-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.admin-tab{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 14px;font-weight:800;cursor:pointer}.admin-tab.active{background:var(--dark);color:#fff;border-color:var(--dark)}
+    .admin-stats{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}.admin-stats strong{color:var(--text)}
+    .admin-table{display:flex;flex-direction:column;gap:8px}.admin-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel)}.admin-row.is-banned{background:#fff5f5}.admin-main{min-width:0;flex:1 1 260px}.admin-actions{display:flex;gap:12px;flex-wrap:wrap}.admin-actions .link-btn{font-size:13px}
+    .code-box{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:800;letter-spacing:1px;border:1px dashed var(--line);border-radius:10px;padding:14px;text-align:center;user-select:all}
+    .danger-zone{border:1px solid rgba(214,69,69,.35);border-radius:12px;padding:14px;margin-top:18px}
     .demo-banner{background:#fff7e0;color:#6b4e00;border-bottom:1px solid #f1dfa3;font-size:13px;font-weight:700;text-align:center;padding:7px 12px}
     .demo-hidden{display:none!important}
     /* ---------- Responsive ---------- */
@@ -764,6 +773,7 @@
     </div>
   </header>
 
+  <div id="bannedBanner" class="banned-banner hidden"></div>
   <div id="demoBanner" class="demo-banner hidden" data-i18n="a_demoBanner">Demo mode — accounts are not saved yet. The live site will use real accounts.</div>
   <div id="mobileMenuBackdrop" class="mobile-menu-backdrop hidden"></div>
   <nav id="mobileMenu" class="mobile-menu">
@@ -773,6 +783,7 @@
     <button class="mobile-nav-btn" data-route="how" data-i18n="howItWorks">How it works</button>
     <button class="mobile-nav-btn" data-route="contracts" data-i18n="contracts">Contracts</button>
     <button class="mobile-nav-btn" data-route="account" data-i18n="account">Account</button>
+    <button class="mobile-nav-btn hidden" id="adminBtnM" data-admin-open data-i18n="adminPanel">Admin panel</button>
     <button class="mobile-nav-btn" data-route="settings" data-i18n="settings">Settings</button>
     <div class="mobile-menu-divider"></div>
     <button class="mobile-nav-btn" data-route="join-editor" data-i18n="joinEditor">Join as an editor</button>
@@ -1087,7 +1098,7 @@
         <div>
           <h2 style="margin-bottom:4px" id="accountName">Egidijus</h2>
           <div class="muted" style="margin-bottom:12px"><span id="accountEmail">egidijusss159@gmail.com</span> · <span id="accountRole">Client</span></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="secondary" data-route="settings" data-i18n="editProfileBtn">Edit profile</button><button class="secondary" data-route="join-editor" data-i18n="createEditorProfileBtn">Create editor profile</button><button class="primary hidden" id="myProfileBtn" data-i18n="myProfileBtn">My editor profile</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="secondary" data-route="settings" data-i18n="editProfileBtn">Edit profile</button><button class="secondary" data-route="join-editor" data-i18n="createEditorProfileBtn">Create editor profile</button><button class="primary hidden" id="myProfileBtn" data-i18n="myProfileBtn">My editor profile</button><button class="secondary hidden" id="adminBtn" data-admin-open data-i18n="adminPanel">Admin panel</button></div>
         </div>
       </div>
       <div id="recoHost"></div>
@@ -1107,7 +1118,7 @@
           </div>
         </div>
         <div>
-          <div class="panel" style="margin-bottom:14px"><h3 data-i18n="reviewsTitle">Reviews</h3><div class="empty-state small"><strong data-i18n="p_noReviewsTitle">No reviews yet</strong><p class="muted" data-i18n="reviewsDesc">Your client and professional reviews will appear here.</p></div></div>
+          <div class="panel" style="margin-bottom:14px"><h3 data-i18n="reviewsTitle">Reviews</h3><div id="accountReviews"><div class="empty-state small"><strong data-i18n="p_noReviewsTitle">No reviews yet</strong><p class="muted" data-i18n="reviewsDesc">Your client and professional reviews will appear here.</p></div></div></div>
           <div class="panel"><h3 data-i18n="p_savedProfiles">Saved profiles</h3><div class="saved-list">
             <button class="saved" data-open-profile="Maya Klein"><span class="contact-avatar">MK</span><span><strong>Maya Klein</strong><span class="muted small" data-i18n="roleEditor">Editor</span></span><span class="muted">→</span></button>
             <button class="saved" data-open-profile="Alex Rivera"><span class="contact-avatar">AR</span><span><strong>Alex Rivera</strong><span class="muted small" data-i18n="roleVideographer">Videographer</span></span><span class="muted">→</span></button>
@@ -1115,6 +1126,13 @@
           </div></div>
         </div>
       </div>
+    </section>
+
+    <!-- ===================== ADMIN ===================== -->
+    <section id="page-admin" class="page">
+      <div class="page-head"><div><h1 data-i18n="adminPanel">Admin panel</h1><p class="muted">Only you can see this page. Actions here take effect immediately.</p></div></div>
+      <div class="admin-tabs"><button class="admin-tab active" data-atab="users">Users</button><button class="admin-tab" data-atab="invites">Invite codes</button><button class="admin-tab" data-atab="reviews">Reviews</button></div>
+      <div class="panel" id="adminBody"></div>
     </section>
 
     <!-- ===================== SETTINGS ===================== -->
@@ -1139,6 +1157,7 @@
               <div><label data-i18n="accountTypeLabel">Account type</label><select id="accountTypeSelect"><option value="client" data-i18n="roleClient">Client</option><option value="editor" data-i18n="roleEditor">Editor</option></select></div>
             </div>
             <div class="form-actions"><button class="primary" id="saveProfileBtn" data-i18n="p_saveChanges">Save changes</button></div>
+            <div class="danger-zone real-only hidden"><strong data-i18n="dz_title">Delete account</strong><p class="muted small" style="margin:4px 0 10px" data-i18n="dz_deleteDesc">This removes your account and everything in it: profile, videos, jobs, messages and reviews. It cannot be undone.</p><button class="secondary" id="deleteAccountBtn" data-i18n="dz_deleteBtn">Delete my account</button></div>
           </div>
           <div class="panel set-pane" data-set-pane="password">
             <h3 data-i18n="settingChangePassword">Change password</h3>
@@ -3073,6 +3092,7 @@
   }
 
   function route(name){
+    if(name==="admin" && !(typeof isAdmin==="function" && isAdmin())) name="home";
     const page=($("#page-"+name) && !(name==="profile" && !state.currentProfile)) ? name : "home";
     $$(".page").forEach(p=>p.classList.remove("active"));
     $("#page-"+page).classList.add("active");
@@ -3428,8 +3448,8 @@
     const reviews = p.reviews.map(r=>`
       <div class="review-item">
         <div class="review-top"><div><strong>${escapeHtml(r.who)}</strong><span class="verified">${t("verifiedClient")}</span></div><div class="muted"><span class="stars" style="color:var(--warn)">${stars(r.stars)}</span> · ${r.when}</div></div>
-        <p>${t(r.key)}</p>
-      </div>`).join("");
+        <p>${r.text!=null?escapeHtml(r.text):t(r.key)}</p>
+      </div>`).join("") || `<div class="muted">${t("p_noReviewsTitle")}</div>`;
     const rateHtml = `<div class="rate-line"><div class="price"><span class="from">${t("from")}</span>${p.rate}</div><div class="price-unit">/ ${t(p.unitKey)}</div></div>`;
 
     root.innerHTML = `
@@ -3443,7 +3463,7 @@
               ${isOwner(name)&&REAL&&!p.is_public?`<div class="notice" style="margin:8px 0"><strong>${t("d_setupTitle")}</strong><br>${t("d_setupSteps")}<br><button class="primary" data-edit-profile style="margin-top:10px;padding:8px 14px">${t("d_setupBtn")}</button></div>`:""}
               <div class="ep-meta"><span>${t(p.roleKey)}</span><span>${escapeHtml(pLocation(p))}</span><span>${escapeHtml(p.langs||"")}</span></div>
               <div class="ep-stats">
-                <span>${p.reviewCount?`<span class="stars">${stars(5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}`:t("p_noReviewsTitle")}</span>
+                <span>${p.reviewCount?`<span class="stars">${stars(Math.round(+p.rating)||5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}`:t("p_noReviewsTitle")}</span>
                 <span>${fill(t("completedProjects"),{n:p.completed})}</span>
                 <span>${fill(t("memberSince"),{y:p.since})}</span>
               </div>
@@ -3462,7 +3482,7 @@
               <div class="panel ep-about" style="margin-bottom:14px"><h3 style="margin-bottom:10px">${t("aboutLabel")}</h3><p>${pAbout(p)}</p></div>
               <div class="panel"><h3 style="margin-bottom:12px">${t("toolsLabel")}</h3><div class="skill-list">${p.tools.map(x=>`<span class="skill">${escapeHtml(x)}</span>`).join("")}</div></div>
             </div>
-            <div class="ep-pane" data-pane="reviews"><div class="panel">${reviews}<div class="muted small" style="margin-top:12px">${fill(t("showingReviews"),{a:p.reviews.length,b:p.reviewCount})}</div></div></div>
+            <div class="ep-pane" data-pane="reviews"><div class="panel">${reviews}<div class="muted small" style="margin-top:12px">${fill(t("showingReviews"),{a:p.reviews.length,b:p.reviewCount})}</div>${typeof reviewButtonHtml==="function"?reviewButtonHtml(name):""}</div></div>
           </div>
         </div>
 
@@ -3773,7 +3793,7 @@
   state.auth = { session:null, profile:null };
 
   function signedIn(){ return REAL ? !!state.auth.session : true; }
-  function requireAuth(){ if(signedIn()) return true; toast(t("a_needSignIn")); route("create-account"); return false; }
+  function requireAuth(){ if(!signedIn()){ toast(t("a_needSignIn")); route("create-account"); return false; } if(isBannedMe()){ toast(t("ban_notice")); return false; } return true; }
   function displayName(){ const p=state.auth.profile; return (p && (p.first_name||p.email)) || (REAL ? t("a_guest") : "Egidijus"); }
   function initials(){ const n=displayName(); return n.split(/[\s@.]+/).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join("") || "C"; }
 
@@ -3809,6 +3829,9 @@
     const sel=$("#accountTypeSelect"); if(sel){ sel.disabled=REAL; sel.closest("div").querySelector(".role-note")?.remove(); if(REAL){ const n=document.createElement("div"); n.className="muted small role-note"; n.style.marginTop="6px"; n.textContent=t("a_roleByInvite"); sel.closest("div").append(n);} }
     const pf=$("#profileFirstName"); if(pf && state.auth.profile) pf.value=state.auth.profile.first_name||"";
     const pe=$("#profileEmail"); if(pe && state.auth.profile) pe.value=state.auth.profile.email||"";
+    $$("[data-admin-open]").forEach(b=>b.classList.toggle("hidden", !isAdmin()));
+    $$(".real-only").forEach(el=>el.classList.toggle("hidden", !(REAL && on)));
+    applyBanUI(); renderMyReviewsPanel();
     refreshReco();
   }
   async function refreshAuth(){
@@ -3913,49 +3936,49 @@
          d_respondsHours:"Usually respond within (hours)", d_turnaround:"Typical turnaround (days)", d_revisions:"Revision rounds included", d_exampleProfile:"Example profile — real editors appear here as they join.",
          d_exampleCantMessage:"This is an example profile. Message a real professional instead.", d_noConversations:"No conversations yet. Message a professional from their profile.", d_client:"Client",
          d_uploading:"Uploading…", d_uploadFailed:"Upload failed. Try a smaller file.", d_jobPosted:"Job posted.", d_noJobs:"No jobs posted yet. Be the first.", d_you:"You", d_examples:"Example profiles",
-         d_realEditors:"Professionals", d_setupTitle:"Set up your editor profile", d_setupSteps:"1. Fill in your profile (bio, price, city). 2. Turn on \"Show my profile in search\". 3. Add your videos with \"Add project\" below.", d_setupBtn:"Fill in my profile", d_draftNotPublic:"Your profile is not public yet. Open Edit profile and turn on \"Show my profile in search\".", d_newMessageFrom:"New message from {name}", d_changesRequested:"Changes requested", d_approved:"Approved",
+         d_realEditors:"Professionals", adminPanel:"Admin panel", rv_title:"Leave a review", rv_editTitle:"Edit my review", rv_intro:"How was working with {name}? Reviews are public and help other clients choose.", rv_textLabel:"Your review", rv_placeholder:"What did they do well? Would you hire them again?", rv_submit:"Publish review", rv_delete:"Delete my review", rv_thanks:"Thank you — your review is live.", rv_needChat:"You can review an editor after you have messaged them.", rv_leave:"Leave a review", rv_noneEditor:"Reviews from your clients will appear here.", dz_title:"Delete account", dz_deleteBtn:"Delete my account", dz_deleteDesc:"This removes your account and everything in it: profile, videos, jobs, messages and reviews. It cannot be undone.", dz_typeWord:"Type {w} to confirm", dz_deleted:"Your account has been deleted.", ban_notice:"Your account is suspended. You can browse, but not message, post or publish.", d_setupTitle:"Set up your editor profile", d_setupSteps:"1. Fill in your profile (bio, price, city). 2. Turn on \"Show my profile in search\". 3. Add your videos with \"Add project\" below.", d_setupBtn:"Fill in my profile", d_draftNotPublic:"Your profile is not public yet. Open Edit profile and turn on \"Show my profile in search\".", d_newMessageFrom:"New message from {name}", d_changesRequested:"Changes requested", d_approved:"Approved",
          d_yourJobs:"Your jobs", d_closeJob:"Close job", d_jobClosed:"Job closed." },
     de:{ d_editProfile:"Profil bearbeiten", d_profileSaved:"Profil gespeichert.", d_displayName:"Anzeigename", d_roleLabel:"Was du machst", d_city:"Stadt", d_country:"Land", d_languages:"Sprachen (mit Komma getrennt)",
          d_tools:"Tools & Fähigkeiten (mit Komma getrennt)", d_bio:"Über dich", d_rate:"Preis", d_rateUnit:"Pro", d_public:"Mein Profil in der Suche anzeigen", d_publicHint:"Schalte das ein, wenn Profil und Portfolio fertig sind.",
          d_respondsHours:"Antwortet meist innerhalb von (Stunden)", d_turnaround:"Typische Bearbeitungszeit (Tage)", d_revisions:"Korrekturrunden inklusive", d_exampleProfile:"Beispielprofil – echte Editoren erscheinen hier, sobald sie beitreten.",
          d_exampleCantMessage:"Das ist ein Beispielprofil. Schreib stattdessen einer echten Fachkraft.", d_noConversations:"Noch keine Unterhaltungen. Schreib einer Fachkraft über ihr Profil.", d_client:"Kunde",
          d_uploading:"Wird hochgeladen…", d_uploadFailed:"Upload fehlgeschlagen. Versuch eine kleinere Datei.", d_jobPosted:"Job veröffentlicht.", d_noJobs:"Noch keine Jobs. Sei der Erste.", d_you:"Du", d_examples:"Beispielprofile",
-         d_realEditors:"Fachkräfte", d_setupTitle:"Richte dein Editor-Profil ein", d_setupSteps:"1. Profil ausfüllen (Bio, Preis, Stadt). 2. „Mein Profil in der Suche anzeigen“ einschalten. 3. Videos unten mit „Projekt hinzufügen“ ergänzen.", d_setupBtn:"Profil ausfüllen", d_draftNotPublic:"Dein Profil ist noch nicht öffentlich. Öffne „Profil bearbeiten“ und schalte „Mein Profil in der Suche anzeigen“ ein.", d_newMessageFrom:"Neue Nachricht von {name}", d_changesRequested:"Änderungen angefragt", d_approved:"Freigegeben",
+         d_realEditors:"Fachkräfte", adminPanel:"Admin-Bereich", rv_title:"Bewertung schreiben", rv_editTitle:"Meine Bewertung bearbeiten", rv_intro:"Wie war die Zusammenarbeit mit {name}? Bewertungen sind öffentlich und helfen anderen Kunden.", rv_textLabel:"Deine Bewertung", rv_placeholder:"Was lief gut? Würdest du wieder buchen?", rv_submit:"Bewertung veröffentlichen", rv_delete:"Meine Bewertung löschen", rv_thanks:"Danke — deine Bewertung ist online.", rv_needChat:"Du kannst bewerten, nachdem du mit dieser Person geschrieben hast.", rv_leave:"Bewertung schreiben", rv_noneEditor:"Bewertungen deiner Kunden erscheinen hier.", dz_title:"Konto löschen", dz_deleteBtn:"Mein Konto löschen", dz_deleteDesc:"Das entfernt dein Konto und alles darin: Profil, Videos, Aufträge, Nachrichten und Bewertungen. Das kann nicht rückgängig gemacht werden.", dz_typeWord:"Tippe {w} zur Bestätigung", dz_deleted:"Dein Konto wurde gelöscht.", ban_notice:"Dein Konto ist gesperrt. Du kannst stöbern, aber nicht schreiben, posten oder veröffentlichen.", d_setupTitle:"Richte dein Editor-Profil ein", d_setupSteps:"1. Profil ausfüllen (Bio, Preis, Stadt). 2. „Mein Profil in der Suche anzeigen“ einschalten. 3. Videos unten mit „Projekt hinzufügen“ ergänzen.", d_setupBtn:"Profil ausfüllen", d_draftNotPublic:"Dein Profil ist noch nicht öffentlich. Öffne „Profil bearbeiten“ und schalte „Mein Profil in der Suche anzeigen“ ein.", d_newMessageFrom:"Neue Nachricht von {name}", d_changesRequested:"Änderungen angefragt", d_approved:"Freigegeben",
          d_yourJobs:"Deine Jobs", d_closeJob:"Job schließen", d_jobClosed:"Job geschlossen." },
     ru:{ d_editProfile:"Редактировать профиль", d_profileSaved:"Профиль сохранён.", d_displayName:"Отображаемое имя", d_roleLabel:"Чем вы занимаетесь", d_city:"Город", d_country:"Страна", d_languages:"Языки (через запятую)",
          d_tools:"Инструменты и навыки (через запятую)", d_bio:"О себе", d_rate:"Ставка", d_rateUnit:"За", d_public:"Показывать профиль в поиске", d_publicHint:"Включите, когда профиль и портфолио готовы.",
          d_respondsHours:"Обычно отвечаю в течение (часов)", d_turnaround:"Типичный срок (дней)", d_revisions:"Раундов правок включено", d_exampleProfile:"Пример профиля — настоящие монтажёры появятся здесь по мере регистрации.",
          d_exampleCantMessage:"Это пример профиля. Напишите настоящему специалисту.", d_noConversations:"Диалогов пока нет. Напишите специалисту из его профиля.", d_client:"Клиент",
          d_uploading:"Загрузка…", d_uploadFailed:"Не удалось загрузить. Попробуйте файл меньше.", d_jobPosted:"Вакансия опубликована.", d_noJobs:"Вакансий пока нет. Будьте первым.", d_you:"Вы", d_examples:"Примеры профилей",
-         d_realEditors:"Специалисты", d_setupTitle:"Настройте профиль монтажёра", d_setupSteps:"1. Заполните профиль (о себе, цена, город). 2. Включите «Показывать профиль в поиске». 3. Добавьте видео кнопкой «Добавить проект» ниже.", d_setupBtn:"Заполнить профиль", d_draftNotPublic:"Ваш профиль пока не публичный. Откройте «Редактировать профиль» и включите «Показывать профиль в поиске».", d_newMessageFrom:"Новое сообщение от {name}", d_changesRequested:"Запрошены правки", d_approved:"Одобрено",
+         d_realEditors:"Специалисты", adminPanel:"Панель администратора", rv_title:"Оставить отзыв", rv_editTitle:"Изменить мой отзыв", rv_intro:"Как прошла работа с {name}? Отзывы публичны и помогают другим клиентам.", rv_textLabel:"Ваш отзыв", rv_placeholder:"Что получилось хорошо? Обратились бы снова?", rv_submit:"Опубликовать отзыв", rv_delete:"Удалить мой отзыв", rv_thanks:"Спасибо — ваш отзыв опубликован.", rv_needChat:"Оставить отзыв можно после переписки с этим специалистом.", rv_leave:"Оставить отзыв", rv_noneEditor:"Отзывы ваших клиентов появятся здесь.", dz_title:"Удалить аккаунт", dz_deleteBtn:"Удалить мой аккаунт", dz_deleteDesc:"Будут удалены аккаунт и всё в нём: профиль, видео, задания, сообщения и отзывы. Это нельзя отменить.", dz_typeWord:"Введите {w} для подтверждения", dz_deleted:"Ваш аккаунт удалён.", ban_notice:"Ваш аккаунт заблокирован. Можно просматривать сайт, но нельзя писать, публиковать задания или профиль.", d_setupTitle:"Настройте профиль монтажёра", d_setupSteps:"1. Заполните профиль (о себе, цена, город). 2. Включите «Показывать профиль в поиске». 3. Добавьте видео кнопкой «Добавить проект» ниже.", d_setupBtn:"Заполнить профиль", d_draftNotPublic:"Ваш профиль пока не публичный. Откройте «Редактировать профиль» и включите «Показывать профиль в поиске».", d_newMessageFrom:"Новое сообщение от {name}", d_changesRequested:"Запрошены правки", d_approved:"Одобрено",
          d_yourJobs:"Ваши вакансии", d_closeJob:"Закрыть вакансию", d_jobClosed:"Вакансия закрыта." },
     lt:{ d_editProfile:"Redaguoti profilį", d_profileSaved:"Profilis išsaugotas.", d_displayName:"Rodomas vardas", d_roleLabel:"Ką darote", d_city:"Miestas", d_country:"Šalis", d_languages:"Kalbos (atskirtos kableliais)",
          d_tools:"Įrankiai ir įgūdžiai (atskirti kableliais)", d_bio:"Apie jus", d_rate:"Įkainis", d_rateUnit:"Už", d_public:"Rodyti mano profilį paieškoje", d_publicHint:"Įjunkite, kai profilis ir portfolio bus paruošti.",
          d_respondsHours:"Paprastai atsakau per (val.)", d_turnaround:"Įprastas atlikimo laikas (d.)", d_revisions:"Įskaičiuoti pataisymų ratai", d_exampleProfile:"Pavyzdinis profilis – tikri editoriai atsiras čia, kai prisijungs.",
          d_exampleCantMessage:"Tai pavyzdinis profilis. Rašykite tikram specialistui.", d_noConversations:"Pokalbių dar nėra. Parašykite specialistui iš jo profilio.", d_client:"Klientas",
          d_uploading:"Įkeliama…", d_uploadFailed:"Įkelti nepavyko. Pabandykite mažesnį failą.", d_jobPosted:"Darbas paskelbtas.", d_noJobs:"Darbų dar nėra. Būkite pirmas.", d_you:"Jūs", d_examples:"Pavyzdiniai profiliai",
-         d_realEditors:"Specialistai", d_setupTitle:"Susikurkite editoriaus profilį", d_setupSteps:"1. Užpildykite profilį (aprašymas, kaina, miestas). 2. Įjunkite „Rodyti mano profilį paieškoje“. 3. Pridėkite vaizdo įrašus žemiau mygtuku „Pridėti projektą“.", d_setupBtn:"Užpildyti profilį", d_draftNotPublic:"Jūsų profilis dar neviešas. Atidarykite „Redaguoti profilį“ ir įjunkite „Rodyti mano profilį paieškoje“.", d_newMessageFrom:"Nauja žinutė nuo {name}", d_changesRequested:"Paprašyta pataisymų", d_approved:"Patvirtinta",
+         d_realEditors:"Specialistai", adminPanel:"Administratoriaus skydelis", rv_title:"Palikti atsiliepimą", rv_editTitle:"Redaguoti mano atsiliepimą", rv_intro:"Kaip sekėsi dirbti su {name}? Atsiliepimai vieši ir padeda kitiems klientams.", rv_textLabel:"Jūsų atsiliepimas", rv_placeholder:"Kas pavyko gerai? Ar samdytumėte dar kartą?", rv_submit:"Paskelbti atsiliepimą", rv_delete:"Ištrinti mano atsiliepimą", rv_thanks:"Ačiū — jūsų atsiliepimas paskelbtas.", rv_needChat:"Atsiliepimą galite palikti, kai būsite susirašinėję su šiuo editoriumi.", rv_leave:"Palikti atsiliepimą", rv_noneEditor:"Čia matysite savo klientų atsiliepimus.", dz_title:"Ištrinti paskyrą", dz_deleteBtn:"Ištrinti mano paskyrą", dz_deleteDesc:"Bus ištrinta paskyra ir viskas joje: profilis, vaizdo įrašai, užsakymai, žinutės ir atsiliepimai. To atšaukti negalima.", dz_typeWord:"Įveskite {w}, kad patvirtintumėte", dz_deleted:"Jūsų paskyra ištrinta.", ban_notice:"Jūsų paskyra sustabdyta. Galite naršyti, bet negalite rašyti, skelbti ar viešinti profilio.", d_setupTitle:"Susikurkite editoriaus profilį", d_setupSteps:"1. Užpildykite profilį (aprašymas, kaina, miestas). 2. Įjunkite „Rodyti mano profilį paieškoje“. 3. Pridėkite vaizdo įrašus žemiau mygtuku „Pridėti projektą“.", d_setupBtn:"Užpildyti profilį", d_draftNotPublic:"Jūsų profilis dar neviešas. Atidarykite „Redaguoti profilį“ ir įjunkite „Rodyti mano profilį paieškoje“.", d_newMessageFrom:"Nauja žinutė nuo {name}", d_changesRequested:"Paprašyta pataisymų", d_approved:"Patvirtinta",
          d_yourJobs:"Jūsų darbai", d_closeJob:"Uždaryti darbą", d_jobClosed:"Darbas uždarytas." },
     es:{ d_editProfile:"Editar perfil", d_profileSaved:"Perfil guardado.", d_displayName:"Nombre visible", d_roleLabel:"A qué te dedicas", d_city:"Ciudad", d_country:"País", d_languages:"Idiomas (separados por comas)",
          d_tools:"Herramientas y habilidades (separadas por comas)", d_bio:"Sobre ti", d_rate:"Tarifa", d_rateUnit:"Por", d_public:"Mostrar mi perfil en la búsqueda", d_publicHint:"Actívalo cuando tu perfil y portafolio estén listos.",
          d_respondsHours:"Suelo responder en (horas)", d_turnaround:"Plazo habitual (días)", d_revisions:"Rondas de revisión incluidas", d_exampleProfile:"Perfil de ejemplo: los editores reales aparecerán aquí al unirse.",
          d_exampleCantMessage:"Este es un perfil de ejemplo. Escribe a un profesional real.", d_noConversations:"Aún no hay conversaciones. Escribe a un profesional desde su perfil.", d_client:"Cliente",
          d_uploading:"Subiendo…", d_uploadFailed:"Error al subir. Prueba con un archivo más pequeño.", d_jobPosted:"Trabajo publicado.", d_noJobs:"Aún no hay trabajos. Sé el primero.", d_you:"Tú", d_examples:"Perfiles de ejemplo",
-         d_realEditors:"Profesionales", d_setupTitle:"Configura tu perfil de editor", d_setupSteps:"1. Rellena tu perfil (bio, precio, ciudad). 2. Activa \"Mostrar mi perfil en la búsqueda\". 3. Añade tus vídeos con \"Añadir proyecto\" abajo.", d_setupBtn:"Rellenar mi perfil", d_draftNotPublic:"Tu perfil aún no es público. Abre Editar perfil y activa \"Mostrar mi perfil en la búsqueda\".", d_newMessageFrom:"Nuevo mensaje de {name}", d_changesRequested:"Cambios solicitados", d_approved:"Aprobado",
+         d_realEditors:"Profesionales", adminPanel:"Panel de administración", rv_title:"Dejar una reseña", rv_editTitle:"Editar mi reseña", rv_intro:"¿Qué tal fue trabajar con {name}? Las reseñas son públicas y ayudan a otros clientes.", rv_textLabel:"Tu reseña", rv_placeholder:"¿Qué hizo bien? ¿Volverías a contratar?", rv_submit:"Publicar reseña", rv_delete:"Eliminar mi reseña", rv_thanks:"Gracias — tu reseña ya está publicada.", rv_needChat:"Puedes dejar una reseña después de haber hablado con este editor.", rv_leave:"Dejar una reseña", rv_noneEditor:"Las reseñas de tus clientes aparecerán aquí.", dz_title:"Eliminar cuenta", dz_deleteBtn:"Eliminar mi cuenta", dz_deleteDesc:"Esto elimina tu cuenta y todo su contenido: perfil, vídeos, trabajos, mensajes y reseñas. No se puede deshacer.", dz_typeWord:"Escribe {w} para confirmar", dz_deleted:"Tu cuenta ha sido eliminada.", ban_notice:"Tu cuenta está suspendida. Puedes navegar, pero no enviar mensajes, publicar ni mostrar tu perfil.", d_setupTitle:"Configura tu perfil de editor", d_setupSteps:"1. Rellena tu perfil (bio, precio, ciudad). 2. Activa \"Mostrar mi perfil en la búsqueda\". 3. Añade tus vídeos con \"Añadir proyecto\" abajo.", d_setupBtn:"Rellenar mi perfil", d_draftNotPublic:"Tu perfil aún no es público. Abre Editar perfil y activa \"Mostrar mi perfil en la búsqueda\".", d_newMessageFrom:"Nuevo mensaje de {name}", d_changesRequested:"Cambios solicitados", d_approved:"Aprobado",
          d_yourJobs:"Tus trabajos", d_closeJob:"Cerrar trabajo", d_jobClosed:"Trabajo cerrado." },
     pl:{ d_editProfile:"Edytuj profil", d_profileSaved:"Profil zapisany.", d_displayName:"Wyświetlana nazwa", d_roleLabel:"Czym się zajmujesz", d_city:"Miasto", d_country:"Kraj", d_languages:"Języki (oddzielone przecinkami)",
          d_tools:"Narzędzia i umiejętności (oddzielone przecinkami)", d_bio:"O Tobie", d_rate:"Stawka", d_rateUnit:"Za", d_public:"Pokazuj mój profil w wyszukiwaniu", d_publicHint:"Włącz, gdy profil i portfolio będą gotowe.",
          d_respondsHours:"Zwykle odpowiadam w ciągu (godzin)", d_turnaround:"Typowy czas realizacji (dni)", d_revisions:"Rundy poprawek w cenie", d_exampleProfile:"Profil przykładowy – prawdziwi montażyści pojawią się tutaj, gdy dołączą.",
          d_exampleCantMessage:"To profil przykładowy. Napisz do prawdziwego specjalisty.", d_noConversations:"Brak rozmów. Napisz do specjalisty z jego profilu.", d_client:"Klient",
          d_uploading:"Przesyłanie…", d_uploadFailed:"Przesyłanie nie powiodło się. Spróbuj mniejszy plik.", d_jobPosted:"Zlecenie opublikowane.", d_noJobs:"Brak zleceń. Bądź pierwszy.", d_you:"Ty", d_examples:"Profile przykładowe",
-         d_realEditors:"Specjaliści", d_setupTitle:"Skonfiguruj profil montażysty", d_setupSteps:"1. Uzupełnij profil (bio, cena, miasto). 2. Włącz „Pokazuj mój profil w wyszukiwaniu”. 3. Dodaj filmy przyciskiem „Dodaj projekt” poniżej.", d_setupBtn:"Uzupełnij profil", d_draftNotPublic:"Twój profil nie jest jeszcze publiczny. Otwórz Edytuj profil i włącz „Pokazuj mój profil w wyszukiwaniu”.", d_newMessageFrom:"Nowa wiadomość od {name}", d_changesRequested:"Poproszono o zmiany", d_approved:"Zatwierdzono",
+         d_realEditors:"Specjaliści", adminPanel:"Panel administratora", rv_title:"Dodaj opinię", rv_editTitle:"Edytuj moją opinię", rv_intro:"Jak układała się współpraca z {name}? Opinie są publiczne i pomagają innym klientom.", rv_textLabel:"Twoja opinia", rv_placeholder:"Co poszło dobrze? Czy zatrudnisz ponownie?", rv_submit:"Opublikuj opinię", rv_delete:"Usuń moją opinię", rv_thanks:"Dziękujemy — Twoja opinia jest już widoczna.", rv_needChat:"Opinię możesz dodać po rozmowie z tym montażystą.", rv_leave:"Dodaj opinię", rv_noneEditor:"Tutaj pojawią się opinie Twoich klientów.", dz_title:"Usuń konto", dz_deleteBtn:"Usuń moje konto", dz_deleteDesc:"To usuwa Twoje konto i wszystko w nim: profil, filmy, zlecenia, wiadomości i opinie. Nie można tego cofnąć.", dz_typeWord:"Wpisz {w}, aby potwierdzić", dz_deleted:"Twoje konto zostało usunięte.", ban_notice:"Twoje konto jest zawieszone. Możesz przeglądać, ale nie pisać, publikować ani pokazywać profilu.", d_setupTitle:"Skonfiguruj profil montażysty", d_setupSteps:"1. Uzupełnij profil (bio, cena, miasto). 2. Włącz „Pokazuj mój profil w wyszukiwaniu”. 3. Dodaj filmy przyciskiem „Dodaj projekt” poniżej.", d_setupBtn:"Uzupełnij profil", d_draftNotPublic:"Twój profil nie jest jeszcze publiczny. Otwórz Edytuj profil i włącz „Pokazuj mój profil w wyszukiwaniu”.", d_newMessageFrom:"Nowa wiadomość od {name}", d_changesRequested:"Poproszono o zmiany", d_approved:"Zatwierdzono",
          d_yourJobs:"Twoje zlecenia", d_closeJob:"Zamknij zlecenie", d_jobClosed:"Zlecenie zamknięte." },
     uk:{ d_editProfile:"Редагувати профіль", d_profileSaved:"Профіль збережено.", d_displayName:"Відображуване ім'я", d_roleLabel:"Чим ви займаєтеся", d_city:"Місто", d_country:"Країна", d_languages:"Мови (через кому)",
          d_tools:"Інструменти та навички (через кому)", d_bio:"Про себе", d_rate:"Ставка", d_rateUnit:"За", d_public:"Показувати профіль у пошуку", d_publicHint:"Увімкніть, коли профіль і портфоліо готові.",
          d_respondsHours:"Зазвичай відповідаю протягом (годин)", d_turnaround:"Типовий термін (днів)", d_revisions:"Раундів правок включено", d_exampleProfile:"Приклад профілю — справжні монтажери з'являться тут після реєстрації.",
          d_exampleCantMessage:"Це приклад профілю. Напишіть справжньому фахівцю.", d_noConversations:"Діалогів поки немає. Напишіть фахівцю з його профілю.", d_client:"Клієнт",
          d_uploading:"Завантаження…", d_uploadFailed:"Не вдалося завантажити. Спробуйте менший файл.", d_jobPosted:"Вакансію опубліковано.", d_noJobs:"Вакансій поки немає. Будьте першим.", d_you:"Ви", d_examples:"Приклади профілів",
-         d_realEditors:"Фахівці", d_setupTitle:"Налаштуйте профіль монтажера", d_setupSteps:"1. Заповніть профіль (про себе, ціна, місто). 2. Увімкніть «Показувати профіль у пошуку». 3. Додайте відео кнопкою «Додати проєкт» нижче.", d_setupBtn:"Заповнити профіль", d_draftNotPublic:"Ваш профіль ще не публічний. Відкрийте «Редагувати профіль» і увімкніть «Показувати профіль у пошуку».", d_newMessageFrom:"Нове повідомлення від {name}", d_changesRequested:"Запитано правки", d_approved:"Схвалено",
+         d_realEditors:"Фахівці", adminPanel:"Панель адміністратора", rv_title:"Залишити відгук", rv_editTitle:"Редагувати мій відгук", rv_intro:"Як пройшла робота з {name}? Відгуки публічні й допомагають іншим клієнтам.", rv_textLabel:"Ваш відгук", rv_placeholder:"Що вдалося добре? Чи звернулися б знову?", rv_submit:"Опублікувати відгук", rv_delete:"Видалити мій відгук", rv_thanks:"Дякуємо — ваш відгук опубліковано.", rv_needChat:"Відгук можна залишити після листування з цим фахівцем.", rv_leave:"Залишити відгук", rv_noneEditor:"Тут з’являться відгуки ваших клієнтів.", dz_title:"Видалити обліковий запис", dz_deleteBtn:"Видалити мій обліковий запис", dz_deleteDesc:"Буде видалено обліковий запис і все в ньому: профіль, відео, завдання, повідомлення та відгуки. Це неможливо скасувати.", dz_typeWord:"Введіть {w} для підтвердження", dz_deleted:"Ваш обліковий запис видалено.", ban_notice:"Ваш обліковий запис призупинено. Ви можете переглядати сайт, але не писати, публікувати чи показувати профіль.", d_setupTitle:"Налаштуйте профіль монтажера", d_setupSteps:"1. Заповніть профіль (про себе, ціна, місто). 2. Увімкніть «Показувати профіль у пошуку». 3. Додайте відео кнопкою «Додати проєкт» нижче.", d_setupBtn:"Заповнити профіль", d_draftNotPublic:"Ваш профіль ще не публічний. Відкрийте «Редагувати профіль» і увімкніть «Показувати профіль у пошуку».", d_newMessageFrom:"Нове повідомлення від {name}", d_changesRequested:"Запитано правки", d_approved:"Схвалено",
          d_yourJobs:"Ваші вакансії", d_closeJob:"Закрити вакансію", d_jobClosed:"Вакансію закрито." }
   };
   for(const code in T_DATA){ if(T[code]) Object.assign(T[code], T_DATA[code]); }
@@ -3992,6 +4015,7 @@
     const ids=(rows||[]).map(r=>r.id);
     let projects=[]; if(ids.length){ const { data } = await sb.from("projects").select("*").in("owner",ids); projects=data||[]; }
     (rows||[]).forEach(r=>{ PROFILES["u:"+r.id]=rowToProfile(r, projects.filter(p=>p.owner===r.id)); state.people[r.id]={name:r.display_name}; });
+    await loadReviewsFor(ids);
     renderRealCards();
   }
   async function loadOwnEditorProfile(){
@@ -4000,6 +4024,7 @@
     const { data:projects } = await sb.from("projects").select("*").eq("owner",myId());
     const base = row || { id:myId(), display_name:displayName(), role_label:"editor", city:"", country:"", languages:[], specializations:[], tools:[], bio:"", rate_amount:null, rate_unit:"hour", available:true, responds_hours:24, turnaround_days:7, revisions:2, is_public:false, created_at:new Date().toISOString(), _draft:!row };
     PROFILES[ownKey()]=rowToProfile(base, projects||[]); if(!row) PROFILES[ownKey()].draft=true;
+    await loadReviewsFor([myId()]); renderMyReviewsPanel();
     return PROFILES[ownKey()];
   }
 
@@ -4010,7 +4035,7 @@
     return `<article class="card profile-card real-card" data-search="${escapeHtml(search)}" data-person="${key}">
       <div class="price-badge"><div class="price"><span class="from">${t("from")}</span>${p.rate}</div><div class="price-unit">/ <span>${t(p.unitKey)}</span></div></div>
       <div class="card-body">
-        <div class="person-line"><div><div class="name">${escapeHtml(p.name)}</div><div class="muted">${escapeHtml(pLocation(p))}${p.langs?" · "+escapeHtml(p.langs):""}</div></div><div class="status">${p.available?t("statusAvailable"):""}</div></div>
+        <div class="person-line"><div><div class="name">${escapeHtml(p.name)}</div><div class="muted">${escapeHtml(pLocation(p))}${p.langs?" · "+escapeHtml(p.langs):""}</div></div><div class="status">${p.reviewCount?`<span style="color:var(--warn)">★</span> ${p.rating} (${p.reviewCount})<br>`:""}${p.available?t("statusAvailable"):""}</div></div>
         <div class="media"></div>
         <div class="tag-row">${specs}</div>
         <p class="bio">${escapeHtml((p.aboutText||"").slice(0,110))}${(p.aboutText||"").length>110?"…":""}</p>
@@ -4260,8 +4285,179 @@
     if(signedIn()){ await loadOwnEditorProfile(); await loadConversations(); }
   }
 
+  // =====================================================================
+  // Reviews (client -> editor), account deletion, bans, admin panel
+  // =====================================================================
+  function isAdmin(){ return REAL && !!(state.auth.profile && state.auth.profile.is_admin); }
+  function isBannedMe(){ return REAL && !!(state.auth.profile && state.auth.profile.banned); }
+  function starPick(n){ return [1,2,3,4,5].map(i=>`<button type="button" class="star-pick ${i<=n?"on":""}" data-star="${i}" aria-label="${i}">★</button>`).join(""); }
+  function monthYear(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{month:"short",year:"numeric"}); }catch(e){ return ""; } }
+
+  // ----- reviews -----
+  async function loadReviewsFor(ids){
+    if(!REAL || !ids.length) return;
+    const { data } = await sb.from("reviews").select("*").in("editor", ids).order("created_at",{ascending:false});
+    const rows=data||[];
+    const names={};
+    const clientIds=[...new Set(rows.map(r=>r.client))];
+    if(clientIds.length){ const { data:ps } = await sb.from("profiles").select("id,first_name").in("id",clientIds); (ps||[]).forEach(p=>names[p.id]=p.first_name||t("a_guest")); }
+    ids.forEach(id=>{
+      const p=PROFILES["u:"+id]; if(!p) return;
+      const mine=rows.filter(r=>r.editor===id);
+      p.reviews=mine.map(r=>({ id:r.id, client:r.client, who:names[r.client]||t("a_guest"), stars:r.stars, text:r.body||"", when:monthYear(r.created_at) }));
+      p.reviewCount=mine.length;
+      p.rating=mine.length ? (mine.reduce((s,r)=>s+r.stars,0)/mine.length).toFixed(1) : "–";
+    });
+  }
+  function myReviewOf(key){ const p=PROFILES[key]; if(!p||!myId()) return null; return (p.reviews||[]).find(r=>r.client===myId())||null; }
+  async function reviewModal(key){
+    if(!requireAuth()) return;
+    const p=PROFILES[key]; if(!p||!p.real) return;
+    const { data:okToReview } = await sb.rpc("can_review", { ed:p.id });
+    if(!okToReview){ toast(t("rv_needChat")); return; }
+    const existing=myReviewOf(key); let stars=existing?existing.stars:5;
+    openModal(existing?t("rv_editTitle"):t("rv_title"), `
+      <p class="muted" style="margin-bottom:10px">${fill(t("rv_intro"),{name:escapeHtml(p.name)})}</p>
+      <div class="star-row" id="rvStars">${starPick(stars)}</div>
+      <label style="margin-top:12px">${t("rv_textLabel")}</label><textarea id="rvText" style="min-height:100px" placeholder="${t("rv_placeholder")}">${escapeHtml(existing?existing.text:"")}</textarea>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="primary" id="rvSave">${existing?t("p_saveChanges"):t("rv_submit")}</button>${existing?`<button class="secondary" id="rvDelete">${t("rv_delete")}</button>`:""}</div>`, root=>{
+        $("#rvStars",root).addEventListener("click",e=>{ const b=e.target.closest(".star-pick"); if(!b) return; stars=+b.dataset.star; $("#rvStars",root).innerHTML=starPick(stars); });
+        $("#rvSave",root).addEventListener("click",async()=>{
+          const body=$("#rvText",root).value.trim();
+          const { error } = await sb.from("reviews").upsert({ editor:p.id, client:myId(), stars, body, updated_at:new Date().toISOString() }, { onConflict:"editor,client" });
+          if(error){ toast(t("a_error")); console.error(error); return; }
+          closeModal(); toast(t("rv_thanks")); await loadReviewsFor([p.id]); openProfile(key); renderRealCards(); setTimeout(()=>$$(".ep-tab").find(b=>b.dataset.tab==="reviews")?.click(),50);
+        });
+        $("#rvDelete",root)?.addEventListener("click",async()=>{
+          const { error } = await sb.from("reviews").delete().eq("editor",p.id).eq("client",myId());
+          if(error){ toast(t("a_error")); return; }
+          closeModal(); await loadReviewsFor([p.id]); openProfile(key); renderRealCards();
+        });
+      });
+  }
+  function reviewButtonHtml(key){
+    const p=PROFILES[key];
+    if(!REAL || !p || !p.real || isOwner(key)) return "";
+    const mine=myReviewOf(key);
+    return `<div style="margin-top:12px"><button class="secondary" data-review="${key}">${mine?t("rv_editTitle"):t("rv_leave")}</button></div>`;
+  }
+  function renderMyReviewsPanel(){
+    const host=$("#accountReviews"); if(!host||!REAL) return;
+    const p=ownKey()?PROFILES[ownKey()]:null;
+    if(!isEditor()||!p||!p.reviews||!p.reviews.length){ host.innerHTML=`<div class="empty-state small"><strong>${t("p_noReviewsTitle")}</strong><p class="muted">${t(isEditor()?"rv_noneEditor":"reviewsDesc")}</p></div>`; return; }
+    host.innerHTML=`<div class="muted" style="margin-bottom:8px"><span class="stars" style="color:var(--warn)">${stars(Math.round(+p.rating)||5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}</div>`+p.reviews.slice(0,3).map(r=>`<div class="review-item"><div class="review-top"><strong>${escapeHtml(r.who)}</strong><span class="muted"><span style="color:var(--warn)">${stars(r.stars)}</span> · ${r.when}</span></div><p>${escapeHtml(r.text)}</p></div>`).join("");
+  }
+
+  // ----- delete my account -----
+  function confirmTyped(title, desc, word, onOk){
+    openModal(title, `<p class="muted" style="margin-bottom:10px">${desc}</p><label>${fill(t("dz_typeWord"),{w:word})}</label><input id="dzWord" autocomplete="off"><button class="primary danger-btn" id="dzGo" style="margin-top:14px" disabled>${title}</button>`, root=>{
+      const i=$("#dzWord",root), b=$("#dzGo",root);
+      i.addEventListener("input",()=>b.disabled=i.value.trim().toUpperCase()!==word);
+      b.addEventListener("click",async()=>{ b.disabled=true; await onOk(); });
+    });
+  }
+  async function deleteMyAccount(){
+    if(!requireAuth()) return;
+    confirmTyped(t("dz_deleteBtn"), t("dz_deleteDesc"), "DELETE", async()=>{
+      const { data, error } = await sb.rpc("delete_my_account");
+      if(error || data!=="ok"){ toast(t("a_error")); console.error(error); return; }
+      closeModal(); await doSignOut(); toast(t("dz_deleted")); route("home");
+    });
+  }
+
+  // ----- banned notice -----
+  function applyBanUI(){
+    const b=$("#bannedBanner"); if(!b) return;
+    const on=isBannedMe();
+    b.classList.toggle("hidden",!on);
+    if(on){ const r=state.auth.profile.ban_reason; b.textContent=t("ban_notice")+(r?" — "+r:""); }
+  }
+
+  // ----- admin panel -----
+  const ADMIN={ tab:"users", users:[], invites:[], reviews:[] };
+  function adminGuard(){ if(!isAdmin()){ toast(t("a_error")); route("home"); return false; } return true; }
+  async function openAdmin(tab){
+    if(!adminGuard()) return;
+    if(tab) ADMIN.tab=tab;
+    route("admin");
+    $$(".admin-tab").forEach(b=>b.classList.toggle("active",b.dataset.atab===ADMIN.tab));
+    const host=$("#adminBody"); host.innerHTML=`<div class="muted">Loading…</div>`;
+    try{
+      if(ADMIN.tab==="users"){ const { data, error } = await sb.rpc("admin_list_users"); if(error) throw error; ADMIN.users=data||[]; renderAdminUsers(); }
+      else if(ADMIN.tab==="invites"){ const { data, error } = await sb.rpc("admin_list_invites"); if(error) throw error; ADMIN.invites=data||[]; renderAdminInvites(); }
+      else { const { data, error } = await sb.rpc("admin_list_reviews"); if(error) throw error; ADMIN.reviews=data||[]; renderAdminReviews(); }
+    }catch(e){ console.error(e); host.innerHTML=`<div class="notice danger">${escapeHtml(e.message||"Error")}</div>`; }
+  }
+  function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}); }catch(e){ return ""; } }
+  function renderAdminUsers(){
+    const host=$("#adminBody"); const q=(ADMIN.q||"").toLowerCase();
+    const rows=ADMIN.users.filter(u=>!q || [u.email,u.first_name,u.display_name].join(" ").toLowerCase().includes(q));
+    const stats=`<div class="admin-stats"><span><strong>${ADMIN.users.length}</strong> users</span><span><strong>${ADMIN.users.filter(u=>u.role==="editor").length}</strong> editors</span><span><strong>${ADMIN.users.filter(u=>u.is_public).length}</strong> public profiles</span><span><strong>${ADMIN.users.filter(u=>u.banned).length}</strong> banned</span></div>`;
+    host.innerHTML=stats+`<input id="adminSearch" placeholder="Search by name or e-mail" value="${escapeHtml(ADMIN.q||"")}" style="margin:10px 0 14px">`+
+      (rows.length?`<div class="admin-table">${rows.map(u=>`
+        <div class="admin-row ${u.banned?"is-banned":""}" data-uid="${u.id}">
+          <div class="admin-main">
+            <div><strong>${escapeHtml(u.display_name||u.first_name||"(no name)")}</strong> <span class="muted small">${escapeHtml(u.email||"")}</span></div>
+            <div class="muted small">${u.role==="editor"?"Editor":"Client"}${u.is_admin?" · admin":""}${u.is_public?" · public profile":""} · joined ${fmtDate(u.created_at)} · ${u.projects} videos · ${u.reviews} reviews${u.avg_stars?" · ★ "+u.avg_stars:""}${u.banned?` · <span class="danger-text">BANNED${u.ban_reason?": "+escapeHtml(u.ban_reason):""}</span>`:""}</div>
+          </div>
+          <div class="admin-actions">
+            ${u.role==="editor"&&u.is_public?`<button class="link-btn" data-aview="${u.id}">View profile</button>`:""}
+            ${u.role==="editor"?`<button class="link-btn" data-arole="client">Make client</button>`:`<button class="link-btn" data-arole="editor">Make editor</button>`}
+            ${u.id===myId()?`<span class="muted small">(you)</span>`:u.banned?`<button class="link-btn" data-aunban>Unban</button>`:`<button class="link-btn" data-aban>Ban</button>`}
+            ${u.id===myId()?"":`<button class="link-btn danger-text" data-adelete>Delete user</button>`}
+          </div>
+        </div>`).join("")}</div>`:`<div class="muted">No users match.</div>`);
+    $("#adminSearch").addEventListener("input",e=>{ ADMIN.q=e.target.value; renderAdminUsers(); $("#adminSearch").focus(); const v=$("#adminSearch"); v.setSelectionRange(v.value.length,v.value.length); });
+    $$(".admin-row").forEach(row=>{
+      const uid=row.dataset.uid; const u=ADMIN.users.find(x=>x.id===uid); const label=u.display_name||u.first_name||u.email;
+      row.querySelector("[data-aview]")?.addEventListener("click",async()=>{ await loadEditors(); if(PROFILES["u:"+uid]) openProfile("u:"+uid); else toast("Profile is not public"); });
+      row.querySelector("[data-arole]")?.addEventListener("click",async e=>{ const r=e.target.dataset.arole; const { data } = await sb.rpc("admin_set_role",{ target:uid, new_role:r }); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("Role updated"); openAdmin(); });
+      row.querySelector("[data-aban]")?.addEventListener("click",()=>{
+        openModal("Ban "+escapeHtml(label), `<p class="muted" style="margin-bottom:10px">A banned user stays registered but can no longer message, post jobs or show a profile. Their profile and videos are hidden immediately. You can unban later.</p><label>Reason (shown to the user)</label><input id="banReason" placeholder="e.g. spam, abusive messages"><button class="primary danger-btn" id="banGo" style="margin-top:14px">Ban user</button>`, root=>{
+          $("#banGo",root).addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_set_ban",{ target:uid, ban:true, reason:$("#banReason",root).value.trim()||null }); closeModal(); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("User banned"); openAdmin(); });
+        });
+      });
+      row.querySelector("[data-aunban]")?.addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_set_ban",{ target:uid, ban:false }); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("User unbanned"); openAdmin(); });
+      row.querySelector("[data-adelete]")?.addEventListener("click",()=>{
+        confirmTyped("Delete user", `This permanently deletes <strong>${escapeHtml(label)}</strong>: their account, editor profile, videos and uploaded files, jobs, messages, conversations and reviews. This cannot be undone.`, "DELETE", async()=>{
+          const { data, error } = await sb.rpc("admin_delete_user",{ target:uid }); closeModal();
+          if(error||data!=="ok"){ toast((error&&error.message)||data||t("a_error")); return; }
+          toast("User deleted"); delete PROFILES["u:"+uid]; openAdmin();
+        });
+      });
+    });
+  }
+  function renderAdminInvites(){
+    const host=$("#adminBody");
+    const free=ADMIN.invites.filter(i=>!i.used_at&&!i.used_by), used=ADMIN.invites.filter(i=>i.used_at||i.used_by);
+    host.innerHTML=`<div class="admin-stats"><span><strong>${free.length}</strong> unused</span><span><strong>${used.length}</strong> used</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px"><input id="invNote" placeholder="Note (who is this for?)" style="flex:1;min-width:200px"><button class="primary" id="invCreate">Create invite code</button></div>
+      <div class="admin-table">${ADMIN.invites.map(i=>`<div class="admin-row"><div class="admin-main"><div><strong>${escapeHtml(i.label||"(starter code)")}</strong> <span class="muted small">${escapeHtml(i.note||"")}</span></div><div class="muted small">created ${fmtDate(i.created_at)} · ${i.used_at||i.used_by?`used ${i.used_at?fmtDate(i.used_at):""} by ${escapeHtml(i.used_by_name||i.used_by_email||"deleted user")}`:"<span class='ok-text'>not used yet</span>"}</div></div><div class="admin-actions">${!i.used_at&&!i.used_by?`<button class="link-btn danger-text" data-idel="${i.code_hash}">Delete</button>`:""}</div></div>`).join("")||`<div class="muted">No invites.</div>`}</div>
+      <p class="muted small" style="margin-top:10px">Codes are stored hashed, so a full code is shown only once, at creation. Copy it and send it to the editor.</p>`;
+    $("#invCreate").addEventListener("click",async()=>{
+      const { data, error } = await sb.rpc("admin_create_invite",{ note:$("#invNote").value.trim()||null });
+      if(error||!data){ toast((error&&error.message)||t("a_error")); return; }
+      openModal("New invite code", `<p class="muted" style="margin-bottom:10px">Send this code to the editor. It works once.</p><div class="code-box" id="codeBox">${data}</div><button class="primary" id="copyCode" style="margin-top:12px">Copy code</button>`, root=>{
+        $("#copyCode",root).addEventListener("click",async()=>{ try{ await navigator.clipboard.writeText(data); toast("Copied"); }catch(e){ toast("Select and copy the code"); } });
+      });
+      openAdmin();
+    });
+    $$("[data-idel]").forEach(b=>b.addEventListener("click",async()=>{ const { data } = await sb.rpc("admin_delete_invite",{ hash:b.dataset.idel }); if(data!=="ok"){ toast(data||t("a_error")); return; } toast("Invite deleted"); openAdmin(); }));
+  }
+  function renderAdminReviews(){
+    const host=$("#adminBody");
+    host.innerHTML=`<div class="admin-stats"><span><strong>${ADMIN.reviews.length}</strong> reviews</span></div><div class="admin-table" style="margin-top:12px">${ADMIN.reviews.map(r=>`<div class="admin-row"><div class="admin-main"><div><span style="color:var(--warn)">${stars(r.stars)}</span> <strong>${escapeHtml(r.client_name||r.client_email||"?")}</strong> <span class="muted small">→ ${escapeHtml(r.editor_name||"?")} · ${fmtDate(r.created_at)}</span></div><div class="muted small">${escapeHtml(r.body||"(no text)")}</div></div><div class="admin-actions"><button class="link-btn danger-text" data-rdel="${r.id}">Delete</button></div></div>`).join("")||`<div class="muted">No reviews yet.</div>`}</div>`;
+    $$("[data-rdel]").forEach(b=>b.addEventListener("click",async()=>{ const { error } = await sb.from("reviews").delete().eq("id",b.dataset.rdel); if(error){ toast(error.message); return; } toast("Review deleted"); openAdmin(); }));
+  }
+  function initAdmin(){
+    $$("[data-admin-open]").forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); openAdmin(); }));
+    $$(".admin-tab").forEach(b=>b.addEventListener("click",()=>openAdmin(b.dataset.atab)));
+    $("#deleteAccountBtn")?.addEventListener("click",deleteMyAccount);
+    document.addEventListener("click",e=>{ const b=e.target.closest("[data-review]"); if(b) reviewModal(b.dataset.review); });
+  }
+
   function init(){
-    loadReco();
+    loadReco(); initAdmin();
     if(REAL) state.notifications=[];
     if(REAL) state.user.role="client";
     loadPortfolio();
