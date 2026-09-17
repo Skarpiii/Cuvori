@@ -69,6 +69,7 @@ export const db = {
   one: async (table, query) => { const rows = await sbFetch(`/${table}?${query}&limit=1`); return rows && rows[0] || null; },
   update: (table, query, patch) => sbFetch(`/${table}?${query}`, { method: "PATCH", body: JSON.stringify(patch) }),
   insert: (table, row) => sbFetch(`/${table}`, { method: "POST", body: JSON.stringify(row) }),
+  rpc: (fn, args) => sbFetch(`/rpc/${fn}`, { method: "POST", body: JSON.stringify(args || {}), prefer: "return=representation" }),
 };
 
 // Who is calling? Validates the user's Supabase access token.
