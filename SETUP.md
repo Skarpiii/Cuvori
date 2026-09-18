@@ -125,3 +125,24 @@ Editors set their own status, clients can filter by it, and it expires so it can
 4. Ordinary users still cannot start a chat with you out of the blue — only a report opens that door. That is deliberate: it keeps your inbox usable while leaving the complaint route open.
 5. **The first account that ever signed up is the administrator.** Check in Supabase → Table editor → `profiles` that `is_admin` is true on your own row and nobody else's.
 6. This covers reports made on the site. Mail sent directly to the contact address still arrives in Gmail as normal — the site cannot read your mailbox.
+
+## Part 11 — Professions as data (video editors were the first; the rest come without a rewrite)
+
+Cuvori is no longer hard-wired around "editor". A profession is a row in `professions`, its filters are rows in `filters` and `profession_filters`, and what a person offers is a row per profession in `services` — with its own price and its own answers. Existing editors, videographers and photographers were copied into services by `migrate_v15.sql`; nothing was deleted, and `editor_profiles` still mirrors the main service's price and specialisms so everything old keeps working.
+
+1. Run, in this order, in the Supabase SQL editor: `supabase/schema_v15.sql`, then `supabase/professions_seed.sql`, then `supabase/migrate_v15.sql`, then `supabase/schema_v16.sql`. The first one also keeps a copy of `editor_profiles`, `projects` and `jobs` inside the database as `backup_v15_*` tables — drop those once you are sure, not before.
+2. **What clients see.** The home page has a profession selector. A profession is offered to clients only when it is *open* AND at least one real, public professional offers it. Choosing one changes the chip row and "View all filters" to that profession's set — video editors get specialities, software and turnaround; photographers get shoot types, studio/on-location, travel radius and editing-included; nothing from one ever appears on the other. Filtering happens in the database (`search_professionals()`), so it stays correct and fast as people arrive.
+3. **What professionals see.** Edit profile has a Services block. A new professional picks their profession and only that profession's questions appear. "Add" offers a second profession with its own price; an old combined editor-photographer account simply shows two services.
+4. **Admin panel → Professions.** Open or close a profession for joining, mark it invite-only, reorder, attach or detach filters, mark a filter primary (chip row) or secondary (behind "View all filters"), add options — all without touching code. Closed professions (Motion designer, Copywriter, Web developer are seeded closed) can be opened the moment you want to recruit into them; they stay invisible to clients until someone real is in them.
+5. **Adding languages to something you added in the admin panel.** Admin-added names and options carry an English label; the other six languages fall back to English until you add them. Seeded content is fully translated. To translate admin-added labels properly, edit `professions/seed.js` (or the `tr-*.json` files beside it), run `node tools/gen-professions.js`, and re-run `professions_seed.sql` — it never overwrites options an admin has touched.
+6. **Jobs** carry `profession_slug`; the Post-a-job form asks for the profession first and shows that profession's speciality list. Old jobs were given their profession from the legacy role.
+7. Everything else — accounts, messaging, contracts, reviews, reports, invites — is shared across professions and was not changed.
+
+## Part 12 — Real, demo and hidden accounts
+
+Every account has a visibility: **Real / public**, **Demo / test**, or **Hidden**. Demo and hidden accounts keep working for their owner and for admins, but never appear in search, browse pages, profession counts, ratings or job lists, and a demo account can never make an empty profession look populated.
+
+1. `schema_v16.sql` (run in Part 11) adds it. Existing accounts start as Real / public.
+2. **Admin panel → Users** has the switch per account. Mark every account you created for testing as Demo / test.
+3. The sample profiles that used to appear when the site had no professionals are gone from the live site: an empty marketplace now says so honestly and invites people to join. (Sample cards still appear only when the page runs without a database, for development.)
+4. A review written from a demo account does not count towards anyone's public rating.
