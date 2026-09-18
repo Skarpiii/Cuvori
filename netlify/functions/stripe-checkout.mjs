@@ -31,7 +31,7 @@ export default safe(async (req) => {
     cancel_url: `${SITE_URL}/#contracts?cancelled=${c.id}`,
     line_items: [
       { quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: String(c.title || "Contract").slice(0, 200) || "Contract" } } },
-      { quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing" } } },
+      { quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Cuvori protected payment fee" } } },
     ],
     payment_intent_data: { transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client } },
     metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee) },
