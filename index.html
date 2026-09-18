@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-rLic30ljDHWwO022JYGd60UezUTXtGos9EqRZRiOG3o=' 'sha256-NymAsb59PhP1g7ByaDbuZ2Zqw5qHpI/2+Rb7F/95HBk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-rLic30ljDHWwO022JYGd60UezUTXtGos9EqRZRiOG3o=' 'sha256-fnJVQiq966m0QalUuAoOWQV5XDdeTFDBi2AaE0wdTMk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -5137,13 +5137,14 @@
     $$(".job-filter:checked").forEach(c=>{(active[c.dataset.key]=active[c.dataset.key]||[]).push(c.value);});
     let n=0;
     $$("#jobList .job[data-job]").forEach(j=>{
+      if(j.classList.contains("demo-hidden")) return;   // sample jobs are not counted once real jobs are in use
       const text=(j.dataset.job+" "+j.textContent).toLowerCase();
       let ok=!q || text.includes(q);
       for(const k in active){ if(ok && !active[k].includes(j.dataset[k])) ok=false; }
       j.classList.toggle("hidden",!ok); if(ok) n++;
     });
     $("#jobCount").textContent=t(n===1?"p_jobCountOne":"p_jobCountOther").replace("{n}",n);
-    $("#jobsEmpty").classList.toggle("hidden",n>0);
+    $("#jobsEmpty").classList.toggle("hidden",n>0 || !!$("#jobsEmptyReal"));
   }
 
   function updateJobPreview(){
