@@ -47,6 +47,7 @@ create table if not exists public.filters (
   min_value    numeric, max_value numeric, unit text,
   labels       jsonb not null default '{}'::jsonb,
   admin_edited boolean not null default false,          -- once an admin touches options, the seed stops overwriting them
+  allow_custom boolean not null default false,          -- professionals may add their own entries beside the options (v17)
   sort_order   int not null default 100
 );
 create table if not exists public.profession_filters (
@@ -57,6 +58,7 @@ create table if not exists public.profession_filters (
   profile_field   boolean not null default true,        -- asked for in Edit profile
   primary key (profession_slug, filter_key)
 );
+alter table public.filters add column if not exists allow_custom boolean not null default false;
 create table if not exists public.price_units (
   key    text primary key,                              -- hour, day, project, session, word
   labels jsonb not null default '{}'::jsonb
