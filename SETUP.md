@@ -160,3 +160,25 @@ There is no separate contract to draft, download or sign. In a chat either side 
 5. **Reports.** A progress report can be the delivery: the freelancer ticks "this is the delivery" (or picks the milestone it delivers). The client opens it from the chat or the bell and sees **Approve & release €X** or **Request changes** — a button that moves money always says so. Requesting changes through the report counts a revision round on the Order and stops the release clock inside the paid rounds.
 6. **Cancellation and disputes.** Before funding either side can cancel. After funding the freelancer can cancel and refund everything still held; the client's route is a dispute, which stops every automatic release until you decide in Admin panel → Orders & disputes (release, refund or split of what is still held — money already released for approved milestones stays released). Card chargebacks and refunds made outside Cuvori also put the Order into dispute.
 7. **Where things are.** Orders page: `#orders` (the old `#contracts` address still works). Code: `orders-ui.js` (screens), `orders-i18n.js` (7 languages), `netlify/functions/stripe-*.mjs` (`stripe-cancel.mjs` is new; `stripe-release.mjs` takes a `milestone_id`), `supabase/schema_v18.sql`. Tests: `tests/db/30_attacks.sql` (v18 section runs the fixed-price, milestone and direct flows end to end), `realtest.js` (every scenario from the brief in the browser), `tests/xss/proof5.js`, `tests/attack-functions.mjs`.
+
+## Part 14 — Sign in with Google or Facebook
+
+Visitors who press **Message** or **Request quote** on a profile see one pop-up: continue with Google, continue with Facebook, or sign up with e-mail. The buttons already call Supabase; they work the moment the providers are switched on there. Until then a click says “Google sign-in is not switched on yet — please use e-mail”.
+
+1. Run `supabase/schema_v19.sql` (after v18): accounts created by Google/Facebook get their first name from what the provider sends.
+2. **Google.** Google Cloud Console → APIs & Services → OAuth consent screen (External, app name Cuvori, your e-mail) → Credentials → **Create credentials → OAuth client ID → Web application**. Authorised JavaScript origins: `https://cuvori.io`. Authorised redirect URI: `https://tnxujwlfatcvxzevllfr.supabase.co/auth/v1/callback`. Copy the client ID and secret.
+3. **Facebook.** developers.facebook.com → My Apps → Create app (Consumer) → add **Facebook Login** → Settings → Valid OAuth redirect URIs: the same Supabase callback address. Copy the App ID and App secret. The app has to be switched to Live mode (Meta may ask for a privacy-policy link: `https://cuvori.io/#privacy`).
+4. Supabase → **Authentication → Providers** → Google: paste client ID + secret, enable. Facebook: paste App ID + secret, enable. Then **Authentication → URL configuration**: Site URL `https://cuvori.io`, add `https://cuvori.io/*` to the redirect list.
+5. New accounts made this way are clients; they are asked to agree to the rules on first sign-in, like everyone else. Nothing else changes: an invite still turns an account into a professional.
+
+## Part 15 — Switching protected payments on (checklist)
+
+Everything in the code is ready and tested; what is left needs your accounts and keys, which nobody else should touch. In this order:
+
+1. **Stripe account** (stripe.com, country Germany, individual is fine). Finish identity and bank checks. Settings → Connect → get started → **Express**. Developers → API keys: copy the **secret key** (`sk_test_…` while testing).
+2. **Netlify site** for the payment functions (Part 3; the page can stay on GitHub Pages). Site configuration → Environment variables: `STRIPE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project settings → API), `SITE_URL` = `https://cuvori.io`. Trigger a deploy.
+3. **Webhook.** Stripe → Developers → Webhooks → Add endpoint: `https://<your-site>.netlify.app/.netlify/functions/stripe-webhook`, events `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `account.updated`, `charge.refunded`, `charge.dispute.created`. Copy the signing secret into Netlify as `STRIPE_WEBHOOK_SECRET`; deploy again.
+4. **Point the page at the functions:** in `index.html`, `window.CUVORI_CONFIG` gets `functionsUrl: "https://<your-site>.netlify.app"`. Admin panel → Payment costs then shows “Protected payments: ON”.
+5. **Test in test mode**: a professional connects Stripe in Settings → Payout details (Stripe's test data), a client funds an Order with card 4242 4242 4242 4242, delivers, approves — watch the transfer in the Stripe dashboard. Then swap the two Stripe keys for live ones and deploy once more.
+6. Before real money: a lawyer's word on Part 7, items 1 and 2 (holding funds; who carries the processing cost for EU consumers).
+

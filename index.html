@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-t85gzhQqDVfH2VpG9PqfCcBXAlVIkqyErhxpPdCaWZE=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-CIsI6kdWxbpyCPGfsp/ZCg79hFMQE+cXU67lSmp5lpk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -871,7 +871,7 @@
     .job-content{flex:1 1 auto}
     .job-list{grid-template-columns:minmax(0,1fr)}
     .jobs-layout > *{min-width:0}
-    @media(max-width:1500px){ .quick-flags{display:none} }
+    @media(max-width:1180px){ .quick-flags{display:none} }   /* the flags stay on desktop; on tablets and phones the language button next to Sign in takes over */
     @media(max-width:1280px){ .nav-btn{padding:8px 8px;font-size:14px} .topbar{gap:10px} }
     @media(max-width:1180px){ .nav{display:none} .menu-btn{display:grid} .mobile-iconbar{display:flex} }
     @media(max-width:980px){ .header-actions #createAccountBtn{display:none} }
@@ -1369,7 +1369,7 @@
         </div>
         <div class="panel auth-card">
           <div class="seg small" id="authSeg"><button class="seg-btn active" data-auth="signup" data-i18n="createAccount">Create account</button><button class="seg-btn" data-auth="signin" data-i18n="p_signIn">Sign in</button></div>
-          <div class="two-col" style="gap:8px;margin:16px 0 4px"><button class="secondary" data-auth-social data-i18n="continueGoogle">Continue with Google</button><button class="secondary" data-auth-social data-i18n="continueFacebook">Continue with Facebook</button></div>
+          <div class="two-col" style="gap:8px;margin:16px 0 4px"><button class="secondary" data-auth-social="google" data-i18n="continueGoogle">Continue with Google</button><button class="secondary" data-auth-social="facebook" data-i18n="continueFacebook">Continue with Facebook</button></div>
           <div class="divider"><span data-i18n="orDivider">or</span></div>
           <div data-auth-pane="signup">
             <div class="form-grid"><div><label data-i18n="firstNameLabel">First name</label><input id="suName" maxlength="80" autocomplete="given-name"></div><div><label data-i18n="emailLabel">Email</label><input id="suEmail" type="email" autocomplete="email"></div><div style="grid-column:1/-1"><label data-i18n="passwordLabel">Password</label><input id="suPass" type="password" autocomplete="new-password"></div></div>
@@ -3710,6 +3710,7 @@
   function openWork(name, idx){ openViewer(name, idx); }
 
   function requestQuote(name){
+    if(!signedIn()){ joinPrompt(name); return; }
     if(!requireAuth()) return;
     const dn=displayOf(name);
     openModal(fill(t("quoteTitle"),{name:dn}), `
@@ -3749,7 +3750,7 @@
   }
 
   function openChat(name){
-    if(!signedIn()){ toast(t("a_signInToMessage")); route("create-account"); return; }
+    if(!signedIn()){ joinPrompt(name); return; }
     if(REAL) return openChatReal(name);
     if(!isDesktopDock()) sidebar(false);
     if(state.openChats.has(name)){
@@ -4064,7 +4065,41 @@
   state.auth = { session:null, profile:null };
 
   function signedIn(){ return REAL ? !!state.auth.session : true; }
-  function requireAuth(){ if(!signedIn()){ toast(t("a_needSignIn")); route("create-account"); return false; } if(isBannedMe()){ toast(t("ban_notice")); return false; } return true; }
+  function requireAuth(){ if(!signedIn()){ joinPrompt(null); return false; } if(isBannedMe()){ toast(t("ban_notice")); return false; } return true; }
+  // Visitors can look; to message, order or post they need a free account. One pop-up, three ways in.
+  function joinPrompt(person){
+    const who=person?displayOf(person):"";
+    try{ localStorage.setItem("cuvori_afterAuth", JSON.stringify(person?{chat:person}:{})); }catch(e){}
+    openModal(who?fill(t("jp_titleName"),{name:who}):t("jp_title"), `
+      <p class="muted" style="margin-bottom:12px">${escapeHtml(t("jp_desc"))}</p>
+      <div style="display:grid;gap:8px">
+        <button class="secondary" data-jp-social="google">${escapeHtml(t("continueGoogle"))}</button>
+        <button class="secondary" data-jp-social="facebook">${escapeHtml(t("continueFacebook"))}</button>
+        <button class="primary" id="jpEmail">${escapeHtml(t("jp_email"))}</button>
+      </div>
+      <p class="muted small" style="margin:12px 0 0">${escapeHtml(t("jp_have"))} <button class="link-btn" id="jpSignIn">${escapeHtml(t("p_signIn"))}</button></p>
+      <p class="muted small" style="margin-top:8px">${escapeHtml(t("jp_free"))}</p>`, root=>{
+        $$("[data-jp-social]",root).forEach(b=>b.addEventListener("click",()=>socialSignIn(b.dataset.jpSocial)));
+        $("#jpEmail",root).addEventListener("click",()=>{ closeModal(); route("create-account"); setTimeout(()=>$('#authSeg [data-auth="signup"]')?.click(),30); });
+        $("#jpSignIn",root).addEventListener("click",()=>{ closeModal(); route("create-account"); setTimeout(()=>$('#authSeg [data-auth="signin"]')?.click(),30); });
+      });
+  }
+  async function socialSignIn(provider){
+    if(!["google","facebook"].includes(provider)) return;
+    if(!REAL){ toast(t("p_welcomeToast")); closeModal(); route("account"); return; }
+    try{
+      const { data, error } = await sb.auth.signInWithOAuth({ provider, options:{ redirectTo: location.origin+location.pathname } });
+      if(error) throw error;
+      if(data && data.url) location.href=data.url;
+    }catch(e){ const m=String(e&&e.message||""); toast(/not enabled|unsupported provider|disabled/i.test(m)?fill(t("jp_notOn"),{p:provider==="google"?"Google":"Facebook"}):errText(e)); }
+  }
+  // after a sign-in (e-mail or Google/Facebook) go back to what the visitor wanted: the chat they tried to open
+  function afterAuthResume(){
+    let a=null; try{ a=JSON.parse(localStorage.getItem("cuvori_afterAuth")||"null"); localStorage.removeItem("cuvori_afterAuth"); }catch(e){}
+    if(!a||!a.chat||!signedIn()) return;
+    const key=a.chat; const open=()=>{ if(/^u:/.test(key)) openChat(key); };
+    if(REAL){ setTimeout(open, 900); } else open();
+  }
   function displayName(){ const p=state.auth.profile; return (p && (p.first_name||p.email)) || (REAL ? t("a_guest") : "Egidijus"); }
   function initials(){ const n=displayName(); return n.split(/[\s@.]+/).map(x=>x.replace(/[^\p{L}\p{N}]/gu,"")).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join("") || "C"; }
 
@@ -4207,7 +4242,7 @@
   function initAuth(){
     $$("[data-auth-signup]").forEach(b=>b.addEventListener("click",doSignUp));
     $$("[data-auth-signin]").forEach(b=>b.addEventListener("click",doSignIn));
-    $$("[data-auth-social]").forEach(b=>b.addEventListener("click",()=>{ if(REAL) toast(t("a_comingSoon")); else { toast(t("p_welcomeToast")); route("account"); } }));
+    $$("[data-auth-social]").forEach(b=>b.addEventListener("click",()=>socialSignIn(b.dataset.authSocial||"google")));
     ["#signOutBtn","#signOutBtnM","#signOutBtnH"].forEach(s=>$(s)?.addEventListener("click",doSignOut));
     $("#suPass").addEventListener("keydown",e=>{ if(e.key==="Enter") doSignUp(); });
     $("#siPass").addEventListener("keydown",e=>{ if(e.key==="Enter") doSignIn(); });
@@ -4222,7 +4257,7 @@
       sb.auth.onAuthStateChange(async (event, session)=>{
         state.auth.session=session;
         if(event==="PASSWORD_RECOVERY"){ await loadProfile(); applyAuthUI(); newPasswordModal(); return; }
-        if(event==="SIGNED_IN"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); if(event!=="TOKEN_REFRESHED") loadRealData(); }
+        if(event==="SIGNED_IN"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); if(event!=="TOKEN_REFRESHED") loadRealData(); if(event==="SIGNED_IN"){ afterAuthResume(); if(typeof maybeAskRules==="function") maybeAskRules(); } }
       });
     } else {
       $("#demoBanner")?.classList.remove("hidden");
@@ -4357,7 +4392,7 @@
   for(const code in T_PROF){ if(T[code]) Object.assign(T[code], T_PROF[code]); }
   // ---------- Orders: the Order is the contract (7 languages) ----------
   const T_ORD = {
-    en:{ contracts:"Orders", es_released:"Money released to the freelancer.", contractsSubtitle:"The Order is the agreement: agree in chat, both accept, the client funds it, work begins.", c_btn:"Order", c_contract:"Order", c_openBtn:"Open Order",
+    en:{ contracts:"Orders", ra_firstTitle:"Welcome — one thing before you start", ra_firstBody:"Please read the Cuvori rules and the privacy notice and confirm that you agree to them.", jp_title:"Create a free account", jp_titleName:"Create a free account to message {name}", jp_desc:"Messaging, Orders and reviews need an account so both sides know who they are dealing with. It takes a minute.", jp_email:"Sign up with e-mail", jp_have:"Already have an account?", jp_free:"Free for clients. Cuvori takes no commission.", jp_notOn:"{p} sign-in is not switched on yet — please use e-mail.", es_released:"Money released to the freelancer.", contractsSubtitle:"The Order is the agreement: agree in chat, both accept, the client funds it, work begins.", c_btn:"Order", c_contract:"Order", c_openBtn:"Open Order",
       c_signInToSee:"Sign in to see your Orders.", c_howToStart:"Open a conversation and press “Order” to create one.", p_noContractsTitle:"No Orders yet", p_noContractsDesc:"Orders you create or receive will show up here.",
       c_alreadyActive:"There is already an open Order in this conversation. Finish or cancel it first.",
       p_cs1:"Agree in chat", p_cs1d:"Discuss the project, then either side creates the Order: scope, deliverables, deadline, price.", p_cs2:"Both accept", p_cs2d:"Client and freelancer accept the same version. That Order is the agreement.",
@@ -4398,7 +4433,7 @@
       c_ev_approve:"Approved — {amt} released", c_ev_auto_release:"{amt} released automatically", c_ev_resolved_release:"Cuvori decision: released to the freelancer", c_ev_resolved_refund:"Cuvori decision: refunded to the client", c_ev_resolved_split:"Cuvori decision: split",
       c_ev_milestone_submitted:"Milestone submitted — {label}", c_ev_milestone_approved:"{amt} milestone approved — {label}", c_ev_amendment_proposed:"Amendment proposed", c_ev_amendment_accepted:"Amendment accepted", c_ev_amendment_declined:"Amendment declined", c_ev_cancel_refund:"Cancelled — {amt} refunded",
       rp_msLabel:"This report delivers a milestone", rp_msNone:"— just a progress update", rp_finalEscrow:"This is the delivery — ask the client to approve the work and release {amt}", rp_finalDirect:"This is the delivery — ask the client to approve the work", d_newVersionFrom:"New version to review from {name}", rp_approveRelease:"Approve & release {amt}", rp_linkedOrder:"This report belongs to the Order “{title}”." },
-    de:{ contracts:"Aufträge", es_released:"Geld an den Freelancer freigegeben.", contractsSubtitle:"Der Auftrag ist die Vereinbarung: im Chat einigen, beide annehmen, der Kunde zahlt ein, die Arbeit beginnt.", c_btn:"Auftrag", c_contract:"Auftrag", c_openBtn:"Auftrag öffnen",
+    de:{ contracts:"Aufträge", ra_firstTitle:"Willkommen — eine Sache vor dem Start", ra_firstBody:"Bitte lies die Cuvori-Regeln und die Datenschutzhinweise und bestätige, dass du ihnen zustimmst.", jp_title:"Kostenloses Konto anlegen", jp_titleName:"Kostenloses Konto anlegen, um {name} zu schreiben", jp_desc:"Nachrichten, Aufträge und Bewertungen brauchen ein Konto, damit beide Seiten wissen, mit wem sie es zu tun haben. Das dauert eine Minute.", jp_email:"Mit E-Mail registrieren", jp_have:"Schon ein Konto?", jp_free:"Kostenlos für Kunden. Cuvori nimmt keine Provision.", jp_notOn:"Die Anmeldung mit {p} ist noch nicht eingeschaltet — bitte E-Mail verwenden.", es_released:"Geld an den Freelancer freigegeben.", contractsSubtitle:"Der Auftrag ist die Vereinbarung: im Chat einigen, beide annehmen, der Kunde zahlt ein, die Arbeit beginnt.", c_btn:"Auftrag", c_contract:"Auftrag", c_openBtn:"Auftrag öffnen",
       c_signInToSee:"Melde dich an, um deine Aufträge zu sehen.", c_howToStart:"Öffne eine Unterhaltung und drücke „Auftrag“, um einen anzulegen.", p_noContractsTitle:"Noch keine Aufträge", p_noContractsDesc:"Aufträge, die du anlegst oder erhältst, erscheinen hier.",
       c_alreadyActive:"In dieser Unterhaltung gibt es bereits einen offenen Auftrag. Schließe ihn zuerst ab oder brich ihn ab.",
       p_cs1:"Im Chat einigen", p_cs1d:"Das Projekt besprechen, dann legt eine Seite den Auftrag an: Umfang, Ergebnisse, Frist, Preis.", p_cs2:"Beide nehmen an", p_cs2d:"Kunde und Freelancer nehmen dieselbe Version an. Dieser Auftrag ist die Vereinbarung.",
@@ -4439,7 +4474,7 @@
       c_ev_approve:"Abgenommen — {amt} freigegeben", c_ev_auto_release:"{amt} automatisch freigegeben", c_ev_resolved_release:"Cuvori-Entscheidung: an den Freelancer freigegeben", c_ev_resolved_refund:"Cuvori-Entscheidung: dem Kunden erstattet", c_ev_resolved_split:"Cuvori-Entscheidung: aufgeteilt",
       c_ev_milestone_submitted:"Meilenstein eingereicht — {label}", c_ev_milestone_approved:"Meilenstein über {amt} abgenommen — {label}", c_ev_amendment_proposed:"Änderung vorgeschlagen", c_ev_amendment_accepted:"Änderung angenommen", c_ev_amendment_declined:"Änderung abgelehnt", c_ev_cancel_refund:"Abgebrochen — {amt} erstattet",
       rp_msLabel:"Dieser Bericht liefert einen Meilenstein", rp_msNone:"— nur ein Zwischenstand", rp_finalEscrow:"Das ist die Lieferung — den Kunden bitten, die Arbeit abzunehmen und {amt} freizugeben", rp_finalDirect:"Das ist die Lieferung — den Kunden bitten, die Arbeit abzunehmen", d_newVersionFrom:"Neue Version zur Prüfung von {name}", rp_approveRelease:"Abnehmen & {amt} freigeben", rp_linkedOrder:"Dieser Bericht gehört zum Auftrag „{title}“." },
-    lt:{ contracts:"Užsakymai", es_released:"Pinigai išmokėti specialistui.", contractsSubtitle:"Užsakymas yra susitarimas: susitarkite pokalbyje, abu patvirtinkite, klientas apmoka, darbas prasideda.", c_btn:"Užsakymas", c_contract:"Užsakymas", c_openBtn:"Atidaryti užsakymą",
+    lt:{ contracts:"Užsakymai", ra_firstTitle:"Sveiki — vienas dalykas prieš pradedant", ra_firstBody:"Perskaitykite Cuvori taisykles ir privatumo pranešimą ir patvirtinkite, kad su jais sutinkate.", jp_title:"Sukurti nemokamą paskyrą", jp_titleName:"Sukurkite nemokamą paskyrą, kad parašytumėte {name}", jp_desc:"Žinutėms, užsakymams ir atsiliepimams reikia paskyros, kad abi pusės žinotų, su kuo turi reikalą. Tai užtrunka minutę.", jp_email:"Registruotis el. paštu", jp_have:"Jau turite paskyrą?", jp_free:"Klientams nemokama. Cuvori neima komisinio.", jp_notOn:"Prisijungimas per {p} dar neįjungtas — naudokite el. paštą.", es_released:"Pinigai išmokėti specialistui.", contractsSubtitle:"Užsakymas yra susitarimas: susitarkite pokalbyje, abu patvirtinkite, klientas apmoka, darbas prasideda.", c_btn:"Užsakymas", c_contract:"Užsakymas", c_openBtn:"Atidaryti užsakymą",
       c_signInToSee:"Prisijunkite, kad matytumėte savo užsakymus.", c_howToStart:"Atidarykite pokalbį ir paspauskite „Užsakymas“, kad jį sukurtumėte.", p_noContractsTitle:"Užsakymų dar nėra", p_noContractsDesc:"Jūsų sukurti ar gauti užsakymai atsiras čia.",
       c_alreadyActive:"Šiame pokalbyje jau yra atviras užsakymas. Pirmiausia jį užbaikite arba atšaukite.",
       p_cs1:"Susitarkite pokalbyje", p_cs1d:"Aptarkite projektą, tada bet kuri pusė sukuria užsakymą: apimtį, rezultatus, terminą, kainą.", p_cs2:"Abu patvirtina", p_cs2d:"Klientas ir specialistas patvirtina tą pačią versiją. Tas užsakymas yra susitarimas.",
@@ -4480,7 +4515,7 @@
       c_ev_approve:"Patvirtinta — {amt} išmokėta", c_ev_auto_release:"{amt} išmokėta automatiškai", c_ev_resolved_release:"Cuvori sprendimas: išmokėta specialistui", c_ev_resolved_refund:"Cuvori sprendimas: grąžinta klientui", c_ev_resolved_split:"Cuvori sprendimas: padalyta",
       c_ev_milestone_submitted:"Etapas pateiktas — {label}", c_ev_milestone_approved:"Etapas {amt} patvirtintas — {label}", c_ev_amendment_proposed:"Pasiūlytas pakeitimas", c_ev_amendment_accepted:"Pakeitimas priimtas", c_ev_amendment_declined:"Pakeitimas atmestas", c_ev_cancel_refund:"Atšaukta — {amt} grąžinta",
       rp_msLabel:"Ši ataskaita pristato etapą", rp_msNone:"— tik pažangos atnaujinimas", rp_finalEscrow:"Tai pristatymas — paprašyti kliento patvirtinti darbą ir išmokėti {amt}", rp_finalDirect:"Tai pristatymas — paprašyti kliento patvirtinti darbą", d_newVersionFrom:"Nauja versija peržiūrai nuo {name}", rp_approveRelease:"Patvirtinti ir išmokėti {amt}", rp_linkedOrder:"Ši ataskaita priklauso užsakymui „{title}“." },
-    pl:{ contracts:"Zlecenia", es_released:"Pieniądze wypłacone freelancerowi.", contractsSubtitle:"Zlecenie jest umową: uzgodnijcie na czacie, oboje zaakceptujcie, klient wpłaca, praca rusza.", c_btn:"Zlecenie", c_contract:"Zlecenie", c_openBtn:"Otwórz zlecenie",
+    pl:{ contracts:"Zlecenia", ra_firstTitle:"Witaj — jedna rzecz na początek", ra_firstBody:"Przeczytaj zasady Cuvori i informację o prywatności i potwierdź, że się z nimi zgadzasz.", jp_title:"Załóż bezpłatne konto", jp_titleName:"Załóż bezpłatne konto, aby napisać do {name}", jp_desc:"Wiadomości, zlecenia i opinie wymagają konta, żeby obie strony wiedziały, z kim mają do czynienia. To zajmuje minutę.", jp_email:"Zarejestruj się e-mailem", jp_have:"Masz już konto?", jp_free:"Bezpłatne dla klientów. Cuvori nie pobiera prowizji.", jp_notOn:"Logowanie przez {p} nie jest jeszcze włączone — użyj e-maila.", es_released:"Pieniądze wypłacone freelancerowi.", contractsSubtitle:"Zlecenie jest umową: uzgodnijcie na czacie, oboje zaakceptujcie, klient wpłaca, praca rusza.", c_btn:"Zlecenie", c_contract:"Zlecenie", c_openBtn:"Otwórz zlecenie",
       c_signInToSee:"Zaloguj się, aby zobaczyć swoje zlecenia.", c_howToStart:"Otwórz rozmowę i naciśnij „Zlecenie”, aby je utworzyć.", p_noContractsTitle:"Brak zleceń", p_noContractsDesc:"Zlecenia, które utworzysz lub otrzymasz, pojawią się tutaj.",
       c_alreadyActive:"W tej rozmowie jest już otwarte zlecenie. Najpierw je zakończ lub anuluj.",
       p_cs1:"Uzgodnijcie na czacie", p_cs1d:"Omówcie projekt, potem jedna ze stron tworzy zlecenie: zakres, rezultaty, termin, cenę.", p_cs2:"Oboje akceptują", p_cs2d:"Klient i freelancer akceptują tę samą wersję. To zlecenie jest umową.",
@@ -4521,7 +4556,7 @@
       c_ev_approve:"Zaakceptowano — wypłacono {amt}", c_ev_auto_release:"{amt} wypłacone automatycznie", c_ev_resolved_release:"Decyzja Cuvori: wypłacono freelancerowi", c_ev_resolved_refund:"Decyzja Cuvori: zwrócono klientowi", c_ev_resolved_split:"Decyzja Cuvori: podział",
       c_ev_milestone_submitted:"Etap przesłany — {label}", c_ev_milestone_approved:"Etap {amt} zaakceptowany — {label}", c_ev_amendment_proposed:"Zaproponowano aneks", c_ev_amendment_accepted:"Aneks zaakceptowany", c_ev_amendment_declined:"Aneks odrzucony", c_ev_cancel_refund:"Anulowano — zwrócono {amt}",
       rp_msLabel:"Ten raport dostarcza etap", rp_msNone:"— tylko aktualizacja postępu", rp_finalEscrow:"To jest dostawa — poproś klienta o akceptację pracy i wypłatę {amt}", rp_finalDirect:"To jest dostawa — poproś klienta o akceptację pracy", d_newVersionFrom:"Nowa wersja do sprawdzenia od {name}", rp_approveRelease:"Zaakceptuj i wypłać {amt}", rp_linkedOrder:"Ten raport należy do zlecenia „{title}”." },
-    ru:{ contracts:"Заказы", es_released:"Деньги переведены фрилансеру.", contractsSubtitle:"Заказ — это договор: договоритесь в чате, оба примите, клиент оплачивает, работа начинается.", c_btn:"Заказ", c_contract:"Заказ", c_openBtn:"Открыть заказ",
+    ru:{ contracts:"Заказы", ra_firstTitle:"Добро пожаловать — один шаг перед началом", ra_firstBody:"Прочитайте правила Cuvori и уведомление о конфиденциальности и подтвердите, что вы с ними согласны.", jp_title:"Создать бесплатный аккаунт", jp_titleName:"Создайте бесплатный аккаунт, чтобы написать {name}", jp_desc:"Для сообщений, заказов и отзывов нужен аккаунт, чтобы обе стороны знали, с кем имеют дело. Это займёт минуту.", jp_email:"Зарегистрироваться по e-mail", jp_have:"Уже есть аккаунт?", jp_free:"Бесплатно для клиентов. Cuvori не берёт комиссию.", jp_notOn:"Вход через {p} ещё не включён — используйте e-mail.", es_released:"Деньги переведены фрилансеру.", contractsSubtitle:"Заказ — это договор: договоритесь в чате, оба примите, клиент оплачивает, работа начинается.", c_btn:"Заказ", c_contract:"Заказ", c_openBtn:"Открыть заказ",
       c_signInToSee:"Войдите, чтобы увидеть свои заказы.", c_howToStart:"Откройте чат и нажмите «Заказ», чтобы его создать.", p_noContractsTitle:"Заказов пока нет", p_noContractsDesc:"Заказы, которые вы создадите или получите, появятся здесь.",
       c_alreadyActive:"В этом чате уже есть открытый заказ. Сначала завершите или отмените его.",
       p_cs1:"Договоритесь в чате", p_cs1d:"Обсудите проект, затем любая сторона создаёт заказ: объём, результаты, срок, цену.", p_cs2:"Оба принимают", p_cs2d:"Клиент и фрилансер принимают одну и ту же версию. Этот заказ и есть договор.",
@@ -4562,7 +4597,7 @@
       c_ev_approve:"Принято — выплачено {amt}", c_ev_auto_release:"{amt} выплачено автоматически", c_ev_resolved_release:"Решение Cuvori: выплачено фрилансеру", c_ev_resolved_refund:"Решение Cuvori: возвращено клиенту", c_ev_resolved_split:"Решение Cuvori: разделено",
       c_ev_milestone_submitted:"Этап сдан — {label}", c_ev_milestone_approved:"Этап на {amt} принят — {label}", c_ev_amendment_proposed:"Предложено дополнение", c_ev_amendment_accepted:"Дополнение принято", c_ev_amendment_declined:"Дополнение отклонено", c_ev_cancel_refund:"Отменён — возвращено {amt}",
       rp_msLabel:"Этот отчёт сдаёт этап", rp_msNone:"— просто отчёт о ходе работы", rp_finalEscrow:"Это сдача работы — попросить клиента принять её и выплатить {amt}", rp_finalDirect:"Это сдача работы — попросить клиента принять её", d_newVersionFrom:"Новая версия на проверку от {name}", rp_approveRelease:"Принять и выплатить {amt}", rp_linkedOrder:"Этот отчёт относится к заказу «{title}»." },
-    uk:{ contracts:"Замовлення", es_released:"Гроші переказано фрилансеру.", contractsSubtitle:"Замовлення — це договір: домовтеся в чаті, обоє прийміть, клієнт оплачує, робота починається.", c_btn:"Замовлення", c_contract:"Замовлення", c_openBtn:"Відкрити замовлення",
+    uk:{ contracts:"Замовлення", ra_firstTitle:"Вітаємо — один крок перед початком", ra_firstBody:"Прочитайте правила Cuvori та повідомлення про конфіденційність і підтвердьте, що ви з ними згодні.", jp_title:"Створити безкоштовний акаунт", jp_titleName:"Створіть безкоштовний акаунт, щоб написати {name}", jp_desc:"Для повідомлень, замовлень і відгуків потрібен акаунт, щоб обидві сторони знали, з ким мають справу. Це займе хвилину.", jp_email:"Зареєструватися через e-mail", jp_have:"Вже є акаунт?", jp_free:"Безкоштовно для клієнтів. Cuvori не бере комісії.", jp_notOn:"Вхід через {p} ще не ввімкнено — скористайтеся e-mail.", es_released:"Гроші переказано фрилансеру.", contractsSubtitle:"Замовлення — це договір: домовтеся в чаті, обоє прийміть, клієнт оплачує, робота починається.", c_btn:"Замовлення", c_contract:"Замовлення", c_openBtn:"Відкрити замовлення",
       c_signInToSee:"Увійдіть, щоб побачити свої замовлення.", c_howToStart:"Відкрийте чат і натисніть «Замовлення», щоб його створити.", p_noContractsTitle:"Замовлень ще немає", p_noContractsDesc:"Замовлення, які ви створите або отримаєте, з'являться тут.",
       c_alreadyActive:"У цьому чаті вже є відкрите замовлення. Спочатку завершіть або скасуйте його.",
       p_cs1:"Домовтеся в чаті", p_cs1d:"Обговоріть проєкт, потім будь-яка сторона створює замовлення: обсяг, результати, термін, ціну.", p_cs2:"Обоє приймають", p_cs2d:"Клієнт і фрилансер приймають ту саму версію. Це замовлення і є договором.",
@@ -4603,7 +4638,7 @@
       c_ev_approve:"Прийнято — виплачено {amt}", c_ev_auto_release:"{amt} виплачено автоматично", c_ev_resolved_release:"Рішення Cuvori: виплачено фрилансеру", c_ev_resolved_refund:"Рішення Cuvori: повернено клієнту", c_ev_resolved_split:"Рішення Cuvori: розділено",
       c_ev_milestone_submitted:"Етап здано — {label}", c_ev_milestone_approved:"Етап на {amt} прийнято — {label}", c_ev_amendment_proposed:"Запропоновано доповнення", c_ev_amendment_accepted:"Доповнення прийнято", c_ev_amendment_declined:"Доповнення відхилено", c_ev_cancel_refund:"Скасовано — повернено {amt}",
       rp_msLabel:"Цей звіт здає етап", rp_msNone:"— просто звіт про хід роботи", rp_finalEscrow:"Це здача роботи — попросити клієнта прийняти її і виплатити {amt}", rp_finalDirect:"Це здача роботи — попросити клієнта прийняти її", d_newVersionFrom:"Нова версія на перевірку від {name}", rp_approveRelease:"Прийняти і виплатити {amt}", rp_linkedOrder:"Цей звіт належить до замовлення «{title}»." },
-    es:{ contracts:"Pedidos", es_released:"Dinero liberado al freelancer.", contractsSubtitle:"El pedido es el acuerdo: acordad en el chat, aceptad ambos, el cliente lo financia, empieza el trabajo.", c_btn:"Pedido", c_contract:"Pedido", c_openBtn:"Abrir pedido",
+    es:{ contracts:"Pedidos", ra_firstTitle:"Bienvenido: una cosa antes de empezar", ra_firstBody:"Lee las reglas de Cuvori y el aviso de privacidad y confirma que estás de acuerdo.", jp_title:"Crea una cuenta gratis", jp_titleName:"Crea una cuenta gratis para escribir a {name}", jp_desc:"Los mensajes, los pedidos y las reseñas necesitan una cuenta para que ambas partes sepan con quién tratan. Lleva un minuto.", jp_email:"Registrarse con e-mail", jp_have:"¿Ya tienes cuenta?", jp_free:"Gratis para clientes. Cuvori no cobra comisión.", jp_notOn:"El acceso con {p} aún no está activado; usa el e-mail.", es_released:"Dinero liberado al freelancer.", contractsSubtitle:"El pedido es el acuerdo: acordad en el chat, aceptad ambos, el cliente lo financia, empieza el trabajo.", c_btn:"Pedido", c_contract:"Pedido", c_openBtn:"Abrir pedido",
       c_signInToSee:"Inicia sesión para ver tus pedidos.", c_howToStart:"Abre una conversación y pulsa «Pedido» para crear uno.", p_noContractsTitle:"Aún no hay pedidos", p_noContractsDesc:"Los pedidos que crees o recibas aparecerán aquí.",
       c_alreadyActive:"Ya hay un pedido abierto en esta conversación. Termínalo o cancélalo primero.",
       p_cs1:"Acordad en el chat", p_cs1d:"Hablad del proyecto; luego cualquiera de los dos crea el pedido: alcance, entregables, plazo, precio.", p_cs2:"Ambos aceptan", p_cs2d:"Cliente y freelancer aceptan la misma versión. Ese pedido es el acuerdo.",
@@ -5177,7 +5212,8 @@
   function renderAdminFees(){
     const host=$("#adminBody"); const rows=ADMIN.fees||[];
     const ex=async(cents)=>{ const { data } = await sb.rpc("order_quote",{ p_price_cents:cents, p_currency:"EUR", p_country:"DE", p_customer:"any", p_method:"card" }); return data; };
-    host.innerHTML=`<p class="muted small" style="margin:0 0 10px">The client sees these as “Payment processing” before funding an Order; the freelancer always receives the exact Order price. The most specific active row wins: country › region › ANY, then consumer/business and payment method over “any”. <strong>payer = platform</strong> means Cuvori absorbs the cost and the client pays exactly the Order price (the safe choice where consumer-card surcharges are not allowed). Check the numbers against your Stripe pricing page.</p>
+    const fnHost=FN_BASE||location.origin; const st=ESCROW.reachable?(ESCROW.enabled?`<span class="c-status st-paid">ON</span> — clients fund Orders through Stripe; releases go to the freelancer's connected account.`:`<span class="c-status st-cancelled">OFF</span> — the payment functions at <code>${escapeHtml(fnHost)}</code> answered but Stripe is not configured (SETUP Part 5: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SUPABASE_SERVICE_ROLE_KEY in Netlify).`):`<span class="c-status st-cancelled">OFF</span> — no payment functions reachable at <code>${escapeHtml(fnHost)}/.netlify/functions/</code>. Deploy the repository to Netlify and, if the page stays on GitHub Pages, set <code>functionsUrl</code> in CUVORI_CONFIG (SETUP Part 3, step 6). Until then Orders use direct payment.`;
+    host.innerHTML=`<div class="panel" style="margin-bottom:12px"><strong>Protected payments:</strong> ${st}</div><p class="muted small" style="margin:0 0 10px">The client sees these as “Payment processing” before funding an Order; the freelancer always receives the exact Order price. The most specific active row wins: country › region › ANY, then consumer/business and payment method over “any”. <strong>payer = platform</strong> means Cuvori absorbs the cost and the client pays exactly the Order price (the safe choice where consumer-card surcharges are not allowed). Check the numbers against your Stripe pricing page.</p>
       <div id="feeExample" class="muted small" style="margin-bottom:10px"></div>
       <div class="admin-table">${rows.map(r=>`<div class="admin-row ${r.active?"":"is-banned"}" data-fid="${r.id}"><div class="admin-main"><div><strong>${escapeHtml(r.provider)} · ${escapeHtml(r.region)}${r.country?" · "+escapeHtml(r.country):""} · ${escapeHtml(r.customer_kind)} · ${escapeHtml(r.method)}</strong> <span class="muted small">${r.active?"":"(off)"}</span></div>
         <div class="fee-edit"><label>%</label><input class="f-pct" type="number" min="0" max="49" step="0.01" value="${Number(r.percent)}"><label>+ cents</label><input class="f-fix" type="number" min="0" max="10000" step="1" value="${r.fixed_cents}"><label>payer</label><select class="f-payer"><option value="client" ${r.payer==="client"?"selected":""}>client (on top)</option><option value="platform" ${r.payer==="platform"?"selected":""}>platform (Cuvori absorbs)</option></select><label>active</label><input class="f-active" type="checkbox" ${r.active?"checked":""}></div>
@@ -5503,7 +5539,8 @@
   const ESCROW={ enabled:false, days:7, checked:false };   // the processing cost comes from the database (order_quote), never from here
   async function loadEscrowStatus(){
     if(!REAL) return;
-    try{ const r=await fetch(FN_BASE+"/.netlify/functions/stripe-status",{cache:"no-store"}); if(r.ok){ const j=await r.json(); ESCROW.enabled=!!j.escrow; ESCROW.days=j.autoReleaseDays??7; } }catch(e){}
+    ESCROW.reachable=false;
+    try{ const r=await fetch(FN_BASE+"/.netlify/functions/stripe-status",{cache:"no-store"}); if(r.ok){ const j=await r.json(); if(typeof j.escrow==="boolean"){ ESCROW.reachable=true; ESCROW.enabled=!!j.escrow; ESCROW.days=j.autoReleaseDays??7; } } }catch(e){}
     ESCROW.checked=true; renderStripeBox();
   }
   async function fnCall(name, body, method){
@@ -5693,8 +5730,9 @@
   }
   function rulesModal(){
     if(state.rulesAsking) return; state.rulesAsking=true;
-    openModal(t("ra_updatedTitle"),
-      `<p>${escapeHtml(t("ra_updatedBody"))}</p>
+    const fresh=!(state.auth.profile&&state.auth.profile.rules_version);   // a brand-new account (Google/Facebook) has never seen them
+    openModal(t(fresh?"ra_firstTitle":"ra_updatedTitle"),
+      `<p>${escapeHtml(t(fresh?"ra_firstBody":"ra_updatedBody"))}</p>
        <p style="margin-top:10px"><button class="link-btn" data-route="rules">${escapeHtml(t("r_toRules"))}</button> · <button class="link-btn" data-route="privacy">${escapeHtml(t("r_toPrivacy"))}</button></p>
        <div class="two-col" style="gap:8px;margin-top:16px"><button class="primary" id="raYes">${escapeHtml(t("ra_accept"))}</button><button class="secondary" id="raLater">${escapeHtml(t("ra_later"))}</button></div>`,
       root=>{
