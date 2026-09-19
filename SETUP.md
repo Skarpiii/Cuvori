@@ -5,7 +5,7 @@ Follow these steps once. About 20 minutes. Nothing here needs coding.
 ## Part 1 — Create the backend (Supabase)
 
 1. Go to https://supabase.com and click **Start your project**. Sign up (GitHub login is easiest).
-2. Click **New project**. Name: `Cuvori`. Choose a strong database password (save it somewhere, you will rarely need it). Region: **Frankfurt** (closest to Lithuania). Click **Create new project** and wait about a minute.
+2. Click **New project**. Name: `Cuvori`. Choose a strong database password (save it somewhere, you will rarely need it). Region: **Frankfurt** (closest to Schwabach). Click **Create new project** and wait about a minute.
 3. In the left menu click **SQL Editor** → **New query**. Open the file `supabase/schema.sql` from this repo, copy **everything**, paste it into the editor and click **Run**. You should see "Success". This creates the accounts table, the invite system and the security rules.
 4. In the left menu click **Authentication** → **Providers** → **Email**. Turn **Confirm email OFF** for now (so people can sign in immediately without clicking an email link). Save. You can turn it back on later when you have a custom email sender.
 5. In the left menu click **Project Settings** (gear icon) → **API**. Copy two values:
@@ -58,7 +58,7 @@ Still demo (next steps): the three example editors, jobs, messages, progress upd
 
 Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's Stripe balance until the client approves, Cuvori decides a dispute, or 7 days pass after delivery. Until this part is done the site uses **direct payments** (the client pays the editor's IBAN/PayPal and both confirm).
 
-1. Create a Stripe account at https://stripe.com (country: Lithuania; individual is fine to start). Finish the identity and bank checks Stripe asks for.
+1. Create a Stripe account at https://stripe.com (country: Germany; individual is fine to start). Finish the identity and bank checks Stripe asks for.
 2. Stripe dashboard → **Settings → Connect** → get started → choose **Express** accounts. Also set the platform name/branding ("Cuvori").
 3. Stripe → **Developers → API keys**: copy the **Secret key** (starts with `sk_test_` in test mode, `sk_live_` later).
 4. Stripe → **Developers → Webhooks → Add endpoint**: URL `https://cuvori.netlify.app/.netlify/functions/stripe-webhook`, events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `account.updated`, `charge.refunded`, `charge.dispute.created`. Copy the **Signing secret** (`whsec_...`). If Stripe puts `account.updated` on a separate "Connected accounts" endpoint, give that endpoint the same URL and add its signing secret as `STRIPE_CONNECT_WEBHOOK_SECRET`.
@@ -88,19 +88,19 @@ The database rules were attacked from every side (visitor, client, editor, banne
 
 ## Part 7 — Open questions for the contract templates (business decisions)
 
-The clause texts were reviewed adversarially (how each clause could be abused, and where it may not hold up in EU / Lithuanian law) and fixed where wording alone could fix it. Four things need a decision from you, not from code:
+The clause texts were reviewed adversarially (how each clause could be abused, and where it may not hold up in EU / German law) and fixed where wording alone could fix it. Four things need a decision from you, not from code:
 
 1. **Holding other people's money.** Protected payments land in Cuvori's own Stripe balance before being paid out. Depending on how this grows, that can count as handling third-party funds and may need a payment-institution licence or an agent-of-payee arrangement. Ask Stripe (and, once there is revenue, an accountant) before switching escrow on for real money.
 2. **The payment fee.** The client pays 3% + €0.25 on top of the price. The contract now says plainly that this fee covers card and payment handling and is not refunded if the money is later returned. Check that the percentage really covers Stripe's cost in your country, and never describe it as "no fees" in marketing.
 3. **Cuvori's decision in a dispute.** With protected payments, both sides accept that Cuvori distributes the held money, while keeping the right to go to court afterwards. With direct payments Cuvori can only give a written opinion. Keep that difference visible — promising more than that in marketing would be a promise you cannot keep.
-4. **A lawyer's read.** The templates are careful but they are not legal advice. Before serious volume, have a Lithuanian lawyer look at the Lithuanian and English versions, in particular the transfer of copyright, the consumer withdrawal clause and the dispute clause.
+4. **A lawyer's read.** The templates are careful but they are not legal advice. Before serious volume, have a German lawyer look at the German and English versions (and a Lithuanian one at the Lithuanian version if most of your professionals are there), in particular the transfer of copyright, the consumer withdrawal clause and the dispute clause.
 
 ## Part 8 — The site rules, the privacy notice and the report route
 
 Everyone who creates an account now has to tick a box agreeing to the rules and the privacy notice, and the version they agreed to is recorded against their account. Existing users are asked again whenever the version changes.
 
 1. Run `supabase/schema_v12.sql` in the Supabase SQL editor. It adds the acceptance record, the `reports` table (with the admin queue), the requirement that a ban always carries a written reason, the "verified client" badge that only appears when a real contract backs the review, and a `purge_old_records()` cleanup for the 24-month retention the privacy notice promises.
-2. Fill in **`window.CUVORI_LEGAL`** near the top of `index.html`: the legal name that runs Cuvori, the address, and a working e-mail. These three values appear in the rules, the privacy notice and the footer, and the law requires them to be real. Until there is a company, your own name and address are the honest answer.
+2. **`window.CUVORI_LEGAL`** near the top of `index.html` holds the name that runs Cuvori, the address and a working e-mail. These three values appear in the rules, the privacy notice and the footer, and German law (§ 5 DDG, the *Impressum* rule) requires them to be real and easy to find. The address is set to Dr.-Haas-Straße 1A, 91126 Schwabach. Until there is a registered company, `company` must be your own full name (e.g. `"Egidijus Surname (Cuvori)"`) — a trade name alone is not enough for a sole trader. The rules say German law applies, that Cuvori does not take part in consumer arbitration (the standard § 36 VSBG statement, allowed for a business with 10 or fewer staff — change it if you ever choose to take part), and the privacy notice names the Bavarian data-protection authority (BayLDA). The old EU online-dispute platform is not mentioned because it closed in July 2025.
 3. The contact address is currently **egidijus.cuvori@gmail.com**, set in `window.CUVORI_LEGAL`. Every objection, report and data request in the rules points at it, so it has to keep working. To move to **hello@cuvori.io** later: Cloudflare → cuvori.io → **Email Routing** → enable → add a custom address `hello@cuvori.io` forwarding to the Gmail, confirm the verification mail, then change the one value in `window.CUVORI_LEGAL`. In Gmail, **Settings → Accounts → Send mail as** lets you reply as hello@cuvori.io so replies do not come from a personal-looking address.
 4. Rules and privacy text live in `rules-i18n/*.js` (English is the source) and are merged into `index.html`. When you change them, bump `RULES_VERSION` in `index.html` **only if the change matters to people** — bumping it asks every user to agree again, which is right for a real change and annoying for a typo fix.
 5. Reports arrive in **Admin panel → Reports**. Every one must be closed with a written reason: that reason is shown back to the person who reported it, and it is the record a regulator would ask for under the Digital Services Act. Answer within a few days.
