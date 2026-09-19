@@ -30,6 +30,7 @@ Paste the two values between the quotes, save, then commit and push in GitHub De
 3. Leave the build settings as they are (the repo contains `netlify.toml`, which tells Netlify what to do). Click **Deploy**.
 4. After a minute you get an address like `https://something-1234.netlify.app`. That is the real Cuvori. Every time you push to GitHub, Netlify updates the site automatically.
 5. Later, to use **cuvori.io**: Netlify → **Domain management** → **Add a domain** and follow the instructions from your domain provider.
+6. **If the page itself lives on GitHub Pages (cuvori.io does today)**, the payment functions still need Netlify. Deploy the repository to Netlify as above (only the functions matter there), then add one value to `window.CUVORI_CONFIG` in `index.html`: `functionsUrl: "https://<your-site>.netlify.app"`. The page calls the functions there; they accept calls from `https://cuvori.io` (see `ALLOWED_ORIGINS` in `netlify/lib/cuvori.mjs` to add another address).
 
 ## Part 4 — Check it works
 
@@ -56,7 +57,7 @@ Still demo (next steps): the three example editors, jobs, messages, progress upd
 
 ## Part 5 — Protected payments (Stripe escrow)
 
-Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's Stripe balance until the client approves, Cuvori decides a dispute, or 7 days pass after delivery. Until this part is done the site uses **direct payments** (the client pays the editor's IBAN/PayPal and both confirm).
+Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's Stripe balance until the client approves, Cuvori decides a dispute, or 7 days pass after delivery. Until this part is done the site uses **direct payments** (the client pays the freelancer's IBAN/PayPal and both confirm in the Order, which says plainly that nothing is secured).
 
 1. Create a Stripe account at https://stripe.com (country: Germany; individual is fine to start). Finish the identity and bank checks Stripe asks for.
 2. Stripe dashboard → **Settings → Connect** → get started → choose **Express** accounts. Also set the platform name/branding ("Cuvori").
@@ -67,13 +68,14 @@ Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's 
    - `STRIPE_SECRET_KEY` = sk_…
    - `STRIPE_WEBHOOK_SECRET` = whsec_…
    - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key
-   - optional: `FEE_PERCENT` (default 3), `FEE_FIXED_CENTS` (default 25), `AUTO_RELEASE_DAYS` (default 7)
-   Then **Deploys → Trigger deploy**. From now on new contracts are "Protected payment".
+   - optional: `ALLOWED_ORIGINS` (comma-separated page addresses allowed to call the functions; defaults to the site URL plus https://cuvori.io)
+   There is no fee setting here any more: the processing cost comes from the **fee_schedules** table (Admin panel → Payment costs), see Part 13.
+   Then **Deploys → Trigger deploy**. From now on new Orders are "Protected payment".
 7. Run `supabase/schema_v5.sql` … `schema_v9.sql` in the Supabase SQL editor, in order (already done for the live database).
-8. Test in Stripe **test mode**: editor → Settings → Payout details → "Set up payouts with Stripe" (use Stripe's test data); client → contract → Pay now → card `4242 4242 4242 4242`, any future date, any CVC.
+8. Test in Stripe **test mode**: freelancer → Settings → Payout details → "Set up payouts with Stripe" (use Stripe's test data); client → Order → Fund → card `4242 4242 4242 4242`, any future date, any CVC.
 9. Go live: switch the two Stripe keys to live keys in Netlify and trigger a deploy.
 
-How the money flows: client pays price + card fee → held → editor "Mark as delivered" → client "Approve & release" (or 7-day auto-release) → Stripe pays the editor's bank. Disputes (either side) stop the clock; you decide in Admin panel → Contracts & disputes: release, refund or split.
+How the money flows: client funds the Order price + the provider's processing cost → held → freelancer "Deliver for approval" (or submits a milestone) → client "Approve work & release €X" (or 7-day auto-release) → Stripe pays the freelancer's bank. Milestones are released one by one from the same funded amount. Disputes (either side) stop the clock; you decide in Admin panel → Orders & disputes: release, refund or split of what is still held.
 
 ## Part 6 — Security checks (keep these working)
 
@@ -82,8 +84,8 @@ The database rules were attacked from every side (visitor, client, editor, banne
 1. Run `supabase/schema_v9.sql` in the Supabase SQL editor, then `supabase/check_v9.sql` (it lists existing rows that break the new limits; they keep working but must be fixed before they can be saved again).
 2. Run `supabase/schema_v10.sql` **only after the new page is live** (it hides other people's e-mails; the old page would lose its sign-in role). Then run `supabase/schema_v11.sql` (contract templates: types, governing law, clauses, counter-proposals).
 3. The page has a Content-Security-Policy that allows only its own scripts, by fingerprint. **After any change to `index.html` run `python3 tools/csp.py index.html`**, otherwise the page will not start.
-4. Contract clause texts live in `contracts-i18n/*.js` (English is the source; the others are translations) and are merged into `index.html` — edit them there and re-merge, never edit the page by hand. **Never change the wording of a clause that people have already accepted.** Accepted contracts store their own copy of the text (`contracts.terms_doc`), so old contracts keep what was signed, but for new wording bump `clauses_version` in `schema_v11.sql` and keep the old file for reference.
-5. Two numbers must stay equal or contracts will say something the system does not do: `AUTO_RELEASE_DAYS` in Netlify, `auto_days` on the contracts table, and the `7 days` inside `contract_action()`.
+4. The standard terms every Order carries live in `contracts-i18n/*.js` (English is the source; the others are translations) and are merged into `index.html` — edit them there and re-merge, never edit the page by hand. **Never change the wording of a clause that people have already accepted.** Accepted Orders store their own copy of the text (`contracts.terms_doc`), so old Orders keep what was agreed, but for new wording bump `clauses_version` in `schema_v11.sql` and keep the old file for reference.
+5. Two numbers must stay equal or Orders will say something the system does not do: `AUTO_RELEASE_DAYS` in Netlify, `auto_days` on the contracts table, and the `7 days` inside `order_action()` / `order_milestone_action()`.
 6. The full test kit is stored as `tests/test-kit.tar.gz` (unpack it in the repo folder with `tar xzf tests/test-kit.tar.gz`). Then `tests/run-all.sh` runs every check: 248 database attacks, payment-function attacks, stored-XSS proofs, the browser policy test, the UI fuzz test (7 languages × 4 screen widths) and all site flows.
 
 ## Part 7 — Open questions for the contract templates (business decisions)
@@ -91,7 +93,7 @@ The database rules were attacked from every side (visitor, client, editor, banne
 The clause texts were reviewed adversarially (how each clause could be abused, and where it may not hold up in EU / German law) and fixed where wording alone could fix it. Four things need a decision from you, not from code:
 
 1. **Holding other people's money.** Protected payments land in Cuvori's own Stripe balance before being paid out. Depending on how this grows, that can count as handling third-party funds and may need a payment-institution licence or an agent-of-payee arrangement. Ask Stripe (and, once there is revenue, an accountant) before switching escrow on for real money.
-2. **The payment fee.** The client pays 3% + €0.25 on top of the price. The contract now says plainly that this fee covers card and payment handling and is not refunded if the money is later returned. Check that the percentage really covers Stripe's cost in your country, and never describe it as "no fees" in marketing.
+2. **The processing cost.** The client pays the payment provider's processing cost on top of the Order price, shown as an exact amount before paying (Part 13). Check the numbers against your Stripe pricing, decide who carries it for European consumers (a lawyer should confirm what is allowed; the table can make Cuvori absorb it), and never describe Cuvori as "no fees" in marketing — say "no commission".
 3. **Cuvori's decision in a dispute.** With protected payments, both sides accept that Cuvori distributes the held money, while keeping the right to go to court afterwards. With direct payments Cuvori can only give a written opinion. Keep that difference visible — promising more than that in marketing would be a promise you cannot keep.
 4. **A lawyer's read.** The templates are careful but they are not legal advice. Before serious volume, have a German lawyer look at the German and English versions (and a Lithuanian one at the Lithuanian version if most of your professionals are there), in particular the transfer of copyright, the consumer withdrawal clause and the dispute clause.
 
@@ -146,3 +148,15 @@ Every account has a visibility: **Real / public**, **Demo / test**, or **Hidden*
 2. **Admin panel → Users** has the switch per account. Mark every account you created for testing as Demo / test.
 3. The sample profiles that used to appear when the site had no professionals are gone from the live site: an empty marketplace now says so honestly and invites people to join. (Sample cards still appear only when the page runs without a database, for development.)
 4. A review written from a demo account does not count towards anyone's public rating.
+
+## Part 13 — The Order is the contract
+
+There is no separate contract to draft, download or sign. In a chat either side presses **Order** and fills in the title, profession, scope of work, deliverables, deadline, revision rounds, the two sides' responsibilities, rights to the work and the price — optionally split into milestones. Once client and freelancer have accepted the same version, that Order is their agreement; the standard terms (cancellation, refunds, rights, disputes, law) are attached to every Order and shown before accepting. A printable copy exists, but it is a copy of the accepted Order, not a second agreement.
+
+1. Run `supabase/schema_v18.sql` in the Supabase SQL editor (after v17). It adds the structured fields and explicit acceptance to the `contracts` table (the table keeps its old name; every row is an Order), plus `order_milestones`, `order_amendments`, `order_events` (append-only history — nothing there can be edited or deleted, not even by an admin), `order_payments` (the money ledger: every funding, release and refund) and `fee_schedules`.
+2. **Acceptance.** Whoever creates or edits an Order has accepted that version; the other side presses **Accept Order**. Any edit before acceptance makes a new version and wipes the other side's acceptance. After acceptance nothing is silently editable: changes go through an **amendment** (extra money, new deadline, added scope or deliverables, extra revision rounds, a new milestone) that both sides accept; the original stays in the history. If an amendment adds money to a funded Order, the client is asked to fund the extra amount.
+3. **Money.** Before funding, the client sees four lines: Order price, payment processing, Cuvori fee (€0) and the total. The processing cost is computed by `order_quote()` from the `fee_schedules` table — grossed up so the freelancer receives exactly the Order price — never from a number in the code. Rows can be per region (EEA / non-EEA / any), country, consumer or business, and payment method; the most specific active row wins. Setting a row's payer to **platform** makes Cuvori absorb the cost (the client pays exactly the price) — a lawyer should tell you which is allowed for European consumers before real money moves. Admin panel → **Payment costs** edits the table and shows a worked example. The freelancer's amount, the processing cost, the secured balance, releases and refunds are always kept apart.
+4. **Milestones.** The client funds the whole amount up front; each milestone is submitted by the freelancer and approved with **Approve milestone & release €X**; the rest stays secured. A submitted milestone the client ignores is released automatically after the review window, like a whole delivery.
+5. **Reports.** A progress report can be the delivery: the freelancer ticks "this is the delivery" (or picks the milestone it delivers). The client opens it from the chat or the bell and sees **Approve & release €X** or **Request changes** — a button that moves money always says so. Requesting changes through the report counts a revision round on the Order and stops the release clock inside the paid rounds.
+6. **Cancellation and disputes.** Before funding either side can cancel. After funding the freelancer can cancel and refund everything still held; the client's route is a dispute, which stops every automatic release until you decide in Admin panel → Orders & disputes (release, refund or split of what is still held — money already released for approved milestones stays released). Card chargebacks and refunds made outside Cuvori also put the Order into dispute.
+7. **Where things are.** Orders page: `#orders` (the old `#contracts` address still works). Code: `orders-ui.js` (screens), `orders-i18n.js` (7 languages), `netlify/functions/stripe-*.mjs` (`stripe-cancel.mjs` is new; `stripe-release.mjs` takes a `milestone_id`), `supabase/schema_v18.sql`. Tests: `tests/db/30_attacks.sql` (v18 section runs the fixed-price, milestone and direct flows end to end), `realtest.js` (every scenario from the brief in the browser), `tests/xss/proof5.js`, `tests/attack-functions.mjs`.
