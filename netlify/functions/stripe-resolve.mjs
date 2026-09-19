@@ -1,5 +1,5 @@
 // POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, centsOf } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -12,13 +12,13 @@ export default safe(async (req) => {
   const note = typeof body.note === "string" ? body.note.slice(0, 2000) : "";
   const c = await db.contract(body.contract_id);
   if (!c) return bad("Not found", 404);
-  if (c.payment_mode !== "escrow") return bad("This contract is not holding money", 409);
-  const total = centsOf(c);
-  if (!total) return bad("Contract amount missing", 409);
+  if (c.payment_mode !== "escrow") return bad("This order is not holding money", 409);
+  const total = heldCents(c);                                            // what is still held: released milestones stay released
+  if (!total) return bad("This order is not holding money", 409);
 
   let row;
   if (c.status === "resolving") {                                        // resume: the recorded decision wins
-    if (c.resolution !== decision) return bad(`A '${c.resolution}' decision is already in progress for this contract`, 409);
+    if (c.resolution !== decision) return bad(`A '${c.resolution}' decision is already in progress for this order`, 409);
     row = c;
   } else {
     let editorCents;
@@ -32,7 +32,7 @@ export default safe(async (req) => {
     const refundCents = total - editorCents;
     const now = new Date().toISOString();
     row = await db.claim(c.id, ["funded", "delivered", "disputed"], { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null });
-    if (!row) return bad("This contract is not holding money", 409);
+    if (!row) return bad("This order is not holding money", 409);
     row.was_disputed = c.status === "disputed";
   }
   const u = await settle(row, me.id, `resolved_${decision}`);

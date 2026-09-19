@@ -7,7 +7,7 @@ export default safe(async (req) => {
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
-  if (me.role !== "editor") return bad("Only editors can receive payouts", 403);
+  if (me.role !== "editor") return bad("Only professionals can receive payouts", 403);
 
   const payout = await db.one("payout_details", `id=eq.${me.id}&select=id,stripe_account_id,stripe_payouts_enabled`);
   let acct = null;
