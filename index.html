@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-elmdzhbpsPp0rRqSFbK5pwqmaoUFOmpuQQ7dnB+kOwI=' 'sha256-KzONafF/4nqMb+CUpNIcqe6fCDOA6rR6dBC1KQZqV6o=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-elmdzhbpsPp0rRqSFbK5pwqmaoUFOmpuQQ7dnB+kOwI=' 'sha256-0s8POkZZ87NLSCx0KP3Uk7ntSfUA+G3cQNMj6I0bOLY=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -741,6 +741,14 @@
     .svc-form .form-grid{margin-top:8px}
     .svc-add{display:flex;gap:8px;align-items:center;margin-top:6px}.svc-add select{flex:1 1 200px}
     .fact-v .skill-list{justify-content:flex-end}
+    .taginput{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:6px 8px;background:var(--panel);position:relative;cursor:text}
+    .taginput .tags{display:contents}
+    .taginput .tag{display:inline-flex;align-items:center;gap:4px;background:var(--dark);color:#fff;border-radius:999px;padding:4px 6px 4px 10px;font-size:13px;font-weight:700}
+    .taginput .tag-x{background:transparent;border:0;color:#fff;font-size:15px;line-height:1;padding:0 4px;cursor:pointer;opacity:.8}.taginput .tag-x:hover{opacity:1}
+    .taginput input{flex:1 1 120px;min-width:100px;border:0;outline:0;background:transparent;padding:6px 4px;font:inherit}
+    .taginput .tag-suggest{position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-top:4px;box-shadow:0 10px 30px rgba(0,0,0,.08);overflow:hidden}
+    .taginput .tag-opt{display:block;width:100%;text-align:left;background:transparent;border:0;padding:9px 12px;font:inherit;cursor:pointer}
+    .taginput .tag-opt:hover,.taginput .tag-opt.active{background:rgba(0,0,0,.05)}
     .fblock{margin-top:16px}.fblock>strong{display:block;margin-bottom:8px}
     .frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.frow input,.frow select{flex:1 1 120px;min-width:0}
     @media(max-width:700px){ .prof-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch} .prof-row .chip{flex:0 0 auto} }
@@ -923,8 +931,8 @@
 
       <div class="section">
         <div class="section-head">
-          <h2 data-i18n="featured">Featured profiles</h2>
-          <div class="muted" id="resultCount">3 profiles</div>
+          <h2 id="resultsTitle" data-i18n="pf_results">Professionals</h2>
+          <div class="muted" id="resultCount"></div>
         </div>
         <div class="grid" id="profileGrid">
           <article class="card profile-card" data-search="maya klein munich germany english german commercial documentary shorts reels tiktok editor" data-person="Maya Klein">
@@ -996,9 +1004,6 @@
           <div class="panel filter-panel">
             <div class="searchbar compact"><span class="search-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span><input id="jobSearch" data-i18n-placeholder="jobSearchPlaceholder" placeholder="Search for a job" /><button class="primary hidden" id="jobSearchBtn" data-i18n="search">Search</button></div>
             <button class="secondary jobs-mobile-filters" id="toggleJobFilters" data-i18n="p_filters">Filters</button>
-            <div class="filter-group"><div class="filter-title" data-i18n="p_roleFilter">Professional</div>
-              <div id="jobRoleFilters"></div>
-            </div>
             <div class="filter-group"><div class="filter-title" data-i18n="p_whereFilter">Where</div>
               <label class="check"><input type="checkbox" class="job-filter" data-key="where" value="remote"> <span data-i18n="p_remote">Remote</span></label>
               <label class="check"><input type="checkbox" class="job-filter" data-key="where" value="onsite"> <span data-i18n="p_onSite">On location</span></label>
@@ -1011,9 +1016,11 @@
           </div>
         </aside>
         <div class="jobs-main">
+          <div class="chips prof-row" id="jobProfRow" style="margin-top:0"></div>
+          <div class="chips" id="jobFilterRow" style="margin-top:8px"></div>
           <div class="list-toolbar"><span class="muted" id="jobCount">6 jobs</span><span class="muted" data-i18n="p_sortNewest">Sorted by newest</span></div>
           <div class="job-list" id="jobList">
-            <div class="job" data-job="youtube documentary editor long form davinci premiere" data-role="video-editor" data-where="remote" data-pricing="project">
+            <div class="job" data-job="youtube documentary editor long form davinci premiere" data-role="video-editor" data-details='{"video_specialty":["catYoutubeLong","catDocumentary"],"software":["davinci_resolve","premiere_pro"]}' data-where="remote" data-pricing="project">
               <div class="job-avatar">JW</div>
               <div class="job-content">
                 <div class="job-top"><div><h3 data-i18n="job1Title">YouTube documentary editor</h3><div class="muted" data-i18n="job1Meta">Creator · Remote</div></div><strong>€450–€700</strong></div>
@@ -1021,7 +1028,7 @@
                 <div class="job-meta"><span class="pill" data-i18n="catDocumentary">Documentary</span><span class="pill" data-i18n="pillEditing">Editing</span><span class="pill" data-i18n="pillEnglish">English</span><span class="job-time muted"><span data-i18n="p_posted">Posted</span> 2d</span></div>
               </div>
             </div>
-            <div class="job" data-job="shorts reels tiktok editor creator social" data-role="video-editor" data-where="remote" data-pricing="hourly">
+            <div class="job" data-job="shorts reels tiktok editor creator social" data-role="video-editor" data-details='{"video_specialty":["catShorts"]}' data-where="remote" data-pricing="hourly">
               <div class="job-avatar alt">GL</div>
               <div class="job-content">
                 <div class="job-top"><div><h3 data-i18n="job2Title">Shorts / Reels / TikTok editor</h3><div class="muted" data-i18n="job2Meta">Small brand · Remote</div></div><strong>€25/<span data-i18n="perHour">hour</span></strong></div>
@@ -1029,7 +1036,7 @@
                 <div class="job-meta"><span class="pill" data-i18n="catShorts">Shorts / Reels / TikTok</span><span class="pill" data-i18n="pillOngoing">Ongoing</span><span class="pill" data-i18n="pillEnglishGerman">English / German</span><span class="job-time muted"><span data-i18n="p_posted">Posted</span> 3d</span></div>
               </div>
             </div>
-            <div class="job" data-job="videographer munich product commercial" data-role="videographer" data-where="onsite" data-pricing="hourly">
+            <div class="job" data-job="videographer munich product commercial" data-role="videographer" data-details='{"video_specialty":["catCommercial"]}' data-where="onsite" data-pricing="hourly">
               <div class="job-avatar two">NB</div>
               <div class="job-content">
                 <div class="job-top"><div><h3 data-i18n="job3Title">Videographer for product shoot</h3><div class="muted" data-i18n="job3Meta">Brand · Munich</div></div><strong>€650/<span data-i18n="perDay">day</span></strong></div>
@@ -1079,7 +1086,7 @@
             <div class="form-grid">
               <div style="grid-column:1/-1"><label data-i18n="labelJobTitle">Job title</label><input id="jobTitle" maxlength="150" data-i18n-placeholder="jobTitlePlaceholder" placeholder="e.g. YouTube documentary editor" /></div>
               <div><label data-i18n="labelProfessionalNeeded">Professional needed</label><select id="jobRole"></select></div>
-              <div><label data-i18n="specializationsLabel">Specializations</label><select id="jobCat"></select></div>
+              <div style="grid-column:1/-1" id="jobSpecs"></div>
             </div>
           </div>
           <div class="form-section">
@@ -3186,7 +3193,7 @@
     if(typeof renderFilterBar==="function" && PROF.loaded) renderFilterBar();
     if(typeof renderQuickFlags==="function") renderQuickFlags();
     if(typeof fillJobCatSelect==="function") fillJobCatSelect();
-    if(typeof renderJobRoleFilters==="function") renderJobRoleFilters();
+    if(typeof renderJobFilterBar==="function") renderJobFilterBar();
     if(typeof renderMobileIconbar==="function") renderMobileIconbar();
     if(typeof runProfileSearch==="function") runProfileSearch();
     if(state.currentProfile && $("#page-profile").classList.contains("active")) openProfile(state.currentProfile);
@@ -4272,13 +4279,13 @@
   for(const code in T_AVAIL2){ if(T[code]) Object.assign(T[code], T_AVAIL2[code]); }
 
   const T_PROF = {
-    en:{ pf_who:"Who do you need?", pf_all:"Everyone", pf_clear:"Clear filters", pf_min:"Min", pf_max:"Max", pf_anyUnit:"Any pricing", pf_tagsPh:"A few words, separated by commas", pf_noneTitle:"No professionals match all the selected filters.", pf_noneBody:"Remove a filter below or clear them all. Nothing is hidden to make the list look fuller.", pf_tryWithout:"Without “{f}” there would be {n}.", pf_dropIt:"Remove it", pf_noneEven:"Even one filter on its own finds nobody yet — try a broader search.", pf_noneYet:"No professionals here yet.", pf_noneYetProf:"No {p} on Cuvori yet.", pf_noneYetBody:"Cuvori is new and only shows real people. Are you one? Join with an invite.", sv_title:"Services", sv_hint:"What you offer, each with its own price. Add another to offer a second profession.", sv_add:"Add", sv_remove:"Remove", sv_headline:"One line about this service (optional)", sv_headlinePh:"e.g. Fast turnaround for YouTube creators", sv_none:"Add at least one service.", sv_keepOne:"Keep at least one service.", sv_yes:"Yes", sv_no:"No", sv_notOpen:"This profession is not open for joining yet." },
-    de:{ pf_who:"Wen suchst du?", pf_all:"Alle", pf_clear:"Filter zurücksetzen", pf_min:"Min", pf_max:"Max", pf_anyUnit:"Jede Preisart", pf_tagsPh:"Ein paar Wörter, durch Kommas getrennt", pf_noneTitle:"Keine Profis erfüllen alle ausgewählten Filter.", pf_noneBody:"Entferne unten einen Filter oder setze sie alle zurück. Es wird nichts versteckt, um die Liste voller wirken zu lassen.", pf_tryWithout:"Ohne „{f}“ gäbe es {n}.", pf_dropIt:"Entfernen", pf_noneEven:"Schon ein einzelner Filter findet noch niemanden — versuch eine breitere Suche.", pf_noneYet:"Hier gibt es noch keine Profis.", pf_noneYetProf:"Noch keine {p} auf Cuvori.", pf_noneYetBody:"Cuvori ist neu und zeigt nur echte Menschen. Bist du einer davon? Tritt mit einer Einladung bei.", sv_title:"Leistungen", sv_hint:"Was du anbietest, jede mit eigenem Preis. Füge eine weitere hinzu, um einen zweiten Beruf anzubieten.", sv_add:"Hinzufügen", sv_remove:"Entfernen", sv_headline:"Ein Satz zu dieser Leistung (optional)", sv_headlinePh:"z. B. Schnelle Bearbeitung für YouTube-Creator", sv_none:"Füge mindestens eine Leistung hinzu.", sv_keepOne:"Behalte mindestens eine Leistung.", sv_yes:"Ja", sv_no:"Nein", sv_notOpen:"Dieser Beruf ist noch nicht für den Beitritt geöffnet." },
-    ru:{ pf_who:"Кого вы ищете?", pf_all:"Все", pf_clear:"Сбросить фильтры", pf_min:"Мин", pf_max:"Макс", pf_anyUnit:"Любая цена", pf_tagsPh:"Несколько слов через запятую", pf_noneTitle:"Ни один специалист не подходит под все выбранные фильтры.", pf_noneBody:"Уберите фильтр ниже или сбросьте все. Мы ничего не скрываем, чтобы список выглядел длиннее.", pf_tryWithout:"Без «{f}» их было бы {n}.", pf_dropIt:"Убрать", pf_noneEven:"Даже один этот фильтр пока никого не находит — попробуйте более широкий поиск.", pf_noneYet:"Здесь пока нет специалистов.", pf_noneYetProf:"На Cuvori пока нет {p}.", pf_noneYetBody:"Cuvori — новый сервис и показывает только реальных людей. Вы один из них? Присоединяйтесь по приглашению.", sv_title:"Услуги", sv_hint:"То, что вы предлагаете, у каждой услуги своя цена. Добавьте ещё одну, чтобы предложить вторую профессию.", sv_add:"Добавить", sv_remove:"Удалить", sv_headline:"Одна строка об этой услуге (необязательно)", sv_headlinePh:"например, Быстрая сдача для авторов YouTube", sv_none:"Добавьте хотя бы одну услугу.", sv_keepOne:"Оставьте хотя бы одну услугу.", sv_yes:"Да", sv_no:"Нет", sv_notOpen:"Эта профессия пока не открыта для присоединения." },
-    lt:{ pf_who:"Ko ieškote?", pf_all:"Visi", pf_clear:"Išvalyti filtrus", pf_min:"Min", pf_max:"Maks", pf_anyUnit:"Bet kokia kainodara", pf_tagsPh:"Keli žodžiai, atskirti kableliais", pf_noneTitle:"Nė vienas specialistas neatitinka visų pasirinktų filtrų.", pf_noneBody:"Pašalinkite filtrą žemiau arba išvalykite juos visus. Niekas neslepiama, kad sąrašas atrodytų pilnesnis.", pf_tryWithout:"Be „{f}“ būtų {n}.", pf_dropIt:"Pašalinti", pf_noneEven:"Kol kas net vienas filtras atskirai nieko neranda — pabandykite platesnę paiešką.", pf_noneYet:"Čia specialistų dar nėra.", pf_noneYetProf:"Cuvori dar nėra {p}.", pf_noneYetBody:"Cuvori yra naujas ir rodo tik tikrus žmones. Ar esate vienas iš jų? Prisijunkite su kvietimu.", sv_title:"Paslaugos", sv_hint:"Ką siūlote, kiekviena su savo kaina. Pridėkite dar vieną, jei norite siūlyti antrą profesiją.", sv_add:"Pridėti", sv_remove:"Pašalinti", sv_headline:"Viena eilutė apie šią paslaugą (nebūtina)", sv_headlinePh:"pvz., Greitas atlikimas YouTube kūrėjams", sv_none:"Pridėkite bent vieną paslaugą.", sv_keepOne:"Palikite bent vieną paslaugą.", sv_yes:"Taip", sv_no:"Ne", sv_notOpen:"Ši profesija dar neatvira prisijungimui." },
-    es:{ pf_who:"¿A quién necesitas?", pf_all:"Todos", pf_clear:"Borrar filtros", pf_min:"Mín", pf_max:"Máx", pf_anyUnit:"Cualquier precio", pf_tagsPh:"Unas palabras, separadas por comas", pf_noneTitle:"Ningún profesional coincide con todos los filtros seleccionados.", pf_noneBody:"Quita un filtro de abajo o bórralos todos. No ocultamos nada para que la lista parezca más completa.", pf_tryWithout:"Sin «{f}» habría {n}.", pf_dropIt:"Quitarlo", pf_noneEven:"Ni siquiera este filtro por sí solo encuentra a nadie todavía: prueba una búsqueda más amplia.", pf_noneYet:"Todavía no hay profesionales aquí.", pf_noneYetProf:"Aún no hay {p} en Cuvori.", pf_noneYetBody:"Cuvori es nuevo y solo muestra personas reales. ¿Eres una de ellas? Únete con una invitación.", sv_title:"Servicios", sv_hint:"Lo que ofreces, cada uno con su propio precio. Añade otro para ofrecer una segunda profesión.", sv_add:"Añadir", sv_remove:"Eliminar", sv_headline:"Una línea sobre este servicio (opcional)", sv_headlinePh:"p. ej. Entrega rápida para creadores de YouTube", sv_none:"Añade al menos un servicio.", sv_keepOne:"Mantén al menos un servicio.", sv_yes:"Sí", sv_no:"No", sv_notOpen:"Esta profesión aún no está abierta para unirse." },
-    pl:{ pf_who:"Kogo szukasz?", pf_all:"Wszyscy", pf_clear:"Wyczyść filtry", pf_min:"Min", pf_max:"Maks", pf_anyUnit:"Dowolne rozliczenie", pf_tagsPh:"Kilka słów oddzielonych przecinkami", pf_noneTitle:"Żaden specjalista nie pasuje do wszystkich wybranych filtrów.", pf_noneBody:"Usuń filtr poniżej albo wyczyść je wszystkie. Nic nie jest ukrywane, żeby lista wyglądała pełniej.", pf_tryWithout:"Bez „{f}” byłoby {n}.", pf_dropIt:"Usuń", pf_noneEven:"Nawet jeden filtr sam w sobie nikogo jeszcze nie znajduje — spróbuj szerszego wyszukiwania.", pf_noneYet:"Nie ma tu jeszcze specjalistów.", pf_noneYetProf:"Na Cuvori nie ma jeszcze {p}.", pf_noneYetBody:"Cuvori jest nowe i pokazuje tylko prawdziwych ludzi. Jesteś jednym z nich? Dołącz z zaproszeniem.", sv_title:"Usługi", sv_hint:"To, co oferujesz, każda usługa z własną ceną. Dodaj kolejną, by zaoferować drugi zawód.", sv_add:"Dodaj", sv_remove:"Usuń", sv_headline:"Jedno zdanie o tej usłudze (opcjonalnie)", sv_headlinePh:"np. Szybka realizacja dla twórców YouTube", sv_none:"Dodaj co najmniej jedną usługę.", sv_keepOne:"Zostaw co najmniej jedną usługę.", sv_yes:"Tak", sv_no:"Nie", sv_notOpen:"Ten zawód nie jest jeszcze otwarty do dołączenia." },
-    uk:{ pf_who:"Кого ви шукаєте?", pf_all:"Усі", pf_clear:"Скинути фільтри", pf_min:"Мін", pf_max:"Макс", pf_anyUnit:"Будь-яка ціна", pf_tagsPh:"Кілька слів через кому", pf_noneTitle:"Жоден фахівець не відповідає всім обраним фільтрам.", pf_noneBody:"Приберіть фільтр нижче або скиньте всі. Ми нічого не приховуємо, щоб список виглядав довшим.", pf_tryWithout:"Без «{f}» їх було б {n}.", pf_dropIt:"Прибрати", pf_noneEven:"Навіть один цей фільтр поки нікого не знаходить — спробуйте ширший пошук.", pf_noneYet:"Тут поки немає фахівців.", pf_noneYetProf:"На Cuvori поки немає {p}.", pf_noneYetBody:"Cuvori — новий сервіс, який показує лише реальних людей. Ви один з них? Приєднуйтесь за запрошенням.", sv_title:"Послуги", sv_hint:"Те, що ви пропонуєте, у кожної послуги своя ціна. Додайте ще одну, щоб запропонувати другу професію.", sv_add:"Додати", sv_remove:"Видалити", sv_headline:"Один рядок про цю послугу (необов'язково)", sv_headlinePh:"наприклад, Швидке виконання для авторів YouTube", sv_none:"Додайте хоча б одну послугу.", sv_keepOne:"Залиште хоча б одну послугу.", sv_yes:"Так", sv_no:"Ні", sv_notOpen:"Ця професія ще не відкрита для приєднання." }
+    en:{ ti_langPh:"Type a language…", ti_addOwn:"Add “{w}”", pf_results:"Professionals", pf_who:"Who do you need?", pf_all:"Everyone", pf_clear:"Clear filters", pf_min:"Min", pf_max:"Max", pf_anyUnit:"Any pricing", pf_tagsPh:"A few words, separated by commas", pf_noneTitle:"No professionals match all the selected filters.", pf_noneBody:"Remove a filter below or clear them all. Nothing is hidden to make the list look fuller.", pf_tryWithout:"Without “{f}” there would be {n}.", pf_dropIt:"Remove it", pf_noneEven:"Even one filter on its own finds nobody yet — try a broader search.", pf_noneYet:"No professionals here yet.", pf_noneYetProf:"No {p} on Cuvori yet.", pf_noneYetBody:"Cuvori is new and only shows real people. Are you one? Join with an invite.", sv_title:"Services", sv_hint:"What you offer, each with its own price. Add another to offer a second profession.", sv_add:"Add", sv_remove:"Remove", sv_headline:"One line about this service (optional)", sv_headlinePh:"e.g. Fast turnaround for YouTube creators", sv_none:"Add at least one service.", sv_keepOne:"Keep at least one service.", sv_yes:"Yes", sv_no:"No", sv_notOpen:"This profession is not open for joining yet." },
+    de:{ ti_langPh:"Sprache eingeben…", ti_addOwn:"„{w}“ hinzufügen", pf_results:"Freelancer", pf_who:"Wen suchst du?", pf_all:"Alle", pf_clear:"Filter zurücksetzen", pf_min:"Min", pf_max:"Max", pf_anyUnit:"Jede Preisart", pf_tagsPh:"Ein paar Wörter, durch Kommas getrennt", pf_noneTitle:"Keine Profis erfüllen alle ausgewählten Filter.", pf_noneBody:"Entferne unten einen Filter oder setze sie alle zurück. Es wird nichts versteckt, um die Liste voller wirken zu lassen.", pf_tryWithout:"Ohne „{f}“ gäbe es {n}.", pf_dropIt:"Entfernen", pf_noneEven:"Schon ein einzelner Filter findet noch niemanden — versuch eine breitere Suche.", pf_noneYet:"Hier gibt es noch keine Profis.", pf_noneYetProf:"Noch keine {p} auf Cuvori.", pf_noneYetBody:"Cuvori ist neu und zeigt nur echte Menschen. Bist du einer davon? Tritt mit einer Einladung bei.", sv_title:"Leistungen", sv_hint:"Was du anbietest, jede mit eigenem Preis. Füge eine weitere hinzu, um einen zweiten Beruf anzubieten.", sv_add:"Hinzufügen", sv_remove:"Entfernen", sv_headline:"Ein Satz zu dieser Leistung (optional)", sv_headlinePh:"z. B. Schnelle Bearbeitung für YouTube-Creator", sv_none:"Füge mindestens eine Leistung hinzu.", sv_keepOne:"Behalte mindestens eine Leistung.", sv_yes:"Ja", sv_no:"Nein", sv_notOpen:"Dieser Beruf ist noch nicht für den Beitritt geöffnet." },
+    ru:{ ti_langPh:"Введите язык…", ti_addOwn:"Добавить «{w}»", pf_results:"Специалисты", pf_who:"Кого вы ищете?", pf_all:"Все", pf_clear:"Сбросить фильтры", pf_min:"Мин", pf_max:"Макс", pf_anyUnit:"Любая цена", pf_tagsPh:"Несколько слов через запятую", pf_noneTitle:"Ни один специалист не подходит под все выбранные фильтры.", pf_noneBody:"Уберите фильтр ниже или сбросьте все. Мы ничего не скрываем, чтобы список выглядел длиннее.", pf_tryWithout:"Без «{f}» их было бы {n}.", pf_dropIt:"Убрать", pf_noneEven:"Даже один этот фильтр пока никого не находит — попробуйте более широкий поиск.", pf_noneYet:"Здесь пока нет специалистов.", pf_noneYetProf:"На Cuvori пока нет {p}.", pf_noneYetBody:"Cuvori — новый сервис и показывает только реальных людей. Вы один из них? Присоединяйтесь по приглашению.", sv_title:"Услуги", sv_hint:"То, что вы предлагаете, у каждой услуги своя цена. Добавьте ещё одну, чтобы предложить вторую профессию.", sv_add:"Добавить", sv_remove:"Удалить", sv_headline:"Одна строка об этой услуге (необязательно)", sv_headlinePh:"например, Быстрая сдача для авторов YouTube", sv_none:"Добавьте хотя бы одну услугу.", sv_keepOne:"Оставьте хотя бы одну услугу.", sv_yes:"Да", sv_no:"Нет", sv_notOpen:"Эта профессия пока не открыта для присоединения." },
+    lt:{ ti_langPh:"Įveskite kalbą…", ti_addOwn:"Pridėti „{w}“", pf_results:"Specialistai", pf_who:"Ko ieškote?", pf_all:"Visi", pf_clear:"Išvalyti filtrus", pf_min:"Min", pf_max:"Maks", pf_anyUnit:"Bet kokia kainodara", pf_tagsPh:"Keli žodžiai, atskirti kableliais", pf_noneTitle:"Nė vienas specialistas neatitinka visų pasirinktų filtrų.", pf_noneBody:"Pašalinkite filtrą žemiau arba išvalykite juos visus. Niekas neslepiama, kad sąrašas atrodytų pilnesnis.", pf_tryWithout:"Be „{f}“ būtų {n}.", pf_dropIt:"Pašalinti", pf_noneEven:"Kol kas net vienas filtras atskirai nieko neranda — pabandykite platesnę paiešką.", pf_noneYet:"Čia specialistų dar nėra.", pf_noneYetProf:"Cuvori dar nėra {p}.", pf_noneYetBody:"Cuvori yra naujas ir rodo tik tikrus žmones. Ar esate vienas iš jų? Prisijunkite su kvietimu.", sv_title:"Paslaugos", sv_hint:"Ką siūlote, kiekviena su savo kaina. Pridėkite dar vieną, jei norite siūlyti antrą profesiją.", sv_add:"Pridėti", sv_remove:"Pašalinti", sv_headline:"Viena eilutė apie šią paslaugą (nebūtina)", sv_headlinePh:"pvz., Greitas atlikimas YouTube kūrėjams", sv_none:"Pridėkite bent vieną paslaugą.", sv_keepOne:"Palikite bent vieną paslaugą.", sv_yes:"Taip", sv_no:"Ne", sv_notOpen:"Ši profesija dar neatvira prisijungimui." },
+    es:{ ti_langPh:"Escribe un idioma…", ti_addOwn:"Añadir «{w}»", pf_results:"Profesionales", pf_who:"¿A quién necesitas?", pf_all:"Todos", pf_clear:"Borrar filtros", pf_min:"Mín", pf_max:"Máx", pf_anyUnit:"Cualquier precio", pf_tagsPh:"Unas palabras, separadas por comas", pf_noneTitle:"Ningún profesional coincide con todos los filtros seleccionados.", pf_noneBody:"Quita un filtro de abajo o bórralos todos. No ocultamos nada para que la lista parezca más completa.", pf_tryWithout:"Sin «{f}» habría {n}.", pf_dropIt:"Quitarlo", pf_noneEven:"Ni siquiera este filtro por sí solo encuentra a nadie todavía: prueba una búsqueda más amplia.", pf_noneYet:"Todavía no hay profesionales aquí.", pf_noneYetProf:"Aún no hay {p} en Cuvori.", pf_noneYetBody:"Cuvori es nuevo y solo muestra personas reales. ¿Eres una de ellas? Únete con una invitación.", sv_title:"Servicios", sv_hint:"Lo que ofreces, cada uno con su propio precio. Añade otro para ofrecer una segunda profesión.", sv_add:"Añadir", sv_remove:"Eliminar", sv_headline:"Una línea sobre este servicio (opcional)", sv_headlinePh:"p. ej. Entrega rápida para creadores de YouTube", sv_none:"Añade al menos un servicio.", sv_keepOne:"Mantén al menos un servicio.", sv_yes:"Sí", sv_no:"No", sv_notOpen:"Esta profesión aún no está abierta para unirse." },
+    pl:{ ti_langPh:"Wpisz język…", ti_addOwn:"Dodaj „{w}”", pf_results:"Specjaliści", pf_who:"Kogo szukasz?", pf_all:"Wszyscy", pf_clear:"Wyczyść filtry", pf_min:"Min", pf_max:"Maks", pf_anyUnit:"Dowolne rozliczenie", pf_tagsPh:"Kilka słów oddzielonych przecinkami", pf_noneTitle:"Żaden specjalista nie pasuje do wszystkich wybranych filtrów.", pf_noneBody:"Usuń filtr poniżej albo wyczyść je wszystkie. Nic nie jest ukrywane, żeby lista wyglądała pełniej.", pf_tryWithout:"Bez „{f}” byłoby {n}.", pf_dropIt:"Usuń", pf_noneEven:"Nawet jeden filtr sam w sobie nikogo jeszcze nie znajduje — spróbuj szerszego wyszukiwania.", pf_noneYet:"Nie ma tu jeszcze specjalistów.", pf_noneYetProf:"Na Cuvori nie ma jeszcze {p}.", pf_noneYetBody:"Cuvori jest nowe i pokazuje tylko prawdziwych ludzi. Jesteś jednym z nich? Dołącz z zaproszeniem.", sv_title:"Usługi", sv_hint:"To, co oferujesz, każda usługa z własną ceną. Dodaj kolejną, by zaoferować drugi zawód.", sv_add:"Dodaj", sv_remove:"Usuń", sv_headline:"Jedno zdanie o tej usłudze (opcjonalnie)", sv_headlinePh:"np. Szybka realizacja dla twórców YouTube", sv_none:"Dodaj co najmniej jedną usługę.", sv_keepOne:"Zostaw co najmniej jedną usługę.", sv_yes:"Tak", sv_no:"Nie", sv_notOpen:"Ten zawód nie jest jeszcze otwarty do dołączenia." },
+    uk:{ ti_langPh:"Введіть мову…", ti_addOwn:"Додати «{w}»", pf_results:"Фахівці", pf_who:"Кого ви шукаєте?", pf_all:"Усі", pf_clear:"Скинути фільтри", pf_min:"Мін", pf_max:"Макс", pf_anyUnit:"Будь-яка ціна", pf_tagsPh:"Кілька слів через кому", pf_noneTitle:"Жоден фахівець не відповідає всім обраним фільтрам.", pf_noneBody:"Приберіть фільтр нижче або скиньте всі. Ми нічого не приховуємо, щоб список виглядав довшим.", pf_tryWithout:"Без «{f}» їх було б {n}.", pf_dropIt:"Прибрати", pf_noneEven:"Навіть один цей фільтр поки нікого не знаходить — спробуйте ширший пошук.", pf_noneYet:"Тут поки немає фахівців.", pf_noneYetProf:"На Cuvori поки немає {p}.", pf_noneYetBody:"Cuvori — новий сервіс, який показує лише реальних людей. Ви один з них? Приєднуйтесь за запрошенням.", sv_title:"Послуги", sv_hint:"Те, що ви пропонуєте, у кожної послуги своя ціна. Додайте ще одну, щоб запропонувати другу професію.", sv_add:"Додати", sv_remove:"Видалити", sv_headline:"Один рядок про цю послугу (необов'язково)", sv_headlinePh:"наприклад, Швидке виконання для авторів YouTube", sv_none:"Додайте хоча б одну послугу.", sv_keepOne:"Залиште хоча б одну послугу.", sv_yes:"Так", sv_no:"Ні", sv_notOpen:"Ця професія ще не відкрита для приєднання." }
   };
   for(const code in T_PROF){ if(T[code]) Object.assign(T[code], T_PROF[code]); }
 
@@ -4303,15 +4310,17 @@
   // that profession's main speciality list (video categories, shoot types, …), from the same configuration
   function jobProfessions(){ const list=(typeof joinableProfessions==="function"?joinableProfessions():[]); return list.length?list:PROF.professions.filter(p=>["video-editor","videographer","photographer"].includes(p.slug)); }
   function jobSpecKey(slug){ return typeof primaryMultiKey==="function" ? primaryMultiKey(slug) : null; }
+  // the list filters a job can carry: the profession's primary multi-select filters (specialities, software, shoot types …)
+  function jobFilterKeys(slug){ return profFilters(slug).filter(x=>x.primary_filter && x.def.kind==="multi").map(x=>x.key); }
   function fillJobCatSelect(){
-    const role=$("#jobRole"), sel=$("#jobCat"); if(!sel||!role) return;
+    const role=$("#jobRole"), box=$("#jobSpecs"); if(!box||!role) return;
     const cur=role.value; role.innerHTML=jobProfessions().map(p=>`<option value="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</option>`).join("");
     if(cur && [...role.options].some(o=>o.value===cur)) role.value=cur;
-    const k=jobSpecKey(role.value); const d=k?filterDef(k):null; const i=sel.value;
-    sel.innerHTML = d ? (d.options||[]).map(o=>`<option value="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</option>`).join("") : `<option value="">—</option>`;
-    if(i && [...sel.options].some(o=>o.value===i)) sel.value=i;
-    sel.closest("div").classList.toggle("hidden", !d);
+    const chosen={}; $$(".job-opt.selected",box).forEach(b=>{ (chosen[b.dataset.k]=chosen[b.dataset.k]||[]).push(b.dataset.v); });
+    box.innerHTML=jobFilterKeys(role.value).map(k=>{ const d=filterDef(k); return `<div style="margin-bottom:10px"><label>${escapeHtml(pl(d.labels))}</label><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-opt${(chosen[k]||[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div></div>`; }).join("");
+    $$(".job-opt",box).forEach(b=>b.addEventListener("click",()=>{ b.classList.toggle("selected"); updateJobPreview(); }));
   }
+  function jobReadDetails(){ const d={}; $$("#jobSpecs .job-opt.selected").forEach(b=>{ (d[b.dataset.k]=d[b.dataset.k]||[]).push(b.dataset.v); }); return d; }
   const ROLE_TO_KEY = { editor:"roleEditor", videographer:"roleVideographer", photographer:"optPhotographer", editor_photographer:"roleEditorPhotographer" };
   const UNIT_TO_KEY = { hour:"perHour", project:"perProject", day:"perDay" };
   const COUNTRY_NAME = { DE:"countryGermany", ES:"countrySpain", KR:"countrySouthKorea", LT:"countryLithuania" };
@@ -4408,6 +4417,7 @@
     }
     const total = state.searchTotal!=null ? state.searchTotal : real.length;
     const rc=$("#resultCount"); if(rc) rc.textContent=t(total===1?"profileCountOne":"profileCountOther").replace("{n}", total);
+    const rt=$("#resultsTitle"); if(rt) rt.textContent=state.ps.profession ? profName(state.ps.profession) : t("pf_results");
     // the database already ordered them (available first, then rating); insert in reverse so the first stays on top
     real.slice().reverse().forEach(([k,p])=>grid.insertAdjacentHTML("afterbegin", cardHtml(k,p)));
     $$(".real-card",grid).forEach(card=>{
@@ -4432,7 +4442,7 @@
         <div><label>${t("d_displayName")}</label><input id="epName" maxlength="80" value="${escapeHtml(r.display_name||p.name||"")}"></div>
         <div><label>${t("d_city")}</label><input id="epCity" maxlength="80" value="${escapeHtml(r.city||"")}"></div>
         <div><label>${t("d_country")}</label><input id="epCountry" maxlength="80" value="${escapeHtml(r.country||"")}"></div>
-        <div style="grid-column:1/-1"><label>${t("d_languages")}</label>${chipPick("ep-lang",PICK_LANGS,r.languages)}<input id="epLangs" style="margin-top:8px" value="${escapeHtml(pickRest(PICK_LANGS,r.languages).join(", "))}" placeholder="${escapeHtml(t("d_skillsOwn"))}"></div>
+        <div style="grid-column:1/-1"><label>${t("d_languages")}</label>${tagInputHtml("epLangTags",{ options:(filterDef("languages")||{}).options||[], selected:r.languages||[], placeholder:t("ti_langPh"), allowFree:true })}</div>
         ${svcBlockHtml(svcInitial(p))}
         <div style="grid-column:1/-1"><label>${t("d_bio")}</label><textarea id="epBio" maxlength="3000" style="min-height:90px">${escapeHtml(r.bio||"")}</textarea></div>
         <div style="grid-column:1/-1"><label>${t("d_credTitle")}</label><div class="muted small" style="margin:-2px 0 8px">${t("d_credHint")}</div><div id="epCreds">${(Array.isArray(r.credentials)?r.credentials:[]).map(c=>credRowHtml(c,p.projects)).join("")}</div><button type="button" class="secondary small-btn" id="epAddCred">${t("d_credAdd")}</button></div>
@@ -4442,7 +4452,7 @@
         <div><label class="switch-row" style="border:0;padding:8px 0"><span><strong>${t("d_public")}</strong><span class="muted small">${t("d_publicHint")}</span></span><input type="checkbox" class="switch" id="epPublic" ${r.is_public?"checked":""}></label></div>
       </div>
       <button class="primary" id="epSave" style="margin-top:14px">${t("p_saveChanges")}</button>`, root=>{
-        $$(".ep-lang",root).forEach(b=>b.addEventListener("click",()=>b.classList.toggle("selected")));
+        tagInputBind(root,"epLangTags",(filterDef("languages")||{}).options||[]);
         avBindPicker(root); svcBind(root);
         $("#epAddCred",root).addEventListener("click",()=>{ $("#epCreds",root).insertAdjacentHTML("beforeend",credRowHtml({},p.projects)); $("#epCreds .cred-row:last-child .cr-title",root).focus(); });
         $("#epCreds",root).addEventListener("click",e=>{ const b=e.target.closest(".cr-del"); if(b) b.closest(".cred-row").remove(); });
@@ -4456,7 +4466,7 @@
           // the common profile; price, role, specialisms and tools are mirrored from the main service by the database
           const legacyRole = services[0].profession_slug==="videographer"?"videographer":services[0].profession_slug==="photographer"?"photographer":"editor";
           const upd={ id:myId(), display_name:$("#epName",root).value.trim()||displayName(), role_label: (r.role_label && p.services && p.services.length>1) ? r.role_label : legacyRole, city:$("#epCity",root).value.trim(), country:$("#epCountry",root).value.trim(),
-            languages:pickValues(root,"ep-lang","#epLangs"), bio:$("#epBio",root).value.trim(), credentials:creds,
+            languages:tagInputValues(root,"epLangTags").map(x=>String(x).slice(0,40)).slice(0,30), bio:$("#epBio",root).value.trim(), credentials:creds,
             responds_hours:clamp($("#epResp",root).value,1,720,24), revisions:clamp($("#epRev",root).value,0,50,2),
             ...avReadPicker(root),
             is_public:$("#epPublic",root).checked, updated_at:new Date().toISOString() };
@@ -4504,11 +4514,21 @@
     renderRealJobs();
   }
   function ago(ts){ const d=Math.floor((Date.now()-new Date(ts))/86400000); return d<1?"0d":d<7?d+"d":Math.floor(d/7)+"w"; }
-  function renderJobRoleFilters(){
-    const host=$("#jobRoleFilters"); if(!host) return;
-    const on=new Set($$(".job-filter[data-key='role']:checked",host).map(c=>c.value));
-    host.innerHTML=jobProfessions().map(p=>`<label class="check"><input type="checkbox" class="job-filter" data-key="role" value="${escapeHtml(p.slug)}" ${on.has(p.slug)?"checked":""}> <span>${escapeHtml(pl(p.labels))}</span></label>`).join("");
-    $$(".job-filter",host).forEach(c=>c.addEventListener("change",runJobSearch));
+  state.js = { profession:null, f:{} };
+  function renderJobFilterBar(){
+    const row=$("#jobProfRow"), chips=$("#jobFilterRow"); if(!row||!chips) return;
+    const present=new Set($$("#jobList .job[data-job]:not(.demo-hidden)").map(j=>j.dataset.role).filter(Boolean));
+    const profs=PROF.professions.filter(p=>present.has(p.slug) || p.slug===state.js.profession).sort((a,b)=>a.sort_order-b.sort_order);
+    row.innerHTML=`<span class="filter-label">${escapeHtml(t("p_roleFilter"))}</span><button class="chip prof-chip${state.js.profession?"":" selected"}" data-prof="">${escapeHtml(t("pf_all"))}</button>`+
+      profs.map(p=>`<button class="chip prof-chip${state.js.profession===p.slug?" selected":""}" data-prof="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</button>`).join("");
+    $$(".prof-chip",row).forEach(b=>b.addEventListener("click",()=>{ const slug=b.dataset.prof||null; if(slug!==state.js.profession){ state.js.profession=slug; state.js.f={}; } renderJobFilterBar(); runJobSearch(); }));
+    const keys=state.js.profession?jobFilterKeys(state.js.profession):[];
+    const n=Object.keys(state.js.f).length;
+    chips.innerHTML=keys.map(k=>{ const d=filterDef(k); return (d.options||[]).map(o=>`<button class="chip${(state.js.f[k]||[]).includes(o.key)?" selected":""}" data-jk="${escapeHtml(k)}" data-jv="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join(""); }).join("")+
+      (n?`<button class="chip link" id="clearJobChips">${escapeHtml(t("pf_clear"))}</button>`:"");
+    chips.classList.toggle("hidden", !keys.length);
+    $$("[data-jk]",chips).forEach(b=>b.addEventListener("click",()=>{ const k=b.dataset.jk, v=b.dataset.jv; const cur=(state.js.f[k]||[]).slice(); const i=cur.indexOf(v); if(i>=0) cur.splice(i,1); else cur.push(v); if(cur.length) state.js.f[k]=cur; else delete state.js.f[k]; renderJobFilterBar(); runJobSearch(); }));
+    $("#clearJobChips",chips)?.addEventListener("click",()=>{ state.js.f={}; renderJobFilterBar(); runJobSearch(); });
   }
   function renderRealJobs(){
     if(!REAL) return;
@@ -4521,30 +4541,31 @@
       const el=document.createElement("div"); el.className="job real-job"; el.dataset.job=(j.title+" "+(j.description||"")+" "+(j.location||"")).toLowerCase();
       const jslug=j.profession_slug || ({editor:"video-editor",videographer:"videographer",photographer:"photographer"}[j.role_needed]||"video-editor");
       el.dataset.role=jslug; el.dataset.where=j.remote?"remote":"onsite"; el.dataset.pricing=j.pricing; el.dataset.owner=j.owner; el.dataset.id=j.id;
-      const specK=jobSpecKey(jslug); const specV=(j.details&&specK&&Array.isArray(j.details[specK])&&j.details[specK][0]) || (specK==="video_specialty"?j.category:null);
+      const det=(j.details&&typeof j.details==="object")?{...j.details}:{}; if(!det.video_specialty && jobSpecKey(jslug)==="video_specialty" && j.category && j.category!=="catOther") det.video_specialty=[j.category];
+      el.dataset.details=JSON.stringify(det);
       el.innerHTML=`<div class="job-avatar alt">${escapeHtml(initialsOf(who))}</div><div class="job-content">
         <div class="job-top"><div><h3>${escapeHtml(j.title)}</h3><div class="muted">${escapeHtml(who)} · ${escapeHtml(j.location||t("p_remote"))}</div></div><strong>${escapeHtml(j.budget||"€ —")}</strong></div>
         <p class="muted">${escapeHtml(j.description||"")}</p>
-        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${specV?`<span class="pill">${escapeHtml(optName(specK,specV))}</span>`:""}${j.owner===myId()?`<button class="link-btn" data-close-job="${j.id}" style="font-size:12px">${t("d_closeJob")}</button>`:""}<span class="job-time muted">${t("p_posted")} ${ago(j.created_at)}</span></div></div>`;
+        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${Object.entries(det).flatMap(([k,vs])=>(Array.isArray(vs)?vs:[]).slice(0,4).map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}${j.owner===myId()?`<button class="link-btn" data-close-job="${j.id}" style="font-size:12px">${t("d_closeJob")}</button>`:""}<span class="job-time muted">${t("p_posted")} ${ago(j.created_at)}</span></div></div>`;
       el.addEventListener("click",e=>{ if(e.target.closest("[data-close-job]")) return; openJob(el); });
       list.prepend(el);
     });
     $$("[data-close-job]",list).forEach(b=>b.addEventListener("click",async e=>{e.stopPropagation(); await sb.from("jobs").update({status:"closed"}).eq("id",b.dataset.closeJob); toast(t("d_jobClosed")); loadJobs();}));
     $("#jobsEmptyReal")?.remove();
     if(!state.jobsReal.length){ const n=document.createElement("div"); n.id="jobsEmptyReal"; n.className="empty-state"; n.innerHTML=`<strong>${t("d_noJobs")}</strong>`; list.append(n); }
-    runJobSearch();
+    renderJobFilterBar(); runJobSearch();
   }
   async function publishJobReal(){
-    const role=$("#jobRole"), cat=$("#jobCat"), pricing=$("#jobPricing");
+    const role=$("#jobRole"), pricing=$("#jobPricing");
     const loc=$("#jobLoc").value.trim(), title=$("#jobTitle").value.trim();
-    const slug=role.value||"video-editor"; const specKey=jobSpecKey(slug); const spec=cat.value||"";
+    const slug=role.value||"video-editor"; const details=jobReadDetails(); const spec=(details.video_specialty||[])[0]||"";
     const legacyRole={ "video-editor":"editor", videographer:"videographer", photographer:"photographer" }[slug] || "editor";
     const row={ owner:myId(), title, status:"open", role_needed:legacyRole, profession_slug:slug, category:CAT_KEYS.includes(spec)?spec:"catOther",
-      details: (specKey && spec) ? { [specKey]:[spec] } : {},
+      details,
       description:$("#jobDesc").value.trim(), location:loc, remote:(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc)), pricing:pricing.selectedIndex===0?"project":"hourly", budget:$("#jobBudget").value.trim(), deadline:$("#jobDeadline").value||null };
     const { error } = await sb.from("jobs").insert(row);
     if(error){ toast(errText(error)); console.error(error); return; }
-    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); updateJobPreview();
+    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); $$("#jobSpecs .job-opt.selected").forEach(b=>b.classList.remove("selected")); updateJobPreview();
     toast(t("d_jobPosted")); route("jobs"); loadJobs();
   }
 
@@ -5789,7 +5810,7 @@
   function setProfession(slug, opts){
     slug = slug && profBySlug(slug) ? slug : null;
     if(state.ps.profession!==slug){ state.ps.profession=slug; state.ps.f={}; }   // filters belong to a profession; changing it clears them
-    renderFilterBar();
+    renderFilterBar(); const rt=$("#resultsTitle"); if(rt) rt.textContent=slug ? profName(slug) : t("pf_results");
     if(!(opts&&opts.silent)) runProfileSearch();
     if(!(opts&&opts.noRoute)){ const h=slug?"#professionals/"+slug:"#home"; if(location.hash!==h) history.replaceState(null,"",h); }
   }
@@ -5836,7 +5857,7 @@
     const block=(title, inner)=>`<div class="fblock"><strong>${escapeHtml(title)}</strong>${inner}</div>`;
     const html=list.map(x=>{ const d=x.def, k=d.key;
       if(d.kind==="price"){ const pr=f.price||{}; return block(pl(d.labels), `<div class="frow"><input type="number" min="0" id="fPriceMin" placeholder="${escapeHtml(t("pf_min"))}" value="${pr.min??""}"><span>–</span><input type="number" min="0" id="fPriceMax" placeholder="${escapeHtml(t("pf_max"))}" value="${pr.max??""}"><select id="fPriceUnit"><option value="">${escapeHtml(t("pf_anyUnit"))}</option>${units.map(u=>`<option value="${u}" ${pr.unit===u?"selected":""}>${escapeHtml(unitName(u))}</option>`).join("")}</select></div>`); }
-      if(d.kind==="languages") return block(pl(d.labels), `<div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip fopt${psHasOpt(k,o.key)?" selected":""}" data-k="${k}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>`);
+      if(d.kind==="languages") return block(pl(d.labels), tagInputHtml("fLangs",{ options:d.options||[], selected:f[k]||[], placeholder:t("ti_langPh") }));
       if(d.kind==="location"){ const l=f.location||{}; return block(pl(d.labels), `<div class="frow"><input id="fCountry" placeholder="${escapeHtml(t("d_country"))}" value="${escapeHtml(l.country||"")}"><input id="fCity" placeholder="${escapeHtml(t("d_city"))}" value="${escapeHtml(l.city||"")}"></div>`); }
       if(d.kind==="availability") return block(pl(d.labels), `<label class="switch-row" style="border:0;padding:6px 0"><span>${escapeHtml(t("av_filterOpen"))}</span><input type="checkbox" class="switch fbool" data-k="availability" ${f.availability==="open"?"checked":""}></label>`);
       if(d.kind==="bool") return block(pl(d.labels), `<label class="switch-row" style="border:0;padding:6px 0"><span>${escapeHtml(pl(d.labels))}</span><input type="checkbox" class="switch fbool" data-k="${k}" ${f[k]?"checked":""}></label>`);
@@ -5849,6 +5870,7 @@
     openModal(t("allFiltersModalTitle") + (p ? " · " + pl(p.labels) : ""), html +
       `<div class="two-col" style="gap:8px;margin-top:16px"><button class="primary" id="applyFilters">${escapeHtml(t("applyFiltersBtn"))}</button><button class="secondary" id="resetFilters">${escapeHtml(t("pf_clear"))}</button></div>`, root=>{
         $$(".fopt",root).forEach(b=>b.addEventListener("click",()=>b.classList.toggle("selected")));
+        if($("#fLangs",root)) tagInputBind(root,"fLangs",(filterDef("languages")||{}).options||[]);
         $$(".fone",root).forEach(b=>b.addEventListener("click",()=>{ const on=b.classList.contains("selected"); $$(`.fone[data-k="${b.dataset.k}"]`,root).forEach(x=>x.classList.remove("selected")); if(!on) b.classList.add("selected"); }));
         $("#resetFilters",root).addEventListener("click",()=>{ state.ps.f={}; closeModal(); renderFilterBar(); runProfileSearch(); });
         $("#applyFilters",root).addEventListener("click",()=>{
@@ -5856,6 +5878,7 @@
           const pm=$("#fPriceMin",root), px=$("#fPriceMax",root), pu=$("#fPriceUnit",root);
           if(pm&&(pm.value!==""||px.value!==""||pu.value)){ const o={}; if(pm.value!=="") o.min=Math.max(0,+pm.value); if(px.value!=="") o.max=Math.max(0,+px.value); if(pu.value) o.unit=pu.value; if(Object.keys(o).length) nf.price=o; }
           const byK={}; $$(".fopt.selected",root).forEach(b=>{ (byK[b.dataset.k]=byK[b.dataset.k]||[]).push(b.dataset.v); }); Object.assign(nf, byK);
+          if($("#fLangs",root)){ const ls=tagInputValues(root,"fLangs"); if(ls.length) nf.languages=ls; }
           $$(".fone.selected",root).forEach(b=>{ nf[b.dataset.k]=b.dataset.v; });
           const co=$("#fCountry",root), ci=$("#fCity",root); if(co&&(co.value.trim()||ci.value.trim())) nf.location={ country:co.value.trim().slice(0,80), city:ci.value.trim().slice(0,80) };
           $$(".fbool",root).forEach(c=>{ if(!c.checked) return; if(c.dataset.k==="availability") nf.availability="open"; else nf[c.dataset.k]=true; });
@@ -6076,6 +6099,47 @@
   }
   function svcErrText(e){ const m=String((e&&e.message)||""); if(m.includes("profession_not_open")) return t("sv_notOpen"); if(m.startsWith("unknown_option")||m.startsWith("unknown_field")||m.startsWith("out_of_range")||m.startsWith("bad_")) return t("err_invalidInput"); return errText(e); }
 
+  // ---------- a typed field that turns matches into tags: "Lith" → Lithuanian ----------
+  // options: [{key, labels}] · selected: keys · allowFree: an unknown word can be added as its own tag
+  function tagInputHtml(id, opts){
+    const o=opts||{}; const sel=(o.selected||[]);
+    const labelOf=k=>{ const x=(o.options||[]).find(y=>y.key===k); return x?pl(x.labels):k; };
+    return `<div class="taginput" id="${escapeHtml(id)}" data-free="${o.allowFree?"1":"0"}">
+      <span class="tags">${sel.map(k=>`<span class="tag" data-k="${escapeHtml(k)}">${escapeHtml(labelOf(k))}<button type="button" class="tag-x" aria-label="remove">×</button></span>`).join("")}</span>
+      <input type="text" autocomplete="off" placeholder="${escapeHtml(o.placeholder||"")}" maxlength="40">
+      <div class="tag-suggest hidden"></div></div>`;
+  }
+  function tagInputBind(root, id, options){
+    const box=$("#"+id, root); if(!box) return; const input=$("input",box), sug=$(".tag-suggest",box), tags=$(".tags",box);
+    const opts=options||[]; const labelOf=k=>{ const x=opts.find(y=>y.key===k); return x?pl(x.labels):k; };
+    const have=()=>$$(".tag",tags).map(t0=>t0.dataset.k);
+    const add=k=>{ if(!k||have().includes(k)) return; tags.insertAdjacentHTML("beforeend",`<span class="tag" data-k="${escapeHtml(k)}">${escapeHtml(labelOf(k))}<button type="button" class="tag-x" aria-label="remove">×</button></span>`); input.value=""; hide(); };
+    const hide=()=>{ sug.classList.add("hidden"); sug.innerHTML=""; };
+    const matches=q=>{ q=q.trim().toLowerCase(); if(!q) return []; const h=have();
+      return opts.filter(x=>!h.includes(x.key)).map(x=>({x, names:[...new Set(Object.values(x.labels||{}))]}))
+        .filter(m=>m.names.some(n=>n.toLowerCase().startsWith(q)) || m.names.some(n=>n.toLowerCase().includes(q)))
+        .sort((a,b)=>{ const as=a.names.some(n=>n.toLowerCase().startsWith(q))?0:1, bs=b.names.some(n=>n.toLowerCase().startsWith(q))?0:1; return as-bs; }).slice(0,8).map(m=>m.x); };
+    const show=()=>{ const m=matches(input.value); const free=box.dataset.free==="1" && input.value.trim() && !m.length && !/[<>]/.test(input.value);
+      if(!m.length && !free){ hide(); return; }
+      sug.innerHTML=m.map((x,i)=>`<button type="button" class="tag-opt${i===0?" active":""}" data-k="${escapeHtml(x.key)}">${escapeHtml(pl(x.labels))}</button>`).join("")+(free?`<button type="button" class="tag-opt${m.length?"":" active"}" data-k="${escapeHtml(input.value.trim())}">${escapeHtml(t("ti_addOwn").replace("{w}",input.value.trim()))}</button>`:"");
+      sug.classList.remove("hidden"); };
+    input.addEventListener("input",show);
+    input.addEventListener("focus",show);
+    input.addEventListener("keydown",e=>{
+      const act=$(".tag-opt.active",sug), all=$$(".tag-opt",sug);
+      if(e.key==="Enter"){ e.preventDefault(); if(act) add(act.dataset.k); else if(all[0]) add(all[0].dataset.k); else if(box.dataset.free==="1" && input.value.trim() && !/[<>]/.test(input.value)) add(input.value.trim()); }
+      else if(e.key==="ArrowDown"||e.key==="ArrowUp"){ if(!all.length) return; e.preventDefault(); let i=all.indexOf(act); i=e.key==="ArrowDown"?Math.min(all.length-1,i+1):Math.max(0,i-1); all.forEach((b,j)=>b.classList.toggle("active",j===i)); }
+      else if(e.key==="Backspace" && !input.value){ const last=$$(".tag",tags).pop(); if(last) last.remove(); }
+      else if(e.key==="Escape") hide();
+      else if(e.key==="," ){ e.preventDefault(); const first=$(".tag-opt",sug); if(first) add(first.dataset.k); }
+    });
+    sug.addEventListener("mousedown",e=>{ const b=e.target.closest(".tag-opt"); if(b){ e.preventDefault(); add(b.dataset.k); input.focus(); } });
+    tags.addEventListener("click",e=>{ const x=e.target.closest(".tag-x"); if(x){ x.closest(".tag").remove(); input.focus(); } });
+    box.addEventListener("click",e=>{ if(e.target===box||e.target===tags) input.focus(); });
+    input.addEventListener("blur",()=>setTimeout(hide,150));
+  }
+  function tagInputValues(root, id){ const box=$("#"+id, root); return box ? $$(".tag",box).map(t0=>t0.dataset.k) : []; }
+
   function init(){
     loadReco(); initAdmin(); initContracts(); initEscrow(); initRules();
     applyProfConfig(window.CUVORI_PROFESSIONS); renderFilterBar();
@@ -6191,6 +6255,9 @@
       const text=(j.dataset.job+" "+j.textContent).toLowerCase();
       let ok=!q || text.includes(q);
       for(const k in active){ if(ok && !active[k].includes(j.dataset[k])) ok=false; }
+      if(ok && state.js.profession && j.dataset.role!==state.js.profession) ok=false;
+      if(ok && Object.keys(state.js.f).length){ let det={}; try{ det=JSON.parse(j.dataset.details||"{}"); }catch(e){}
+        for(const [k,vs] of Object.entries(state.js.f)){ const have=Array.isArray(det[k])?det[k]:[]; if(!vs.some(v=>have.includes(v))){ ok=false; break; } } }
       j.classList.toggle("hidden",!ok); if(ok) n++;
     });
     $("#jobCount").textContent=t(n===1?"p_jobCountOne":"p_jobCountOther").replace("{n}",n);
@@ -6199,13 +6266,13 @@
 
   function updateJobPreview(){
     const title=$("#jobTitle").value.trim(), desc=$("#jobDesc").value.trim(), loc=$("#jobLoc").value.trim(), budget=$("#jobBudget").value.trim();
-    const role=$("#jobRole"), cat=$("#jobCat");
+    const role=$("#jobRole");
     $("#pvTitle").textContent=title||t("p_pvTitle");
     $("#pvMeta").textContent=t("p_pvYou")+" · "+(loc||t("p_remote"));
     $("#pvBudget").textContent=budget||"€ —";
     $("#pvDesc").textContent=desc||t("p_pvDesc");
-    const ro=role.options[role.selectedIndex], co=cat.options[cat.selectedIndex];
-    $("#pvTags").innerHTML=`<span class="pill">${escapeHtml(ro?ro.textContent:"")}</span>${co&&co.value?`<span class="pill">${escapeHtml(co.textContent)}</span>`:""}`;
+    const ro=role.options[role.selectedIndex]; const det=jobReadDetails();
+    $("#pvTags").innerHTML=`<span class="pill">${escapeHtml(ro?ro.textContent:"")}</span>`+Object.entries(det).flatMap(([k,vs])=>vs.map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("");
   }
 
   function publishJobFromForm(){
@@ -6213,16 +6280,16 @@
     if(REAL){ if(!$("#jobTitle").value.trim()){ toast(t("toastAddJobTitle")); return; } return publishJobReal(); }
     const title=$("#jobTitle").value.trim();
     if(!title){toast(t("toastAddJobTitle"));$("#jobTitle").focus();return;}
-    const role=$("#jobRole"), cat=$("#jobCat"), pricing=$("#jobPricing");
-    const roleVal=["editor","videographer","photographer"][role.selectedIndex];
+    const role=$("#jobRole"), pricing=$("#jobPricing");
+    const roleVal=role.value||"video-editor"; const det=jobReadDetails();
     const loc=$("#jobLoc").value.trim(), desc=$("#jobDesc").value.trim(), budget=$("#jobBudget").value.trim()||"€ —";
     const where=(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc))?"remote":"onsite";
     const j=document.createElement("div");
-    j.className="job"; j.dataset.job=(title+" "+desc).toLowerCase(); j.dataset.role=roleVal; j.dataset.where=where; j.dataset.pricing=pricing.selectedIndex===0?"project":"hourly";
+    j.className="job"; j.dataset.job=(title+" "+desc).toLowerCase(); j.dataset.role=roleVal; j.dataset.where=where; j.dataset.pricing=pricing.selectedIndex===0?"project":"hourly"; j.dataset.details=JSON.stringify(det);
     j.innerHTML=`<div class="job-avatar alt">EC</div><div class="job-content">
       <div class="job-top"><div><h3>${escapeHtml(title)}</h3><div class="muted">${t("p_pvYou")} · ${escapeHtml(loc||t("p_remote"))}</div></div><strong>${escapeHtml(budget)}</strong></div>
       <p class="muted">${escapeHtml(desc||t("p_pvDesc"))}</p>
-      <div class="job-meta"><span class="pill">${escapeHtml(role.options[role.selectedIndex].textContent)}</span><span class="pill">${escapeHtml(cat.options[cat.selectedIndex].textContent)}</span><span class="job-time muted">${t("p_posted")} 0d</span></div></div>`;
+      <div class="job-meta"><span class="pill">${escapeHtml(role.options[role.selectedIndex].textContent)}</span>${Object.entries(det).flatMap(([k,vs])=>vs.map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}<span class="job-time muted">${t("p_posted")} 0d</span></div></div>`;
     j.addEventListener("click",()=>openJob(j));
     $("#jobList").prepend(j);
     $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value="");
@@ -6253,12 +6320,12 @@
   function initPages(){
     // Jobs
     $$(".job-filter").forEach(c=>c.addEventListener("change",runJobSearch));
-    $("#clearJobFilters").addEventListener("click",()=>{$$(".job-filter").forEach(c=>c.checked=false);$("#jobSearch").value="";runJobSearch();});
+    $("#clearJobFilters").addEventListener("click",()=>{$$(".job-filter").forEach(c=>c.checked=false);$("#jobSearch").value="";state.js.profession=null;state.js.f={};renderJobFilterBar();runJobSearch();});
     $("#toggleJobFilters").addEventListener("click",()=>$(".filter-panel").classList.toggle("open"));
     // Post a job
     $$("#page-post-job input,#page-post-job textarea,#page-post-job select").forEach(i=>{i.addEventListener("input",updateJobPreview);i.addEventListener("change",updateJobPreview);});
     $("#jobRole")?.addEventListener("change",()=>{ fillJobCatSelect(); updateJobPreview(); });   // the speciality list follows the profession
-    fillJobCatSelect(); renderJobRoleFilters(); updateJobPreview();
+    fillJobCatSelect(); renderJobFilterBar(); updateJobPreview();
     // How it works
     $$("#howSeg .seg-btn").forEach(b=>b.addEventListener("click",()=>{
       $$("#howSeg .seg-btn").forEach(x=>x.classList.toggle("active",x===b));
