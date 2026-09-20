@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-12Z2HRrfZkVESs0sSEntAe0+4k15fi8gIpeHPpRQOGA=' 'sha256-VW+Ox2B9ED4ZZbbBmokXnfKUWnby4s3DdmMBF5gsafc=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-12Z2HRrfZkVESs0sSEntAe0+4k15fi8gIpeHPpRQOGA=' 'sha256-jsRNdGpbUC3gr/gXuXsZln3j8Ta5Gs5F26p+a3U6qTM=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -176,15 +176,32 @@
     .chip{background:#fff;border:1px solid var(--line);padding:8px 12px;color:#39424f;border-radius:999px;font-size:13px;font-weight:650;transition:.15s}
     /* type-to-search profession picker (Post a job) */
     .pp{position:relative}
-    .pp input{width:100%}
+    .pp input{width:100%;padding-right:38px;cursor:pointer}
     .pp input.picked{font-weight:650}
-    .pp-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:26px;height:26px;border:0;background:transparent;color:#6b7684;font-size:19px;line-height:1;cursor:pointer;border-radius:50%}
-    .pp-clear:hover{background:#eef1f5;color:#111}
-    .pp-pop{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);max-height:320px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 34px rgba(16,24,40,.14);padding:6px}
-    .pp-group{padding:9px 10px 4px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#8a93a0}
+    .pp input:focus{cursor:text}
+    .pp-caret,.pp-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:#6b7684;cursor:pointer;border-radius:50%;padding:0}
+    .pp-caret svg{width:18px;height:18px}
+    .pp-caret:hover,.pp-clear:hover{background:#eef1f5;color:#111}
+    .pp-clear{font-size:19px;line-height:1}
+    .pp.open .pp-caret svg{transform:rotate(180deg)}
+    /* the list always scrolls, and says so: a visible bar, a wheel that stays inside it, and a finger that works */
+    .pp-pop{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);max-height:min(58vh,440px);overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 34px rgba(16,24,40,.14);padding:6px;
+      overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+      /* a soft shadow at the edge that appears only while there is more to scroll to — visible even where the system hides scrollbars */
+      background:linear-gradient(#fff 30%,rgba(255,255,255,0)) top/100% 22px no-repeat local,
+                 linear-gradient(rgba(255,255,255,0),#fff 70%) bottom/100% 22px no-repeat local,
+                 radial-gradient(farthest-side at 50% 0,rgba(16,24,40,.16),rgba(16,24,40,0)) top/100% 11px no-repeat scroll,
+                 radial-gradient(farthest-side at 50% 100%,rgba(16,24,40,.16),rgba(16,24,40,0)) bottom/100% 11px no-repeat scroll,
+                 #fff}
+    .pp-pop::-webkit-scrollbar{width:10px}
+    .pp-pop::-webkit-scrollbar-track{background:transparent;margin:6px 0}
+    .pp-pop::-webkit-scrollbar-thumb{background:#c3cad4;border-radius:999px;border:3px solid #fff}
+    .pp-pop::-webkit-scrollbar-thumb:hover{background:#9aa5b4}
+    .pp-group{padding:9px 10px 5px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#8a93a0}
     .pp-opt{display:block;width:100%;text-align:left;border:0;background:transparent;padding:9px 10px;border-radius:8px;font-size:14px;color:#1c2430;cursor:pointer}
     .pp-opt:hover,.pp-opt.on{background:#eef2ff;color:#1a2b6b}
     .pp-none{padding:12px 10px;color:#6b7684;font-size:13.5px}
+    .pp-count{padding:6px 10px 2px;color:#8a93a0;font-size:12px}
     .job-specs-hint{color:#6b7684;font-size:13.5px;padding:10px 0 2px}
     .chip:hover{border-color:#c9d2de;background:var(--panel-2)}
     .chip.selected{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-dark)}
@@ -1128,6 +1145,7 @@
               <div><label data-i18n="labelProfessionalNeeded">Professional needed</label>
                 <div class="pp" id="jobRolePick">
                   <input id="jobRoleSearch" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="jobRoleList" aria-autocomplete="list" data-i18n-placeholder="pj_rolePh" placeholder="Type to search: editor, designer, translator…">
+                  <button type="button" class="pp-caret" id="jobRoleCaret" tabindex="-1" aria-label="Show all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
                   <button type="button" class="pp-clear hidden" id="jobRoleClear" aria-label="Clear">×</button>
                   <div class="pp-pop hidden" id="jobRoleList" role="listbox"></div>
                 </div>
@@ -4869,19 +4887,19 @@
   // ---------- Post a job: the profession picker you can type into, and its own options (7 languages) ----------
   const T_PJ = {
     en:{ pj_rolePh:"Type to search: editor, designer, translator…", pj_noMatch:"Nothing matches “{q}”. Try another word.", pj_pickFirst:"Choose who you need above — their own skills and software appear here.",
-      pj_chooseRole:"Choose who you need first.", pj_more:"{n} more", pj_allProfs:"All {n} professions", pj_change:"Change" },
+      pj_chooseRole:"Choose who you need first.", pj_more:"{n} more", pj_allProfs:"All {n} professions", pj_someProfs:"{n} match", pj_change:"Change" },
     de:{ pj_rolePh:"Tippen und suchen: Editor, Designer, Übersetzer…", pj_noMatch:"Nichts passt zu „{q}“. Versuch ein anderes Wort.", pj_pickFirst:"Wähl oben, wen du brauchst — die passenden Fähigkeiten und Programme erscheinen hier.",
-      pj_chooseRole:"Wähl zuerst, wen du brauchst.", pj_more:"{n} weitere", pj_allProfs:"Alle {n} Berufe", pj_change:"Ändern" },
+      pj_chooseRole:"Wähl zuerst, wen du brauchst.", pj_more:"{n} weitere", pj_allProfs:"Alle {n} Berufe", pj_someProfs:"{n} Treffer", pj_change:"Ändern" },
     ru:{ pj_rolePh:"Начните вводить: монтажёр, дизайнер, переводчик…", pj_noMatch:"Ничего не найдено по «{q}». Попробуйте другое слово.", pj_pickFirst:"Выберите выше, кто вам нужен — здесь появятся его навыки и программы.",
-      pj_chooseRole:"Сначала выберите, кто вам нужен.", pj_more:"ещё {n}", pj_allProfs:"Все профессии ({n})", pj_change:"Изменить" },
+      pj_chooseRole:"Сначала выберите, кто вам нужен.", pj_more:"ещё {n}", pj_allProfs:"Все профессии ({n})", pj_someProfs:"Найдено: {n}", pj_change:"Изменить" },
     lt:{ pj_rolePh:"Rašykite ir ieškokite: editorius, dizaineris, vertėjas…", pj_noMatch:"Pagal „{q}“ nieko nerasta. Pabandykite kitą žodį.", pj_pickFirst:"Viršuje pasirinkite, ko ieškote — čia atsiras to specialisto įgūdžiai ir programos.",
-      pj_chooseRole:"Pirmiausia pasirinkite, ko ieškote.", pj_more:"dar {n}", pj_allProfs:"Visos profesijos ({n})", pj_change:"Keisti" },
+      pj_chooseRole:"Pirmiausia pasirinkite, ko ieškote.", pj_more:"dar {n}", pj_allProfs:"Visos profesijos ({n})", pj_someProfs:"Rasta: {n}", pj_change:"Keisti" },
     es:{ pj_rolePh:"Escribe para buscar: editor, diseñador, traductor…", pj_noMatch:"Nada coincide con «{q}». Prueba otra palabra.", pj_pickFirst:"Elige arriba a quién necesitas y aquí aparecerán sus habilidades y programas.",
-      pj_chooseRole:"Primero elige a quién necesitas.", pj_more:"{n} más", pj_allProfs:"Las {n} profesiones", pj_change:"Cambiar" },
+      pj_chooseRole:"Primero elige a quién necesitas.", pj_more:"{n} más", pj_allProfs:"Las {n} profesiones", pj_someProfs:"{n} coincidencias", pj_change:"Cambiar" },
     pl:{ pj_rolePh:"Wpisz, aby wyszukać: montażysta, grafik, tłumacz…", pj_noMatch:"Nic nie pasuje do „{q}”. Spróbuj innego słowa.", pj_pickFirst:"Wybierz powyżej, kogo potrzebujesz — tutaj pojawią się jego umiejętności i programy.",
-      pj_chooseRole:"Najpierw wybierz, kogo potrzebujesz.", pj_more:"jeszcze {n}", pj_allProfs:"Wszystkie zawody ({n})", pj_change:"Zmień" },
+      pj_chooseRole:"Najpierw wybierz, kogo potrzebujesz.", pj_more:"jeszcze {n}", pj_allProfs:"Wszystkie zawody ({n})", pj_someProfs:"Pasuje: {n}", pj_change:"Zmień" },
     uk:{ pj_rolePh:"Почніть вводити: монтажер, дизайнер, перекладач…", pj_noMatch:"Нічого не знайдено за «{q}». Спробуйте інше слово.", pj_pickFirst:"Виберіть вгорі, хто вам потрібен — тут з’являться його навички та програми.",
-      pj_chooseRole:"Спершу виберіть, хто вам потрібен.", pj_more:"ще {n}", pj_allProfs:"Усі професії ({n})", pj_change:"Змінити" }
+      pj_chooseRole:"Спершу виберіть, хто вам потрібен.", pj_more:"ще {n}", pj_allProfs:"Усі професії ({n})", pj_someProfs:"Знайдено: {n}", pj_change:"Змінити" }
   };
   for(const code in T_PJ){ if(T[code]) Object.assign(T[code], T_PJ[code]); }
 
@@ -4944,16 +4962,18 @@
     return direct.length ? direct : list.filter(p=>hit(p,true));   // nothing by name: widen to what their own lists are called
   }
   function jobRoleOpen(open){
-    const pop=$("#jobRoleList"), inp=$("#jobRoleSearch"); if(!pop||!inp) return;
+    const pop=$("#jobRoleList"), inp=$("#jobRoleSearch"), box=$("#jobRolePick"); if(!pop||!inp) return;
     pop.classList.toggle("hidden", !open); inp.setAttribute("aria-expanded", open?"true":"false");
-    if(!open) pop.querySelectorAll(".pp-opt.on").forEach(b=>b.classList.remove("on"));
+    if(box) box.classList.toggle("open", !!open);
+    if(open){ pop.scrollTop=0; setTimeout(()=>{ const sel=pop.querySelector('.pp-opt[data-slug="'+(jobRoleSlug()||"__none__")+'"]'); if(sel) sel.scrollIntoView({block:"nearest"}); },0); }
+    else pop.querySelectorAll(".pp-opt.on").forEach(b=>b.classList.remove("on"));
   }
   function renderJobRoleList(q){
     const pop=$("#jobRoleList"); if(!pop) return;
     const all=jobProfessions(), list=profMatches(all, q);
     if(!list.length){ pop.innerHTML=`<div class="pp-none">${escapeHtml(fill(t("pj_noMatch"),{q:q}))}</div>`; return; }
     const groups=[]; list.forEach(p=>{ const g=groups.find(x=>x.slug===p.group_slug); (g?g.items:(groups.push({slug:p.group_slug,items:[]}),groups[groups.length-1].items)).push(p); });
-    pop.innerHTML=groups.map(g=>{
+    pop.innerHTML=(list.length>1?`<div class="pp-count">${escapeHtml(fill(t(list.length===all.length?"pj_allProfs":"pj_someProfs"),{n:list.length}))}</div>`:"")+groups.map(g=>{
       const gl=groupLabels(g.slug) ? pl(groupLabels(g.slug)) : "";
       return (gl?`<div class="pp-group">${escapeHtml(gl)}</div>`:"")+g.items.map(p=>`<button type="button" class="pp-opt" role="option" data-slug="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</button>`).join("");
     }).join("");
@@ -4964,6 +4984,7 @@
     inp.value=slug?profName(slug):"";
     inp.classList.toggle("picked", !!slug);
     if(clr) clr.classList.toggle("hidden", !slug);
+    const caret=$("#jobRoleCaret"); if(caret) caret.classList.toggle("hidden", !!slug);
     jobRoleOpen(false);
     renderJobSpecs();
     if(!(opts&&opts.silent)) updateJobPreview();
@@ -4990,7 +5011,12 @@
   function initJobRolePicker(){
     const inp=$("#jobRoleSearch"), pop=$("#jobRoleList"), clr=$("#jobRoleClear"); if(!inp||!pop) return;
     const openWith=q=>{ renderJobRoleList(q); jobRoleOpen(true); };
+    const showAll=()=>{ const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set; if(!jobRoleSlug() && inp.value) set.call(inp,""); openWith(""); };
     inp.addEventListener("focus",()=>openWith(jobRoleSlug()?"":inp.value));
+    // a click on the box is a click on a drop-down: the whole list, every time
+    inp.addEventListener("click",()=>{ if(pop.classList.contains("hidden")) showAll(); });
+    const caret=$("#jobRoleCaret");
+    caret&&caret.addEventListener("mousedown",e=>{ e.preventDefault(); if(pop.classList.contains("hidden")){ inp.focus(); showAll(); } else jobRoleOpen(false); });
     inp.addEventListener("input",()=>{ if($("#jobRole").value){ $("#jobRole").value=""; inp.classList.remove("picked"); clr&&clr.classList.add("hidden"); renderJobSpecs(); updateJobPreview(); } openWith(inp.value); });
     inp.addEventListener("keydown",e=>{
       const opts=[...pop.querySelectorAll(".pp-opt")]; const i=opts.findIndex(o=>o.classList.contains("on"));
