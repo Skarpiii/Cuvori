@@ -14,5 +14,6 @@ echo "== full site flows";  node realtest.js | tail -3; node realtest.js | grep 
 echo "== jobs trust";       node jobstest.js | tail -3; node jobstest.js | grep -q '^FAIL' && r=1
 echo "== galleries";        node galtest.js | tail -1
 echo "== auth";             node authtest.js | tail -1
+echo "== oauth return";     node tests/oauth-return.js | tail -1
 [ $r = 0 ] && echo "ALL CHECKS PASSED" || echo "SOMETHING FAILED"
 exit $r
