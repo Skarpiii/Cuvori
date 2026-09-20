@@ -186,6 +186,12 @@ Everything in the code is ready and tested; what is left needs your accounts and
 5. **Test in test mode**: a professional connects Stripe in Settings → Payout details (Stripe's test data), a client funds an Order with card 4242 4242 4242 4242, delivers, approves — watch the transfer in the Stripe dashboard. Then swap the two Stripe keys for live ones and deploy once more.
 6. Before real money: a lawyer's word on Part 7, items 1 and 2 (holding funds; who carries the processing cost for EU consumers).
 
+**How Netlify is set up, and why (September 2026).** The Netlify free plan gives 300 credits a month and charges **15 credits for every production deploy** — about 20 deploys a month. Deploy previews and **branch deploys cost nothing at all** and are unlimited. In the first month the allowance was spent in a day, because every single file upload to GitHub triggered its own production deploy (22 of them, 330 credits). The site was never down — published sites stay online — but new deploys were skipped until the next billing cycle.
+
+So the project is now wired like this: the Netlify **production branch is `production`**, a branch nothing is pushed to day to day, and **`main` is a branch deploy**. Every push to `main` therefore builds for free at **`main--cuvori.netlify.app`**, and that is the address `functionsUrl` points at. The page itself is not served by Netlify at all — cuvori.io is GitHub Pages — so Netlify only ever needs to carry the nine payment functions. A real production deploy (15 credits) is worth doing only when going live, by merging `main` into `production` once.
+
+Two habits that follow: commit in batches rather than file by file, and remember that the Stripe webhook must point at whichever address is actually serving the functions — `main--cuvori.netlify.app` while testing, the production address later.
+
 
 ## Part 16 — Jobs a freelancer can trust (schema v20)
 
