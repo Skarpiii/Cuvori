@@ -469,5 +469,5 @@
     return res(404,{error:"unknown function"});
   };
   window.supabase = { createClient(){ return client; } };
-  const cfg={supabaseUrl:"https://x.supabase.co",supabaseAnonKey:"key"}; Object.defineProperty(window,"CUVORI_CONFIG",{get(){return cfg;},set(){}});
+  const cfg={supabaseUrl:"https://x.supabase.co",supabaseAnonKey:"key"}; Object.defineProperty(window,"CUVORI_CONFIG",{get(){return cfg;},set(v){ if(v&&typeof v==="object") for(const k in v){ if(k!=="supabaseUrl"&&k!=="supabaseAnonKey") cfg[k]=v[k]; } }});   // the page's own flags (facebookLogin…) flow through; the keys stay fake
 })();

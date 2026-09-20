@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-rB/hsjuPS5qjvsbj6Y55ramgrdJYfv5TWGI1IvNod3c=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-2PNISXubWEmsuBUuxZxphzfB/XA3nezo9nURcHGILyE=' 'sha256-HK4h3e+IkFFQ/6jai3yztVbh8QP/ceQCrL+AHmiMcVU=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -1431,7 +1431,8 @@
 <script>
   // Fill these two values after creating your Supabase project (Project Settings → API).
   // Leave them empty to run the site in demo mode (no real accounts).
-  window.CUVORI_CONFIG = { supabaseUrl: "https://tnxujwlfatcvxzevllfr.supabase.co", supabaseAnonKey: "sb_publishable_unSsruTqbFzMzhAOVpAoYQ_0jUjvA_H" };
+  window.CUVORI_CONFIG = { supabaseUrl: "https://tnxujwlfatcvxzevllfr.supabase.co", supabaseAnonKey: "sb_publishable_unSsruTqbFzMzhAOVpAoYQ_0jUjvA_H",
+    facebookLogin: false };   // set to true once the Meta app is published (needs Meta business verification); until then the Facebook button stays hidden
   // Who runs Cuvori. These three values appear in the rules, the privacy notice and the
   // footer, and the law requires them to be the real ones. Fill them in before launch.
   window.CUVORI_LEGAL = { company: "Cuvori", address: "Dr.-Haas-Straße 1A, 91126 Schwabach, Germany", email: "egidijus.cuvori@gmail.com" };
@@ -4101,7 +4102,7 @@
       <p class="muted" style="margin-bottom:12px">${escapeHtml(t("jp_desc"))}</p>
       <div style="display:grid;gap:8px">
         <button class="secondary" data-jp-social="google">${escapeHtml(t("continueGoogle"))}</button>
-        <button class="secondary" data-jp-social="facebook">${escapeHtml(t("continueFacebook"))}</button>
+        ${CFG.facebookLogin===false?"":`<button class="secondary" data-jp-social="facebook">${escapeHtml(t("continueFacebook"))}</button>`}
         <button class="primary" id="jpEmail">${escapeHtml(t("jp_email"))}</button>
       </div>
       <p class="muted small" style="margin:12px 0 0">${escapeHtml(t("jp_have"))} <button class="link-btn" id="jpSignIn">${escapeHtml(t("p_signIn"))}</button></p>
@@ -4272,6 +4273,7 @@
     $$("[data-auth-signup]").forEach(b=>b.addEventListener("click",doSignUp));
     $$("[data-auth-signin]").forEach(b=>b.addEventListener("click",doSignIn));
     $$("[data-auth-social]").forEach(b=>b.addEventListener("click",()=>socialSignIn(b.dataset.authSocial||"google")));
+    if(CFG.facebookLogin===false) $$('[data-auth-social="facebook"]').forEach(b=>{ b.classList.add("hidden"); b.parentElement.style.gridTemplateColumns="1fr"; });
     ["#signOutBtn","#signOutBtnM","#signOutBtnH"].forEach(s=>$(s)?.addEventListener("click",doSignOut));
     $("#suPass").addEventListener("keydown",e=>{ if(e.key==="Enter") doSignUp(); });
     $("#siPass").addEventListener("keydown",e=>{ if(e.key==="Enter") doSignIn(); });
