@@ -12,6 +12,7 @@ echo "== CSP in browser";   node tests/csp-test.js || r=1
 echo "== UI fuzz";          node tests/ui-fuzz.js | tail -1 || r=1
 echo "== full site flows";  node realtest.js | tail -3; node realtest.js | grep -q '^FAIL' && r=1
 echo "== jobs trust";       node jobstest.js | tail -3; node jobstest.js | grep -q '^FAIL' && r=1
+echo "== post a job";       node tests/post-job.js | tail -1 || r=1
 echo "== galleries";        node galtest.js | tail -1
 echo "== auth";             node authtest.js | tail -1
 echo "== oauth return";     node tests/oauth-return.js | tail -1
