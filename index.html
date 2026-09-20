@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-12Z2HRrfZkVESs0sSEntAe0+4k15fi8gIpeHPpRQOGA=' 'sha256-/Phv0/nuKPY3bLvUwxFGF+3WQD+yWNHkFs/lOO9WaJM=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-12Z2HRrfZkVESs0sSEntAe0+4k15fi8gIpeHPpRQOGA=' 'sha256-VW+Ox2B9ED4ZZbbBmokXnfKUWnby4s3DdmMBF5gsafc=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -4915,8 +4915,15 @@
   // ---- the profession picker you can type into: 30 professions is too many for a drop-down ----
   // A match is any word of the label, the group name or a synonym, in any of the seven languages,
   // so "editor", "montaž", "Übersetzer" and "смм" all land somewhere sensible.
+  // the configuration lists groups as {slug: labels} in the built-in copy and as [{slug, labels}] from the
+  // database; either way this hands back the labels for one group
+  function groupLabels(slug){
+    const g=PROF.groups; if(!g||!slug) return null;
+    if(Array.isArray(g)){ const row=g.find(x=>x&&x.slug===slug); return row?row.labels:null; }
+    return g[slug]||null;
+  }
   function profSearchText(p){
-    const labels=Object.values(p.labels||{}); const g=PROF.groups&&PROF.groups[p.group_slug];
+    const labels=Object.values(p.labels||{}); const g=groupLabels(p.group_slug);
     return [...labels, ...(g?Object.values(g):[]), ...(p.synonyms||[]), p.slug.replace(/-/g," ")].join(" ").toLowerCase();
   }
   function foldText(x){ return String(x||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,""); }
@@ -4947,7 +4954,7 @@
     if(!list.length){ pop.innerHTML=`<div class="pp-none">${escapeHtml(fill(t("pj_noMatch"),{q:q}))}</div>`; return; }
     const groups=[]; list.forEach(p=>{ const g=groups.find(x=>x.slug===p.group_slug); (g?g.items:(groups.push({slug:p.group_slug,items:[]}),groups[groups.length-1].items)).push(p); });
     pop.innerHTML=groups.map(g=>{
-      const gl=PROF.groups&&PROF.groups[g.slug] ? pl(PROF.groups[g.slug]) : "";
+      const gl=groupLabels(g.slug) ? pl(groupLabels(g.slug)) : "";
       return (gl?`<div class="pp-group">${escapeHtml(gl)}</div>`:"")+g.items.map(p=>`<button type="button" class="pp-opt" role="option" data-slug="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</button>`).join("");
     }).join("");
   }
