@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-CIsI6kdWxbpyCPGfsp/ZCg79hFMQE+cXU67lSmp5lpk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-9MgiRtYDH0cNA2P+Tb/UsO7Iojk6WLNAg6NwnQkyraE=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -510,6 +510,9 @@
     .job p.muted{margin:8px 0 0;font-size:14px;line-height:1.45}
     .job-meta{align-items:center}
     .job-time{margin-left:auto;font-size:12px}
+    .job-trust{display:flex;gap:6px 12px;flex-wrap:wrap;font-size:12px;margin:6px 0 2px;color:#5a6472}.trust.ok{color:var(--success);font-weight:700}
+    .mj-table{display:flex;flex-direction:column;gap:8px}.mj-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel)}
+    .status-pill{display:inline-block;font-size:11px;font-weight:800;border-radius:99px;padding:2px 8px;background:var(--panel-2);border:1px solid var(--line);color:#3a4453;vertical-align:middle}.status-pill.ok{background:#e7f6ec;border-color:#bfe6cc;color:#176b3b}.status-pill.warn{background:#fff6e0;border-color:#f3dfa0;color:#7a5a00}.status-pill.danger{background:#fdecec;border-color:#f3bcbc;color:#9a1c1c}
     .jobs-mobile-filters{display:none}
 
     /* ---------- Post a job ---------- */
@@ -1029,13 +1032,19 @@
               <label class="check"><input type="checkbox" class="job-filter" data-key="pricing" value="project"> <span data-i18n="p_perProjectFilter">Per project</span></label>
               <label class="check"><input type="checkbox" class="job-filter" data-key="pricing" value="hourly"> <span data-i18n="p_hourlyFilter">Hourly / daily</span></label>
             </div>
+            <div class="filter-group"><div class="filter-title" data-i18n="jt_trustFilter">Trust</div>
+              <label class="check"><input type="checkbox" class="job-trust-filter" id="jtVerified"> <span data-i18n="jt_fVerified">Identity verified only</span></label>
+              <label class="check"><input type="checkbox" class="job-trust-filter" id="jtSecured"> <span data-i18n="jt_fSecured">Payment secured only</span></label>
+              <label class="check" style="flex-direction:column;align-items:flex-start;gap:4px"><span data-i18n="jt_fWithin">Posted within</span><select id="jtWithin" style="width:100%"><option value="" data-i18n="jt_wAny">Any time</option><option value="1" data-i18n="jt_w1">24 hours</option><option value="7" data-i18n="jt_w7">7 days</option><option value="30" data-i18n="jt_w30">30 days</option></select></label>
+            </div>
             <button class="link-btn" id="clearJobFilters" data-i18n="p_clearFilters">Clear filters</button>
           </div>
         </aside>
         <div class="jobs-main">
+          <div id="myJobsPanel" class="hidden"></div>
           <div class="chips prof-row" id="jobProfRow" style="margin-top:0"></div>
           <div class="chips" id="jobFilterRow" style="margin-top:8px"></div>
-          <div class="list-toolbar"><span class="muted" id="jobCount">6 jobs</span><span class="muted" data-i18n="p_sortNewest">Sorted by newest</span></div>
+          <div class="list-toolbar"><span class="muted" id="jobCount">6 jobs</span><label class="muted" style="display:flex;gap:6px;align-items:center"><span data-i18n="jt_sort">Sort by</span><select id="jobSort" style="padding:4px 8px;font-size:13px;width:auto"><option value="newest" data-i18n="jt_sortNewest">Newest first</option><option value="budget" data-i18n="jt_sortBudget">Highest budget</option><option value="deadline" data-i18n="jt_sortDeadline">Deadline soonest</option></select></label></div>
           <div class="job-list" id="jobList">
             <div class="job" data-job="youtube documentary editor long form davinci premiere" data-role="video-editor" data-details='{"video_specialty":["catYoutubeLong","catDocumentary"],"software":["davinci_resolve","premiere_pro"]}' data-where="remote" data-pricing="project">
               <div class="job-avatar">JW</div>
@@ -1256,7 +1265,7 @@
     <!-- ===================== ADMIN ===================== -->
     <section id="page-admin" class="page">
       <div class="page-head"><div><h1 data-i18n="adminPanel">Admin panel</h1><p class="muted">Only you can see this page. Actions here take effect immediately.</p></div></div>
-      <div class="admin-tabs"><button class="admin-tab active" data-atab="users">Users</button><button class="admin-tab" data-atab="invites">Invite codes</button><button class="admin-tab" data-atab="reviews">Reviews</button><button class="admin-tab" data-atab="contracts">Orders &amp; disputes</button><button class="admin-tab" data-atab="bad">Bad actors</button><button class="admin-tab" data-atab="reports">Reports</button><button class="admin-tab" data-atab="professions">Professions</button><button class="admin-tab" data-atab="fees">Payment costs</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" data-atab="users">Users</button><button class="admin-tab" data-atab="invites">Invite codes</button><button class="admin-tab" data-atab="reviews">Reviews</button><button class="admin-tab" data-atab="contracts">Orders &amp; disputes</button><button class="admin-tab" data-atab="bad">Bad actors</button><button class="admin-tab" data-atab="reports">Reports</button><button class="admin-tab" data-atab="professions">Professions</button><button class="admin-tab" data-atab="fees">Payment costs</button><button class="admin-tab" data-atab="jobs">Job review</button></div>
       <div class="panel" id="adminBody"></div>
     </section>
 
@@ -3280,6 +3289,8 @@
     if(page==="contracts" && typeof refreshContractsPage==="function") refreshContractsPage();
     if(page==="home" && REAL && typeof runProfileSearch==="function" && state.homeSeen){ loadProfessionConfig().then(()=>{ renderFilterBar(); runProfileSearch(); }); }   // fresh counts and results on each visit; the first paint is done by loadEditors
     if(page==="home") state.homeSeen=true;
+    if(page==="jobs" && REAL && state.jobsSeen && typeof loadJobs==="function") loadJobs();   // a fresh feed on every visit: states and expiry change while you are away
+    if(page==="jobs") state.jobsSeen=true;
     if(rq && REAL){ const go=()=>{ if(page==="contracts") handleContractsReturn(rq); if(page==="settings") handleStripeReturn(rq); }; if(signedIn()) go(); else state.pendingRoute=go; }
     window.scrollTo({top:0,behavior:"smooth"});
   }
@@ -4681,6 +4692,94 @@
       rp_msLabel:"Este informe entrega un hito", rp_msNone:"— solo una actualización de progreso", rp_finalEscrow:"Esta es la entrega: pedir al cliente que apruebe el trabajo y libere {amt}", rp_finalDirect:"Esta es la entrega: pedir al cliente que apruebe el trabajo", d_newVersionFrom:"Nueva versión para revisar de {name}", rp_approveRelease:"Aprobar y liberar {amt}", rp_linkedOrder:"Este informe pertenece al pedido «{title}»." }
   };
   for(const code in T_ORD){ if(T[code]) Object.assign(T[code], T_ORD[code]); }
+  // ---------- Jobs a freelancer can trust (7 languages) ----------
+  const T_JT = {
+    en:{ jt_today:"Posted today", jt_yesterday:"Posted yesterday", jt_days:"Posted {n} days ago", jt_weeks:"Posted {n} weeks ago", jt_on:"Posted on {d}", jt_expires:"Expires {d}",
+      jt_verified:"Identity verified", jt_newClient:"New client", jt_hireOne:"1 hire", jt_hires:"{n} hires", jt_noHires:"No hires yet", jt_hireRate:"{p}% hire rate", jt_secured:"Payment secured", jt_memberSince:"Member since {d}", jt_jobsPosted:"{n} jobs posted", jt_jobPosted:"1 job posted",
+      jt_sort:"Sort by", jt_sortNewest:"Newest first", jt_sortBudget:"Highest budget", jt_sortDeadline:"Deadline soonest",
+      jt_trustFilter:"Trust", jt_fVerified:"Identity verified only", jt_fSecured:"Payment secured only", jt_fWithin:"Posted within", jt_wAny:"Any time", jt_w1:"24 hours", jt_w7:"7 days", jt_w30:"30 days",
+      jt_aboutClient:"About this client", jt_report:"Report job", jt_reportTitle:"Report this job", jt_reportWhy:"What is wrong with it?", jt_r_scam:"Scam or fraud", jt_r_fake:"Fake or misleading", jt_r_spam:"Spam", jt_r_duplicate:"Posted several times", jt_r_payment:"Payment problem", jt_r_inappropriate:"Inappropriate content", jt_r_other:"Something else",
+      jt_reportNote:"Anything else? (optional)", jt_reportSend:"Send report", jt_reportThanks:"Thanks — we will take a look.", jt_reportHint:"Reports are read by a person. Nobody is banned automatically.",
+      jt_myJobs:"My jobs", jt_st_open:"Active", jt_st_filled:"Filled", jt_st_closed:"Closed", jt_st_expired:"Expired", jt_st_hidden:"Under review", jt_st_removed:"Removed",
+      jt_expiresIn:"expires in {n} days", jt_expiresToday:"expires today", jt_markFilled:"Mark as filled", jt_closeJob:"Close", jt_reopen:"Reopen", jt_renew:"Renew for {n} days", jt_view:"View",
+      jt_hiddenAuto:"Cuvori is checking this job before it goes live. This is usually quick.", jt_hiddenSuspended:"This job is hidden because the account is suspended.", jt_hiddenBy:"Hidden by Cuvori: {reason}", jt_removedBy:"Removed by Cuvori: {reason}",
+      jt_appeal:"Ask for a review", jt_appealBody:"Please review my job \"{title}\". ", jt_updated:"Updated.", jt_renewed:"Renewed.", jt_myJobsHint:"Active jobs expire after {n} days unless you renew them. Mark a job as filled when you have hired someone.",
+      jt_err_identity:"Please verify your identity before posting a job.", jt_err_daily:"You have reached today's posting limit. Try again tomorrow.", jt_err_active:"You have too many active jobs. Mark one as filled or close it first.", jt_err_plan:"Your posting plan's limit is reached.", jt_err_dup:"You posted the same job recently. Edit or renew that one instead.", jt_err_renewals:"This job has been renewed as often as allowed. Post it again instead.", jt_err_review:"This job is being reviewed. You can ask for a review from My jobs.",
+      jt_postedReview:"Your job was saved. Cuvori will check it before it goes live.", jt_deadline:"Deadline" },
+    de:{ jt_today:"Heute eingestellt", jt_yesterday:"Gestern eingestellt", jt_days:"Vor {n} Tagen eingestellt", jt_weeks:"Vor {n} Wochen eingestellt", jt_on:"Eingestellt am {d}", jt_expires:"Läuft ab: {d}",
+      jt_verified:"Identität geprüft", jt_newClient:"Neuer Kunde", jt_hireOne:"1 Auftrag vergeben", jt_hires:"{n} Aufträge vergeben", jt_noHires:"Noch nichts vergeben", jt_hireRate:"{p} % Vergabequote", jt_secured:"Zahlung gesichert", jt_memberSince:"Mitglied seit {d}", jt_jobsPosted:"{n} Jobs eingestellt", jt_jobPosted:"1 Job eingestellt",
+      jt_sort:"Sortieren", jt_sortNewest:"Neueste zuerst", jt_sortBudget:"Höchstes Budget", jt_sortDeadline:"Frist am nächsten",
+      jt_trustFilter:"Vertrauen", jt_fVerified:"Nur geprüfte Identität", jt_fSecured:"Nur gesicherte Zahlung", jt_fWithin:"Eingestellt innerhalb", jt_wAny:"Egal wann", jt_w1:"24 Stunden", jt_w7:"7 Tagen", jt_w30:"30 Tagen",
+      jt_aboutClient:"Über diesen Kunden", jt_report:"Job melden", jt_reportTitle:"Diesen Job melden", jt_reportWhy:"Was stimmt nicht?", jt_r_scam:"Betrug", jt_r_fake:"Falsch oder irreführend", jt_r_spam:"Spam", jt_r_duplicate:"Mehrfach eingestellt", jt_r_payment:"Problem mit der Zahlung", jt_r_inappropriate:"Unangemessener Inhalt", jt_r_other:"Etwas anderes",
+      jt_reportNote:"Noch etwas? (optional)", jt_reportSend:"Meldung senden", jt_reportThanks:"Danke — wir schauen uns das an.", jt_reportHint:"Meldungen liest ein Mensch. Niemand wird automatisch gesperrt.",
+      jt_myJobs:"Meine Jobs", jt_st_open:"Aktiv", jt_st_filled:"Besetzt", jt_st_closed:"Geschlossen", jt_st_expired:"Abgelaufen", jt_st_hidden:"In Prüfung", jt_st_removed:"Entfernt",
+      jt_expiresIn:"läuft in {n} Tagen ab", jt_expiresToday:"läuft heute ab", jt_markFilled:"Als besetzt markieren", jt_closeJob:"Schließen", jt_reopen:"Wieder öffnen", jt_renew:"Um {n} Tage verlängern", jt_view:"Ansehen",
+      jt_hiddenAuto:"Cuvori prüft diesen Job, bevor er sichtbar wird. Das geht meist schnell.", jt_hiddenSuspended:"Dieser Job ist ausgeblendet, weil das Konto gesperrt ist.", jt_hiddenBy:"Von Cuvori ausgeblendet: {reason}", jt_removedBy:"Von Cuvori entfernt: {reason}",
+      jt_appeal:"Prüfung anfragen", jt_appealBody:"Bitte prüft meinen Job „{title}“. ", jt_updated:"Aktualisiert.", jt_renewed:"Verlängert.", jt_myJobsHint:"Aktive Jobs laufen nach {n} Tagen ab, wenn du sie nicht verlängerst. Markiere einen Job als besetzt, sobald du jemanden beauftragt hast.",
+      jt_err_identity:"Bitte lass deine Identität prüfen, bevor du einen Job einstellst.", jt_err_daily:"Du hast das Tageslimit erreicht. Versuch es morgen wieder.", jt_err_active:"Du hast zu viele aktive Jobs. Markiere einen als besetzt oder schließe ihn.", jt_err_plan:"Das Limit deines Pakets ist erreicht.", jt_err_dup:"Du hast denselben Job kürzlich eingestellt. Bearbeite oder verlängere ihn stattdessen.", jt_err_renewals:"Dieser Job wurde so oft verlängert wie erlaubt. Stell ihn neu ein.", jt_err_review:"Dieser Job wird geprüft. Unter „Meine Jobs“ kannst du eine Prüfung anfragen.",
+      jt_postedReview:"Dein Job ist gespeichert. Cuvori prüft ihn, bevor er sichtbar wird.", jt_deadline:"Frist" },
+    ru:{ jt_today:"Опубликовано сегодня", jt_yesterday:"Опубликовано вчера", jt_days:"Опубликовано {n} дн. назад", jt_weeks:"Опубликовано {n} нед. назад", jt_on:"Опубликовано {d}", jt_expires:"Истекает {d}",
+      jt_verified:"Личность подтверждена", jt_newClient:"Новый клиент", jt_hireOne:"1 наём", jt_hires:"{n} наймов", jt_noHires:"Наймов пока нет", jt_hireRate:"{p}% наймов", jt_secured:"Оплата защищена", jt_memberSince:"На сайте с {d}", jt_jobsPosted:"{n} заданий размещено", jt_jobPosted:"1 задание размещено",
+      jt_sort:"Сортировка", jt_sortNewest:"Сначала новые", jt_sortBudget:"Больший бюджет", jt_sortDeadline:"Ближайший срок",
+      jt_trustFilter:"Доверие", jt_fVerified:"Только с подтверждённой личностью", jt_fSecured:"Только с защищённой оплатой", jt_fWithin:"Опубликовано за", jt_wAny:"Любое время", jt_w1:"24 часа", jt_w7:"7 дней", jt_w30:"30 дней",
+      jt_aboutClient:"О клиенте", jt_report:"Пожаловаться", jt_reportTitle:"Пожаловаться на задание", jt_reportWhy:"Что не так?", jt_r_scam:"Мошенничество", jt_r_fake:"Ложное или вводящее в заблуждение", jt_r_spam:"Спам", jt_r_duplicate:"Размещено несколько раз", jt_r_payment:"Проблема с оплатой", jt_r_inappropriate:"Неприемлемое содержание", jt_r_other:"Другое",
+      jt_reportNote:"Что-то ещё? (необязательно)", jt_reportSend:"Отправить", jt_reportThanks:"Спасибо — мы посмотрим.", jt_reportHint:"Жалобы читает человек. Никого не блокируют автоматически.",
+      jt_myJobs:"Мои задания", jt_st_open:"Активно", jt_st_filled:"Исполнитель найден", jt_st_closed:"Закрыто", jt_st_expired:"Истекло", jt_st_hidden:"На проверке", jt_st_removed:"Удалено",
+      jt_expiresIn:"истекает через {n} дн.", jt_expiresToday:"истекает сегодня", jt_markFilled:"Исполнитель найден", jt_closeJob:"Закрыть", jt_reopen:"Открыть снова", jt_renew:"Продлить на {n} дн.", jt_view:"Открыть",
+      jt_hiddenAuto:"Cuvori проверяет это задание перед публикацией. Обычно это быстро.", jt_hiddenSuspended:"Задание скрыто, потому что аккаунт заблокирован.", jt_hiddenBy:"Скрыто Cuvori: {reason}", jt_removedBy:"Удалено Cuvori: {reason}",
+      jt_appeal:"Запросить проверку", jt_appealBody:"Пожалуйста, проверьте моё задание «{title}». ", jt_updated:"Обновлено.", jt_renewed:"Продлено.", jt_myJobsHint:"Активные задания истекают через {n} дней, если их не продлить. Отметьте задание, когда нашли исполнителя.",
+      jt_err_identity:"Подтвердите личность, прежде чем размещать задание.", jt_err_daily:"Дневной лимит размещений исчерпан. Попробуйте завтра.", jt_err_active:"Слишком много активных заданий. Сначала закройте одно.", jt_err_plan:"Лимит вашего тарифа исчерпан.", jt_err_dup:"Вы недавно размещали такое же задание. Отредактируйте или продлите его.", jt_err_renewals:"Это задание продлевали максимальное число раз. Разместите его заново.", jt_err_review:"Задание на проверке. Запросить проверку можно в «Моих заданиях».",
+      jt_postedReview:"Задание сохранено. Cuvori проверит его перед публикацией.", jt_deadline:"Срок" },
+    lt:{ jt_today:"Paskelbta šiandien", jt_yesterday:"Paskelbta vakar", jt_days:"Paskelbta prieš {n} d.", jt_weeks:"Paskelbta prieš {n} sav.", jt_on:"Paskelbta {d}", jt_expires:"Galioja iki {d}",
+      jt_verified:"Tapatybė patvirtinta", jt_newClient:"Naujas klientas", jt_hireOne:"1 samdymas", jt_hires:"{n} samdymai", jt_noHires:"Dar nesamdė", jt_hireRate:"{p} % samdymų", jt_secured:"Mokėjimas apsaugotas", jt_memberSince:"Narys nuo {d}", jt_jobsPosted:"{n} skelbimai", jt_jobPosted:"1 skelbimas",
+      jt_sort:"Rikiuoti", jt_sortNewest:"Naujausi pirmi", jt_sortBudget:"Didžiausias biudžetas", jt_sortDeadline:"Artimiausias terminas",
+      jt_trustFilter:"Pasitikėjimas", jt_fVerified:"Tik patvirtinta tapatybė", jt_fSecured:"Tik apsaugotas mokėjimas", jt_fWithin:"Paskelbta per", jt_wAny:"Bet kada", jt_w1:"24 val.", jt_w7:"7 d.", jt_w30:"30 d.",
+      jt_aboutClient:"Apie klientą", jt_report:"Pranešti", jt_reportTitle:"Pranešti apie šį skelbimą", jt_reportWhy:"Kas negerai?", jt_r_scam:"Sukčiavimas", jt_r_fake:"Netikras ar klaidinantis", jt_r_spam:"Šlamštas", jt_r_duplicate:"Paskelbta kelis kartus", jt_r_payment:"Mokėjimo problema", jt_r_inappropriate:"Netinkamas turinys", jt_r_other:"Kita",
+      jt_reportNote:"Dar kas nors? (nebūtina)", jt_reportSend:"Siųsti pranešimą", jt_reportThanks:"Ačiū — peržiūrėsime.", jt_reportHint:"Pranešimus skaito žmogus. Niekas neblokuojamas automatiškai.",
+      jt_myJobs:"Mano skelbimai", jt_st_open:"Aktyvus", jt_st_filled:"Užimtas", jt_st_closed:"Uždarytas", jt_st_expired:"Pasibaigęs", jt_st_hidden:"Tikrinamas", jt_st_removed:"Pašalintas",
+      jt_expiresIn:"baigsis po {n} d.", jt_expiresToday:"baigiasi šiandien", jt_markFilled:"Pažymėti kaip užimtą", jt_closeJob:"Uždaryti", jt_reopen:"Atidaryti iš naujo", jt_renew:"Pratęsti {n} d.", jt_view:"Peržiūrėti",
+      jt_hiddenAuto:"Cuvori patikrina šį skelbimą prieš jam pasirodant. Paprastai tai greita.", jt_hiddenSuspended:"Skelbimas paslėptas, nes paskyra sustabdyta.", jt_hiddenBy:"Cuvori paslėpė: {reason}", jt_removedBy:"Cuvori pašalino: {reason}",
+      jt_appeal:"Prašyti peržiūros", jt_appealBody:"Prašau peržiūrėti mano skelbimą „{title}“. ", jt_updated:"Atnaujinta.", jt_renewed:"Pratęsta.", jt_myJobsHint:"Aktyvūs skelbimai baigia galioti po {n} d., jei jų nepratęsiate. Pažymėkite skelbimą kaip užimtą, kai ką nors pasamdote.",
+      jt_err_identity:"Prieš skelbdami patvirtinkite tapatybę.", jt_err_daily:"Pasiektas šios dienos skelbimų limitas. Bandykite rytoj.", jt_err_active:"Per daug aktyvių skelbimų. Pirmiausia vieną uždarykite.", jt_err_plan:"Pasiektas jūsų plano limitas.", jt_err_dup:"Neseniai paskelbėte tokį patį skelbimą. Redaguokite arba pratęskite jį.", jt_err_renewals:"Šis skelbimas pratęstas tiek, kiek leidžiama. Paskelbkite iš naujo.", jt_err_review:"Šis skelbimas tikrinamas. Peržiūros galite prašyti skiltyje „Mano skelbimai“.",
+      jt_postedReview:"Skelbimas išsaugotas. Cuvori jį patikrins prieš rodydamas.", jt_deadline:"Terminas" },
+    es:{ jt_today:"Publicado hoy", jt_yesterday:"Publicado ayer", jt_days:"Publicado hace {n} días", jt_weeks:"Publicado hace {n} semanas", jt_on:"Publicado el {d}", jt_expires:"Caduca el {d}",
+      jt_verified:"Identidad verificada", jt_newClient:"Cliente nuevo", jt_hireOne:"1 contratación", jt_hires:"{n} contrataciones", jt_noHires:"Sin contrataciones aún", jt_hireRate:"{p} % de contratación", jt_secured:"Pago asegurado", jt_memberSince:"Miembro desde {d}", jt_jobsPosted:"{n} trabajos publicados", jt_jobPosted:"1 trabajo publicado",
+      jt_sort:"Ordenar", jt_sortNewest:"Más recientes", jt_sortBudget:"Mayor presupuesto", jt_sortDeadline:"Fecha límite más próxima",
+      jt_trustFilter:"Confianza", jt_fVerified:"Solo identidad verificada", jt_fSecured:"Solo pago asegurado", jt_fWithin:"Publicado en", jt_wAny:"Cualquier fecha", jt_w1:"24 horas", jt_w7:"7 días", jt_w30:"30 días",
+      jt_aboutClient:"Sobre este cliente", jt_report:"Denunciar", jt_reportTitle:"Denunciar este trabajo", jt_reportWhy:"¿Qué está mal?", jt_r_scam:"Estafa o fraude", jt_r_fake:"Falso o engañoso", jt_r_spam:"Spam", jt_r_duplicate:"Publicado varias veces", jt_r_payment:"Problema de pago", jt_r_inappropriate:"Contenido inapropiado", jt_r_other:"Otra cosa",
+      jt_reportNote:"¿Algo más? (opcional)", jt_reportSend:"Enviar denuncia", jt_reportThanks:"Gracias — lo revisaremos.", jt_reportHint:"Las denuncias las lee una persona. Nadie es bloqueado automáticamente.",
+      jt_myJobs:"Mis trabajos", jt_st_open:"Activo", jt_st_filled:"Cubierto", jt_st_closed:"Cerrado", jt_st_expired:"Caducado", jt_st_hidden:"En revisión", jt_st_removed:"Eliminado",
+      jt_expiresIn:"caduca en {n} días", jt_expiresToday:"caduca hoy", jt_markFilled:"Marcar como cubierto", jt_closeJob:"Cerrar", jt_reopen:"Reabrir", jt_renew:"Renovar {n} días", jt_view:"Ver",
+      jt_hiddenAuto:"Cuvori está revisando este trabajo antes de publicarlo. Suele ser rápido.", jt_hiddenSuspended:"Este trabajo está oculto porque la cuenta está suspendida.", jt_hiddenBy:"Ocultado por Cuvori: {reason}", jt_removedBy:"Eliminado por Cuvori: {reason}",
+      jt_appeal:"Pedir una revisión", jt_appealBody:"Por favor, revisad mi trabajo «{title}». ", jt_updated:"Actualizado.", jt_renewed:"Renovado.", jt_myJobsHint:"Los trabajos activos caducan a los {n} días si no los renuevas. Marca un trabajo como cubierto cuando hayas contratado a alguien.",
+      jt_err_identity:"Verifica tu identidad antes de publicar un trabajo.", jt_err_daily:"Has alcanzado el límite de publicaciones de hoy. Inténtalo mañana.", jt_err_active:"Tienes demasiados trabajos activos. Marca uno como cubierto o ciérralo.", jt_err_plan:"Has alcanzado el límite de tu plan.", jt_err_dup:"Publicaste el mismo trabajo hace poco. Edítalo o renuévalo.", jt_err_renewals:"Este trabajo se ha renovado tantas veces como se permite. Publícalo de nuevo.", jt_err_review:"Este trabajo está en revisión. Puedes pedir una revisión desde Mis trabajos.",
+      jt_postedReview:"Tu trabajo se ha guardado. Cuvori lo revisará antes de publicarlo.", jt_deadline:"Fecha límite" },
+    pl:{ jt_today:"Dodano dzisiaj", jt_yesterday:"Dodano wczoraj", jt_days:"Dodano {n} dni temu", jt_weeks:"Dodano {n} tyg. temu", jt_on:"Dodano {d}", jt_expires:"Wygasa {d}",
+      jt_verified:"Tożsamość zweryfikowana", jt_newClient:"Nowy klient", jt_hireOne:"1 zlecenie", jt_hires:"{n} zleceń", jt_noHires:"Brak zleceń", jt_hireRate:"{p}% zleceń", jt_secured:"Płatność zabezpieczona", jt_memberSince:"Od {d}", jt_jobsPosted:"{n} ogłoszeń", jt_jobPosted:"1 ogłoszenie",
+      jt_sort:"Sortuj", jt_sortNewest:"Najnowsze", jt_sortBudget:"Najwyższy budżet", jt_sortDeadline:"Najbliższy termin",
+      jt_trustFilter:"Zaufanie", jt_fVerified:"Tylko zweryfikowana tożsamość", jt_fSecured:"Tylko zabezpieczona płatność", jt_fWithin:"Dodano w ciągu", jt_wAny:"Kiedykolwiek", jt_w1:"24 godzin", jt_w7:"7 dni", jt_w30:"30 dni",
+      jt_aboutClient:"O tym kliencie", jt_report:"Zgłoś", jt_reportTitle:"Zgłoś to ogłoszenie", jt_reportWhy:"Co jest nie tak?", jt_r_scam:"Oszustwo", jt_r_fake:"Fałszywe lub mylące", jt_r_spam:"Spam", jt_r_duplicate:"Dodane kilka razy", jt_r_payment:"Problem z płatnością", jt_r_inappropriate:"Nieodpowiednia treść", jt_r_other:"Coś innego",
+      jt_reportNote:"Coś jeszcze? (opcjonalnie)", jt_reportSend:"Wyślij zgłoszenie", jt_reportThanks:"Dzięki — przyjrzymy się.", jt_reportHint:"Zgłoszenia czyta człowiek. Nikt nie jest blokowany automatycznie.",
+      jt_myJobs:"Moje ogłoszenia", jt_st_open:"Aktywne", jt_st_filled:"Obsadzone", jt_st_closed:"Zamknięte", jt_st_expired:"Wygasłe", jt_st_hidden:"W trakcie sprawdzania", jt_st_removed:"Usunięte",
+      jt_expiresIn:"wygasa za {n} dni", jt_expiresToday:"wygasa dzisiaj", jt_markFilled:"Oznacz jako obsadzone", jt_closeJob:"Zamknij", jt_reopen:"Otwórz ponownie", jt_renew:"Przedłuż o {n} dni", jt_view:"Zobacz",
+      jt_hiddenAuto:"Cuvori sprawdza to ogłoszenie przed publikacją. Zwykle trwa to krótko.", jt_hiddenSuspended:"Ogłoszenie jest ukryte, bo konto jest zawieszone.", jt_hiddenBy:"Ukryte przez Cuvori: {reason}", jt_removedBy:"Usunięte przez Cuvori: {reason}",
+      jt_appeal:"Poproś o sprawdzenie", jt_appealBody:"Proszę o sprawdzenie mojego ogłoszenia „{title}”. ", jt_updated:"Zaktualizowano.", jt_renewed:"Przedłużono.", jt_myJobsHint:"Aktywne ogłoszenia wygasają po {n} dniach, jeśli ich nie przedłużysz. Oznacz ogłoszenie jako obsadzone, gdy kogoś zatrudnisz.",
+      jt_err_identity:"Zweryfikuj tożsamość, zanim dodasz ogłoszenie.", jt_err_daily:"Osiągnięto dzienny limit ogłoszeń. Spróbuj jutro.", jt_err_active:"Masz za dużo aktywnych ogłoszeń. Najpierw jedno zamknij lub oznacz jako obsadzone.", jt_err_plan:"Osiągnięto limit Twojego planu.", jt_err_dup:"Niedawno dodałeś takie samo ogłoszenie. Edytuj je lub przedłuż.", jt_err_renewals:"To ogłoszenie przedłużano już maksymalną liczbę razy. Dodaj je ponownie.", jt_err_review:"To ogłoszenie jest sprawdzane. O sprawdzenie możesz poprosić w Moich ogłoszeniach.",
+      jt_postedReview:"Ogłoszenie zapisane. Cuvori sprawdzi je przed publikacją.", jt_deadline:"Termin" },
+    uk:{ jt_today:"Опубліковано сьогодні", jt_yesterday:"Опубліковано вчора", jt_days:"Опубліковано {n} дн. тому", jt_weeks:"Опубліковано {n} тиж. тому", jt_on:"Опубліковано {d}", jt_expires:"Діє до {d}",
+      jt_verified:"Особу підтверджено", jt_newClient:"Новий клієнт", jt_hireOne:"1 найм", jt_hires:"{n} наймів", jt_noHires:"Наймів ще немає", jt_hireRate:"{p}% наймів", jt_secured:"Оплату захищено", jt_memberSince:"На сайті з {d}", jt_jobsPosted:"{n} завдань розміщено", jt_jobPosted:"1 завдання розміщено",
+      jt_sort:"Сортування", jt_sortNewest:"Спочатку нові", jt_sortBudget:"Більший бюджет", jt_sortDeadline:"Найближчий строк",
+      jt_trustFilter:"Довіра", jt_fVerified:"Лише з підтвердженою особою", jt_fSecured:"Лише із захищеною оплатою", jt_fWithin:"Опубліковано за", jt_wAny:"Будь-коли", jt_w1:"24 години", jt_w7:"7 днів", jt_w30:"30 днів",
+      jt_aboutClient:"Про клієнта", jt_report:"Поскаржитися", jt_reportTitle:"Поскаржитися на завдання", jt_reportWhy:"Що не так?", jt_r_scam:"Шахрайство", jt_r_fake:"Неправдиве або оманливе", jt_r_spam:"Спам", jt_r_duplicate:"Розміщено кілька разів", jt_r_payment:"Проблема з оплатою", jt_r_inappropriate:"Неприйнятний вміст", jt_r_other:"Інше",
+      jt_reportNote:"Щось іще? (необов'язково)", jt_reportSend:"Надіслати", jt_reportThanks:"Дякуємо — ми подивимося.", jt_reportHint:"Скарги читає людина. Нікого не блокують автоматично.",
+      jt_myJobs:"Мої завдання", jt_st_open:"Активне", jt_st_filled:"Виконавця знайдено", jt_st_closed:"Закрите", jt_st_expired:"Прострочене", jt_st_hidden:"На перевірці", jt_st_removed:"Видалене",
+      jt_expiresIn:"спливає через {n} дн.", jt_expiresToday:"спливає сьогодні", jt_markFilled:"Виконавця знайдено", jt_closeJob:"Закрити", jt_reopen:"Відкрити знову", jt_renew:"Продовжити на {n} дн.", jt_view:"Відкрити",
+      jt_hiddenAuto:"Cuvori перевіряє це завдання перед публікацією. Зазвичай це швидко.", jt_hiddenSuspended:"Завдання приховано, бо обліковий запис призупинено.", jt_hiddenBy:"Приховано Cuvori: {reason}", jt_removedBy:"Видалено Cuvori: {reason}",
+      jt_appeal:"Попросити перевірку", jt_appealBody:"Будь ласка, перевірте моє завдання «{title}». ", jt_updated:"Оновлено.", jt_renewed:"Продовжено.", jt_myJobsHint:"Активні завдання спливають через {n} днів, якщо їх не продовжити. Позначте завдання, коли знайшли виконавця.",
+      jt_err_identity:"Підтвердьте особу, перш ніж розміщувати завдання.", jt_err_daily:"Денний ліміт розміщень вичерпано. Спробуйте завтра.", jt_err_active:"Забагато активних завдань. Спершу закрийте одне.", jt_err_plan:"Ліміт вашого тарифу вичерпано.", jt_err_dup:"Ви нещодавно розміщували таке саме завдання. Відредагуйте або продовжте його.", jt_err_renewals:"Це завдання продовжували максимальну кількість разів. Розмістіть його заново.", jt_err_review:"Завдання на перевірці. Попросити перевірку можна в «Моїх завданнях».",
+      jt_postedReview:"Завдання збережено. Cuvori перевірить його перед публікацією.", jt_deadline:"Строк" }
+  };
+  for(const code in T_JT){ if(T[code]) Object.assign(T[code], T_JT[code]); }
 
   state.people = {};          // user id -> {name}
   state.convs = {};           // other user key -> {id, other, name, last}
@@ -4899,11 +4998,13 @@
   // ----- jobs -----
   async function loadJobs(){
     if(!REAL) return;
-    const { data } = await sb.from("jobs").select("*").eq("status","open").order("created_at",{ascending:false});
+    // one call: the public jobs with the client facts attached (v20). Expired, hidden and removed jobs never come back from it.
+    const { data } = await sb.rpc("browse_jobs",{ p_limit:300 });
     state.jobsReal=data||[];
-    const sj=$(".stat[data-route='jobs'] .stat-num"); if(sj) sj.textContent=state.jobsReal.filter(j=>j.owner===myId()).length;
-    const owners=[...new Set(state.jobsReal.map(j=>j.owner))].filter(id=>!state.people[id]);
-    if(owners.length && signedIn()){ const { data:ps } = await sb.from("profiles").select("id,first_name").in("id",owners); (ps||[]).forEach(x=>state.people[x.id]={name:x.first_name||t("d_client")}); }
+    state.jobsReal.forEach(j=>{ if(j.owner_name) state.people[j.owner]={name:j.owner_name}; });
+    if(!state.jt.rules) await jtLoadRules();
+    await loadMyJobs();
+    const sj=$(".stat[data-route='jobs'] .stat-num"); if(sj) sj.textContent=state.jt.myJobs.filter(j=>jtStatus(j)==="open").length;
     renderRealJobs();
   }
   function ago(ts){ const d=Math.floor((Date.now()-new Date(ts))/86400000); return d<1?"0d":d<7?d+"d":Math.floor(d/7)+"w"; }
@@ -4929,21 +5030,28 @@
     $$(".job[data-job]:not(.real-job)",list).forEach(j=>j.classList.add("demo-hidden"));
     $$(".real-job",list).forEach(j=>j.remove());
     const roleKey={editor:"optEditor",videographer:"optVideographer",photographer:"optPhotographer"};
-    state.jobsReal.forEach(j=>{
+    const sorted=state.jobsReal.slice().sort((a,b)=>{
+      if(state.jt.sort==="budget") return (b.budget_cents||0)-(a.budget_cents||0) || (new Date(b.created_at)-new Date(a.created_at));
+      if(state.jt.sort==="deadline") return ((a.deadline?new Date(a.deadline):Infinity)-(b.deadline?new Date(b.deadline):Infinity)) || (new Date(b.created_at)-new Date(a.created_at));
+      return new Date(b.created_at)-new Date(a.created_at);
+    }).reverse();   // prepended one by one, so the last one ends up on top
+    sorted.forEach(j=>{
       const who=state.people[j.owner]?state.people[j.owner].name:t("d_client");
       const el=document.createElement("div"); el.className="job real-job"; el.dataset.job=(j.title+" "+(j.description||"")+" "+(j.location||"")).toLowerCase();
       const jslug=j.profession_slug || ({editor:"video-editor",videographer:"videographer",photographer:"photographer"}[j.role_needed]||"video-editor");
       el.dataset.role=jslug; el.dataset.where=j.remote?"remote":"onsite"; el.dataset.pricing=j.pricing; el.dataset.owner=j.owner; el.dataset.id=j.id;
       const det=(j.details&&typeof j.details==="object")?{...j.details}:{}; if(!det.video_specialty && jobSpecKey(jslug)==="video_specialty" && j.category && j.category!=="catOther") det.video_specialty=[j.category];
       el.dataset.details=JSON.stringify(det);
+      const c=j.client||{}; el.dataset.posted=j.created_at; el.dataset.verified=c.identity==="verified"?"1":"0"; el.dataset.secured=j.payment_secured?"1":"0";
       el.innerHTML=`<div class="job-avatar alt">${escapeHtml(initialsOf(who))}</div><div class="job-content">
         <div class="job-top"><div><h3>${escapeHtml(j.title)}</h3><div class="muted">${escapeHtml(who)} · ${escapeHtml(j.location||t("p_remote"))}</div></div><strong>${escapeHtml(j.budget||"€ —")}</strong></div>
         <p class="muted">${escapeHtml(j.description||"")}</p>
-        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${Object.entries(det).flatMap(([k,vs])=>(Array.isArray(vs)?vs:[]).slice(0,4).map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}${j.owner===myId()?`<button class="link-btn" data-close-job="${j.id}" style="font-size:12px">${t("d_closeJob")}</button>`:""}<span class="job-time muted">${t("p_posted")} ${ago(j.created_at)}</span></div></div>`;
-      el.addEventListener("click",e=>{ if(e.target.closest("[data-close-job]")) return; openJob(el); });
+        ${jtTrustHtml(j,false)}
+        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${Object.entries(det).flatMap(([k,vs])=>(Array.isArray(vs)?vs:[]).slice(0,4).map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}<span class="job-time muted" title="${escapeHtml(jtExact(j.created_at))}">${escapeHtml(jtAgo(j.created_at))}</span></div></div>`;
+      el.addEventListener("click",()=>openJob(el));
       list.prepend(el);
     });
-    $$("[data-close-job]",list).forEach(b=>b.addEventListener("click",async e=>{e.stopPropagation(); await sb.from("jobs").update({status:"closed"}).eq("id",b.dataset.closeJob); toast(t("d_jobClosed")); loadJobs();}));
+    renderMyJobs();
     $("#jobsEmptyReal")?.remove();
     if(!state.jobsReal.length){ const n=document.createElement("div"); n.id="jobsEmptyReal"; n.className="empty-state"; n.innerHTML=`<strong>${t("d_noJobs")}</strong>`; list.append(n); }
     renderJobFilterBar(); runJobSearch();
@@ -4956,10 +5064,11 @@
     const row={ owner:myId(), title, status:"open", role_needed:legacyRole, profession_slug:slug, category:CAT_KEYS.includes(spec)?spec:"catOther",
       details,
       description:$("#jobDesc").value.trim(), location:loc, remote:(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc)), pricing:pricing.selectedIndex===0?"project":"hourly", budget:$("#jobBudget").value.trim(), deadline:$("#jobDeadline").value||null };
-    const { error } = await sb.from("jobs").insert(row);
-    if(error){ toast(errText(error)); console.error(error); return; }
+    const { data:ins, error } = await sb.from("jobs").insert(row).select("id,status");
+    if(error){ toast(jtErr(error)); console.error(error); return; }
     $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); $$("#jobSpecs .job-opt.selected").forEach(b=>b.classList.remove("selected")); updateJobPreview();
-    toast(t("d_jobPosted")); route("jobs"); loadJobs();
+    const hidden=Array.isArray(ins)&&ins[0]&&ins[0].status==="hidden";
+    toast(t(hidden?"jt_postedReview":"d_jobPosted")); route("jobs"); loadJobs();
   }
 
   // ----- messaging -----
@@ -5318,6 +5427,7 @@
       else if(ADMIN.tab==="reports"){ const { data, error } = await sb.rpc("admin_list_reports",{ p_status:ADMIN.repStatus }); if(error) throw error; ADMIN.reports=data||[]; renderAdminReports(); }
       else if(ADMIN.tab==="professions"){ await adminLoadProfessions(); renderAdminProfessions(); }
       else if(ADMIN.tab==="fees"){ const { data, error } = await sb.rpc("admin_fee_schedules"); if(error) throw error; ADMIN.fees=data||[]; renderAdminFees(); }
+      else if(ADMIN.tab==="jobs"){ const { data, error } = await sb.rpc("admin_job_queue"); if(error) throw error; ADMIN.jobQueue=data||[]; const r=await sb.rpc("setting",{ p_key:"posting_rules" }); ADMIN.rules=(r.data&&typeof r.data==="object")?r.data:{}; renderAdminJobs(); }
       else { const { data, error } = await sb.rpc("admin_list_reviews"); if(error) throw error; ADMIN.reviews=data||[]; renderAdminReviews(); }
     }catch(e){ console.error(e); host.innerHTML=`<div class="notice danger">${escapeHtml(e.message||"Error")}</div>`; }
   }
@@ -6733,6 +6843,159 @@
     state.orderPrefill=state.orderPrefill||{};
   }
 
+  // =====================================================================
+  // Jobs a freelancer can trust (schema v20).
+  // Every card answers: when was this posted, is it still active, who is the client
+  // (verified? hires? new?), is the payment secured. Owners manage states in "My jobs";
+  // anyone signed in can report a job; the admin has a review queue with an audit trail.
+  // Scores stay internal: the public sees facts, never a number.
+  // =====================================================================
+  state.jt = { sort:"newest", verified:false, secured:false, within:"", myJobs:[], rules:null };
+  function jtRules(){ return state.jt.rules || { expiry_days:30 }; }
+  async function jtLoadRules(){ if(!REAL) return; try{ const { data } = await sb.rpc("setting",{ p_key:"posting_rules" }); if(data && typeof data==="object") state.jt.rules=data; }catch(e){} }
+  function jtDays(ts){ return Math.floor((Date.now()-new Date(ts).getTime())/86400000); }
+  function jtAgo(ts){
+    const d=jtDays(ts);
+    if(d<1) return t("jt_today"); if(d===1) return t("jt_yesterday"); if(d<7) return fill(t("jt_days"),{n:d});
+    if(d<60) return fill(t("jt_weeks"),{n:Math.floor(d/7)}); return fill(t("jt_on"),{d:fmtDate(ts)});
+  }
+  function jtExact(ts){ try{ return new Date(ts).toLocaleString(); }catch(e){ return ""; } }
+  function jtMonth(ym){ try{ return new Date(ym+"-01T00:00:00").toLocaleDateString(undefined,{month:"short",year:"numeric"}); }catch(e){ return ym||""; } }
+  // the trust line: facts about the client and the job, never a score
+  function jtTrustHtml(j, long){
+    const c=j.client||{}; const out=[];
+    if(c.identity==="verified") out.push(`<span class="trust ok">✓ ${escapeHtml(t("jt_verified"))}</span>`);
+    if(j.payment_secured) out.push(`<span class="trust ok">✓ ${escapeHtml(t("jt_secured"))}</span>`);
+    if(c.is_new) out.push(`<span class="trust">${escapeHtml(t("jt_newClient"))}</span>`);
+    else{
+      const h=Number(c.hires||0); out.push(`<span class="trust">${escapeHtml(h===1?t("jt_hireOne"):h?fill(t("jt_hires"),{n:h}):t("jt_noHires"))}</span>`);
+      if(c.hire_rate!=null) out.push(`<span class="trust">${escapeHtml(fill(t("jt_hireRate"),{p:c.hire_rate}))}</span>`);
+    }
+    if(long){
+      const n=Number(c.jobs_posted||0); out.push(`<span class="trust">${escapeHtml(n===1?t("jt_jobPosted"):fill(t("jt_jobsPosted"),{n}))}</span>`);
+      if(c.member_since) out.push(`<span class="trust">${escapeHtml(fill(t("jt_memberSince"),{d:jtMonth(c.member_since)}))}</span>`);
+    }
+    return `<div class="job-trust">${out.join("")}</div>`;
+  }
+  function jtStatus(j){ if(j.status==="open" && j.expires_at && new Date(j.expires_at)<new Date()) return "expired"; return j.status; }
+  function jtStatusPill(st){ const cls={open:"ok",filled:"",closed:"",expired:"warn",hidden:"warn",removed:"danger"}[st]||""; return `<span class="status-pill ${cls}">${escapeHtml(t("jt_st_"+st)||st)}</span>`; }
+  function jtErr(error, data){
+    const code=String((data && data!=="ok") ? data : ((error && (error.message||error.hint||error.details)) || ""));
+    const map={ identity_required:"jt_err_identity", job_daily_limit:"jt_err_daily", job_active_limit:"jt_err_active", job_plan_limit:"jt_err_plan", duplicate_cooldown:"jt_err_dup", too_many_renewals:"jt_err_renewals", under_review:"jt_err_review" };
+    for(const k of Object.keys(map)) if(code.includes(k)) return t(map[k]);
+    return errText(error, data);
+  }
+
+  // ----- My jobs: the owner's list, every state, with the reason when Cuvori stepped in -----
+  async function loadMyJobs(){
+    if(!REAL || !signedIn()){ state.jt.myJobs=[]; renderMyJobs(); return; }
+    const { data } = await sb.rpc("my_jobs"); state.jt.myJobs=data||[]; renderMyJobs();
+  }
+  function renderMyJobs(){
+    const host=$("#myJobsPanel"); if(!host) return;
+    const rows=state.jt.myJobs; host.classList.toggle("hidden", !rows.length);
+    if(!rows.length){ host.innerHTML=""; return; }
+    const exp=jtRules().expiry_days||30;
+    host.innerHTML=`<div class="panel" style="margin-bottom:14px"><div class="panel-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${escapeHtml(t("jt_myJobs"))}</h3><span class="muted small">${escapeHtml(fill(t("jt_myJobsHint"),{n:exp}))}</span></div>
+      <div class="mj-table" style="margin-top:10px">${rows.map(j=>{
+        const st=jtStatus(j); const left=j.expires_at?Math.ceil((new Date(j.expires_at)-Date.now())/86400000):null;
+        const when=st==="open"&&left!=null?` · ${escapeHtml(left<=0?t("jt_expiresToday"):fill(t("jt_expiresIn"),{n:left}))}`:"";
+        let why="";
+        if(st==="hidden") why=j.hidden_reason==="auto_review"?t("jt_hiddenAuto"):j.hidden_reason==="account_suspended"?t("jt_hiddenSuspended"):fill(t("jt_hiddenBy"),{reason:j.hidden_reason||""});
+        if(st==="removed") why=fill(t("jt_removedBy"),{reason:j.hidden_reason||""});
+        const acts=[];
+        if(st==="open"){ acts.push(`<button class="link-btn" data-jt="filled">${escapeHtml(t("jt_markFilled"))}</button>`, `<button class="link-btn" data-jt="closed">${escapeHtml(t("jt_closeJob"))}</button>`); if(left!=null && left<=7) acts.push(`<button class="link-btn" data-jt="renew">${escapeHtml(fill(t("jt_renew"),{n:exp}))}</button>`); }
+        if(st==="filled"||st==="closed") acts.push(`<button class="link-btn" data-jt="open">${escapeHtml(t("jt_reopen"))}</button>`);
+        if(st==="expired") acts.push(`<button class="link-btn" data-jt="renew">${escapeHtml(fill(t("jt_renew"),{n:exp}))}</button>`);
+        if(st==="hidden"||st==="removed") acts.push(`<button class="link-btn" data-jt="appeal">${escapeHtml(t("jt_appeal"))}</button>`);
+        return `<div class="mj-row" data-myjob="${j.id}"><div class="admin-main"><div><strong>${escapeHtml(j.title)}</strong> ${jtStatusPill(st)}${j.payment_secured?` <span class="trust ok">✓ ${escapeHtml(t("jt_secured"))}</span>`:""}</div>
+          <div class="muted small" title="${escapeHtml(jtExact(j.created_at))}">${escapeHtml(jtAgo(j.created_at))}${when}${j.hires?` · ${escapeHtml(j.hires===1?t("jt_hireOne"):fill(t("jt_hires"),{n:j.hires}))}`:""}</div>
+          ${why?`<div class="muted small" style="margin-top:4px">${escapeHtml(why)}</div>`:""}</div>
+          <div class="admin-actions">${acts.join("")}</div></div>`; }).join("")}</div></div>`;
+    $$("[data-myjob]",host).forEach(row=>{
+      const id=row.dataset.myjob; const j=rows.find(x=>x.id===id);
+      $$("[data-jt]",row).forEach(b=>b.addEventListener("click",async()=>{
+        const a=b.dataset.jt;
+        if(a==="appeal"){ reportModal("job", id); setTimeout(()=>{ const ta=$("#rpBody"); if(ta && !ta.value) ta.value=fill(t("jt_appealBody"),{title:j.title}); },0); return; }
+        const { data, error } = a==="renew" ? await sb.rpc("renew_job",{ p_job:id }) : await sb.rpc("set_job_status",{ p_job:id, p_status:a });
+        if(error || data!=="ok"){ toast(jtErr(error,data)); return; }
+        toast(t(a==="renew"?"jt_renewed":"jt_updated")); loadJobs();
+      }));
+    });
+  }
+
+  // ----- Report job: one tap, a reason, a person reads it -----
+  function jobReportModal(jobId){
+    if(!signedIn()){ joinPrompt(null); return; }
+    const reasons=["scam","fake","spam","duplicate","payment","inappropriate","other"];
+    openModal(t("jt_reportTitle"), `<label>${escapeHtml(t("jt_reportWhy"))}</label>
+      <div class="ct-toggle" style="display:flex;flex-direction:column;gap:6px;margin:6px 0 12px">${reasons.map((r,i)=>`<label class="check"><input type="radio" name="jrReason" value="${r}" ${i===0?"checked":""}> <span>${escapeHtml(t("jt_r_"+r))}</span></label>`).join("")}</div>
+      <label>${escapeHtml(t("jt_reportNote"))}</label><textarea id="jrNote" rows="3" maxlength="1000"></textarea>
+      <button class="primary" id="jrSend" style="margin-top:14px;width:100%">${escapeHtml(t("jt_reportSend"))}</button>
+      <p class="muted small" style="margin-top:10px">${escapeHtml(t("jt_reportHint"))}</p>`, root=>{
+        $("#jrSend",root).addEventListener("click",async()=>{
+          const reason=($("input[name=jrReason]:checked",root)||{}).value||"other", note=$("#jrNote",root).value.trim();
+          if(!REAL){ closeModal(); toast(t("jt_reportThanks")); return; }
+          const { data, error } = await sb.rpc("report_job",{ p_job:jobId, p_reason:reason, p_note:note });
+          if(error || data!=="ok"){ toast(jtErr(error,data)); return; }
+          closeModal(); toast(t("jt_reportThanks"));
+        });
+      });
+  }
+
+  // ----- Admin: the review queue and the posting rules -----
+  function renderAdminJobs(){
+    const host=$("#adminBody"); const q=ADMIN.jobQueue||[]; const rules=ADMIN.rules||{};
+    const num=(k,label)=>`<label style="display:flex;flex-direction:column;gap:3px;font-size:12px">${label}<input type="number" min="0" max="10000" data-rule="${k}" value="${escapeHtml(String(rules[k]??""))}" style="width:110px"></label>`;
+    const flagText=f=>{ const d=f.detail||{}; if(f.kind==="reports") return `${d.reports||0} report(s)`; if(f.kind==="risk_text") return `text: ${d.hit||""}`; if(f.kind==="links") return `link: ${String(d.hit||"").replace(/^link:/,"")}`; if(f.kind==="duplicate") return `same text as "${d.title||""}" (${d.other_status||""}, ${fmtDate(d.at)})`; if(f.kind==="near_duplicate") return `${Math.round((d.similarity||0)*100)}% like "${d.title||""}" (${fmtDate(d.at)})`; if(f.kind==="repeat_no_hire") return `${d.jobs_posted} jobs posted, ${d.hires} hires, account ${d.account_days} days old`; return f.kind; };
+    host.innerHTML=`<div class="panel" style="margin-bottom:14px"><h3 style="margin:0 0 8px">Posting rules</h3><p class="muted small" style="margin:0 0 10px">Limits protect the feed without punishing good clients. A "verified" client is one Stripe has checked (payouts or identity) or one you marked verified.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">${num("expiry_days","Job expires after (days)")}${num("daily_limit_new","Posts per day — new client")}${num("daily_limit_verified","Posts per day — verified")}${num("active_limit_new","Active jobs — new client")}${num("active_limit_verified","Active jobs — verified")}${num("duplicate_cooldown_days","Same job again after (days)")}${num("auto_hide_score","Hide for review at risk score")}
+      <label class="check" style="font-size:12px"><input type="checkbox" id="ruleIdentity" ${rules.require_identity?"checked":""}> Identity verification required to post</label>
+      <button class="primary" id="saveRules">Save rules</button></div></div>
+      <div class="admin-stats" style="margin-bottom:10px"><span><strong>${q.length}</strong> waiting for review</span></div>
+      ${q.length?`<div class="admin-table">${q.map(e=>{ const j=e.job||{}; const c=e.client||{}; return `
+        <div class="admin-row" data-ajob="${j.id}" style="align-items:flex-start">
+          <div class="admin-main">
+            <div><strong>${escapeHtml(j.title||"")}</strong> ${jtStatusPill(jtStatus(j))} <span class="muted small">score ${e.score}</span></div>
+            <div class="muted small">${escapeHtml(e.owner_name||"")} <span class="muted">${escapeHtml(e.owner_email||"")}</span>${e.owner_banned?` · <span class="danger-text">BANNED</span>`:""} · ${c.jobs_posted||0} jobs · ${c.hires||0} hires · ${c.identity==="verified"?"identity verified":"not verified"} · member since ${escapeHtml(jtMonth(c.member_since))} · posted ${fmtDate(j.created_at)}${j.budget?` · ${escapeHtml(j.budget)}`:""}</div>
+            <div class="muted small" style="margin-top:6px;white-space:pre-wrap">${escapeHtml(String(j.description||"").slice(0,600))}</div>
+            <div style="margin-top:6px">${(e.flags||[]).map(f=>`<span class="pill" title="${escapeHtml(f.kind)}">${escapeHtml(f.kind)} +${f.score}: ${escapeHtml(flagText(f))}</span> `).join("")}</div>
+            ${(e.reports||[]).length?`<div class="muted small" style="margin-top:6px">${e.reports.map(r=>`<div>⚑ ${escapeHtml(r.reason)} — ${escapeHtml(r.reporter||"")}${r.note?": "+escapeHtml(r.note):""} <span class="muted">${fmtDate(r.at)}</span></div>`).join("")}</div>`:""}
+            ${(e.history||[]).length?`<div class="muted small" style="margin-top:6px">Other jobs by this client: ${e.history.map(h=>`${escapeHtml(h.title)} (${escapeHtml(h.status)}, ${fmtDate(h.at)})`).join(" · ")}</div>`:""}
+            ${(e.actions||[]).length?`<div class="muted small" style="margin-top:6px">Previous actions: ${e.actions.map(a=>`${escapeHtml(a.action)}${a.reason?" — "+escapeHtml(a.reason):""} (${fmtDate(a.at)})`).join(" · ")}</div>`:""}
+          </div>
+          <div class="admin-actions" style="flex-direction:column;align-items:flex-start;gap:6px">
+            <button class="link-btn" data-aj="approve">Approve (looks fine)</button>
+            <button class="link-btn" data-aj="false_positive">False positive</button>
+            ${jtStatus(j)==="hidden"?`<button class="link-btn" data-aj="unhide">Unhide</button>`:`<button class="link-btn" data-aj="hide">Hide…</button>`}
+            <button class="link-btn" data-aj="warn">Warn the client…</button>
+            <button class="link-btn danger-text" data-aj="remove">Remove…</button>
+            <button class="link-btn danger-text" data-aj="suspend">Suspend account…</button>
+            ${c.identity!=="verified"?`<button class="link-btn" data-aj="verify">Mark client verified…</button>`:""}
+          </div>
+        </div>`; }).join("")}</div>`:`<div class="muted">Nothing is waiting for review.</div>`}`;
+    $("#saveRules").addEventListener("click",async()=>{
+      const v={...rules}; $$("[data-rule]",host).forEach(i=>{ const n=Number(i.value); if(Number.isFinite(n)) v[i.dataset.rule]=n; }); v.require_identity=$("#ruleIdentity").checked;
+      const { data, error } = await sb.rpc("admin_set_setting",{ p_key:"posting_rules", p_value:v }); if(error||data!=="ok"){ toast(errText(error,data)); return; } toast("Rules saved"); state.jt.rules=v; openAdmin();
+    });
+    $$("[data-ajob]",host).forEach(row=>{
+      const id=row.dataset.ajob; const e=q.find(x=>(x.job||{}).id===id); const j=e.job||{};
+      const act=async(action,reason)=>{ const { data, error } = await sb.rpc("admin_job_action",{ p_job:id, p_action:action, p_reason:reason||"" }); if(error||data!=="ok"){ toast(errText(error,data)); return; } toast("Done"); openAdmin(); };
+      const ask=(title, hint, action, min)=>openModal(title, `<p class="muted" style="margin-bottom:10px">${hint}</p><label>Reason (the client can see it)</label><input id="ajReason" maxlength="1000"><button class="primary" id="ajGo" style="margin-top:14px">${title}</button>`, root=>{
+        $("#ajGo",root).addEventListener("click",async()=>{ const r=$("#ajReason",root).value.trim(); if(r.length<(min||3)){ toast(t("a_fillAll")); return; } closeModal(); await act(action,r); }); });
+      $$("[data-aj]",row).forEach(b=>b.addEventListener("click",async()=>{
+        const a=b.dataset.aj;
+        if(a==="approve"||a==="false_positive"||a==="unhide") return act(a, a==="false_positive"?"false positive":"");
+        if(a==="hide") return ask("Hide job", "The job leaves the feed until you unhide it. The owner sees your reason under My jobs.", "hide");
+        if(a==="remove") return ask("Remove job", "The job is removed for good (the row stays for the record). The owner sees your reason.", "remove");
+        if(a==="warn") return ask("Warn the client", "Sends a message from you to the client's inbox about this job.", "warn");
+        if(a==="suspend") return ask("Suspend account", "Bans the account and hides all their open jobs. Reversible from Users → Unban.", "suspend", 5);
+        if(a==="verify") return openModal("Mark client verified", `<p class="muted" style="margin-bottom:10px">Only do this when you saw real proof (a provider check, a video call with an ID). The note stays in the moderation log.</p><label>What did you see?</label><input id="ajNote" maxlength="500"><button class="primary" id="ajGo" style="margin-top:14px">Mark verified</button>`, root=>{
+          $("#ajGo",root).addEventListener("click",async()=>{ const n=$("#ajNote",root).value.trim(); if(n.length<5){ toast(t("a_fillAll")); return; } const { data, error } = await sb.rpc("admin_set_identity",{ p_user:j.owner, p_status:"verified", p_note:n }); closeModal(); if(error||data!=="ok"){ toast(errText(error,data)); return; } toast("Marked verified"); openAdmin(); }); });
+      }));
+    });
+  }
+
   function init(){
     loadReco(); initAdmin(); initContracts(); initOrders(); initEscrow(); initRules();
     applyProfConfig(window.CUVORI_PROFESSIONS); renderFilterBar();
@@ -6816,13 +7079,18 @@
     const owner=j.dataset.owner; const target=owner?"u:"+owner:"Jonas Weber"; const who=owner?((state.people[owner]&&state.people[owner].name)||t("d_client")):"Jonas Weber"; const mine=!!owner && owner===myId();
     const title=$("h3",j).textContent, meta=$(".job-top .muted",j).textContent, price=$(".job-top strong",j).textContent, desc=$("p.muted",j).textContent;
     const pills=$$(".pill",j).map(p=>"<span class=\"pill\">"+p.textContent+"</span>").join("");
+    const jr=owner?(state.jobsReal||[]).find(x=>x.id===j.dataset.id):null;
+    const when=jr?`<div class="muted small" style="margin-bottom:10px" title="${escapeHtml(jtExact(jr.created_at))}">${escapeHtml(jtAgo(jr.created_at))}${jr.expires_at?` · ${escapeHtml(fill(t("jt_expires"),{d:fmtDate(jr.expires_at)}))}`:""}${jr.deadline?` · ${escapeHtml(t("jt_deadline"))}: ${escapeHtml(fmtDate(jr.deadline))}`:""}</div>`:"";
+    const about=jr?`<div class="notice" style="margin-bottom:16px"><strong>${escapeHtml(t("jt_aboutClient"))}</strong> — ${escapeHtml(who)}${jtTrustHtml(jr,true)}</div>`:`<div class="notice" style="margin-bottom:16px"><strong>${t("postedByLabel")}:</strong> ${escapeHtml(who)} · ${t("roleClient")}</div>`;
     openModal(t("jobDetailsTitle"), `
-      <div class="job-top" style="margin-bottom:10px"><div><h2 style="margin:0 0 4px">${escapeHtml(title)}</h2><div class="muted">${escapeHtml(meta)}</div></div><strong style="font-size:20px">${escapeHtml(price)}</strong></div>
+      <div class="job-top" style="margin-bottom:6px"><div><h2 style="margin:0 0 4px">${escapeHtml(title)}</h2><div class="muted">${escapeHtml(meta)}</div></div><strong style="font-size:20px">${escapeHtml(price)}</strong></div>
+      ${when}
       <p style="line-height:1.6;color:#3a4453">${escapeHtml(desc)}</p>
       <div class="job-meta" style="margin-bottom:18px">${pills}</div>
-      <div class="notice" style="margin-bottom:16px"><strong>${t("postedByLabel")}:</strong> ${escapeHtml(who)} · ${t("roleClient")}</div>
-      ${mine?"":`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="primary" id="applyJob">${t("applyBtn")}</button><button class="secondary" id="msgClient">${t("messageClientBtn")}</button></div>`}`, root=>{
+      ${about}
+      ${mine?"":`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="applyJob">${t("applyBtn")}</button><button class="secondary" id="msgClient">${t("messageClientBtn")}</button>${jr?`<button class="link-btn" id="reportJob" style="margin-left:auto;font-size:13px">${escapeHtml(t("jt_report"))}</button>`:""}</div>`}`, root=>{
         if(mine) return;
+        $("#reportJob",root)?.addEventListener("click",()=>{ closeModal(); jobReportModal(jr.id); });
         const remember=()=>{ if(!owner) return; const jr=(state.jobsReal||[]).find(x=>x.id===j.dataset.id); const budget=jr&&String(jr.budget||"").replace(/[^\d.,]/g,"").replace(",",".");
           state.orderPrefill=state.orderPrefill||{}; state.orderPrefill[target]={ title:title, scope:(jr&&jr.description)||desc, profession_slug:j.dataset.role||"", deadline:(jr&&jr.deadline)||"", price:budget&&Number.isFinite(Number(budget))?Number(budget):"", job_id:(jr&&jr.id)||"" }; };
         $("#msgClient",root).addEventListener("click",()=>{closeModal();remember();openChat(target);});
@@ -6842,6 +7110,9 @@
       let ok=!q || text.includes(q);
       for(const k in active){ if(ok && !active[k].includes(j.dataset[k])) ok=false; }
       if(ok && state.js.profession && j.dataset.role!==state.js.profession) ok=false;
+      if(ok && state.jt.verified && j.dataset.verified!=="1") ok=false;
+      if(ok && state.jt.secured && j.dataset.secured!=="1") ok=false;
+      if(ok && state.jt.within && j.dataset.posted && jtDays(j.dataset.posted)>=Number(state.jt.within)) ok=false;
       if(ok && Object.keys(state.js.f).length){ let det={}; try{ det=JSON.parse(j.dataset.details||"{}"); }catch(e){}
         for(const [k,vs] of Object.entries(state.js.f)){ const have=Array.isArray(det[k])?det[k]:[]; if(!vs.some(v=>have.includes(v))){ ok=false; break; } } }
       j.classList.toggle("hidden",!ok); if(ok) n++;
@@ -6906,7 +7177,11 @@
   function initPages(){
     // Jobs
     $$(".job-filter").forEach(c=>c.addEventListener("change",runJobSearch));
-    $("#clearJobFilters").addEventListener("click",()=>{$$(".job-filter").forEach(c=>c.checked=false);$("#jobSearch").value="";state.js.profession=null;state.js.f={};renderJobFilterBar();runJobSearch();});
+    $("#jtVerified").addEventListener("change",e=>{ state.jt.verified=e.target.checked; runJobSearch(); });
+    $("#jtSecured").addEventListener("change",e=>{ state.jt.secured=e.target.checked; runJobSearch(); });
+    $("#jtWithin").addEventListener("change",e=>{ state.jt.within=e.target.value; runJobSearch(); });
+    $("#jobSort").addEventListener("change",e=>{ state.jt.sort=e.target.value; if(REAL) renderRealJobs(); });
+    $("#clearJobFilters").addEventListener("click",()=>{$$(".job-filter").forEach(c=>c.checked=false);$("#jobSearch").value="";state.js.profession=null;state.js.f={};state.jt.verified=false;state.jt.secured=false;state.jt.within="";$("#jtVerified").checked=false;$("#jtSecured").checked=false;$("#jtWithin").value="";renderJobFilterBar();runJobSearch();});
     $("#toggleJobFilters").addEventListener("click",()=>$(".filter-panel").classList.toggle("open"));
     // Post a job
     $$("#page-post-job input,#page-post-job textarea,#page-post-job select").forEach(i=>{i.addEventListener("input",updateJobPreview);i.addEventListener("change",updateJobPreview);});
