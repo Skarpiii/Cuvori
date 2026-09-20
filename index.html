@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-fP3qhDUchH3iW0KJGy70WfemDxkIF6Uhrz7UlOQUx4A=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-jO0IPlLON+JGYKkzIhponBYHQiLQzjP7OWcWWWWQZJc=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -4783,6 +4783,52 @@
       jt_postedReview:"Завдання збережено. Cuvori перевірить його перед публікацією.", jt_deadline:"Строк" }
   };
   for(const code in T_JT){ if(T[code]) Object.assign(T[code], T_JT[code]); }
+  // ---------- Money that survives the real world: chargebacks, settling payments, payout timing (7 languages) ----------
+  const T_MONEY = {
+    en:{ o_ev_chargeback:"The client's bank opened a chargeback ({amt}). Cuvori answers it with the Order history.", o_ev_chargeback_won:"The bank sided with Cuvori — the chargeback was rejected", o_ev_chargeback_lost:"The bank sided with the client — {amt} went back to them",
+      c_ev_chargeback_won:"Chargeback rejected by the bank", c_ev_chargeback_lost:"Chargeback: the bank refunded the client",
+      es_chargebackOpen:"The client's bank has opened a chargeback on this payment. Nothing can be moved until the bank decides (usually a few weeks). Cuvori sends the bank the Order, the delivery and the chat.", es_chargebackWon:"The bank rejected the chargeback.", es_chargebackLost:"The bank refunded the client through the chargeback.",
+      es_confirming:"Confirming your payment with the payment provider…", es_confirmed:"Payment secured.", es_notConfirmed:"The payment is not confirmed yet. If you were charged, it will show here within a minute — reload the page.",
+      es_payoutTiming:"The money is in the freelancer's Stripe account. Stripe pays it out to their bank in a few days (up to 7 days for a new Stripe account).", es_payoutTimingFl:"Released to your Stripe account. Stripe pays it out to your bank in a few days (up to 7 for a new account).",
+      es_settling:"The payment provider is still settling the card payment. Cuvori retries this automatically every hour — nothing to do." },
+    de:{ o_ev_chargeback:"Die Bank des Kunden hat eine Rückbuchung eröffnet ({amt}). Cuvori antwortet mit dem Verlauf des Auftrags.", o_ev_chargeback_won:"Die Bank hat Cuvori recht gegeben — die Rückbuchung wurde abgelehnt", o_ev_chargeback_lost:"Die Bank hat dem Kunden recht gegeben — {amt} ging an ihn zurück",
+      c_ev_chargeback_won:"Rückbuchung von der Bank abgelehnt", c_ev_chargeback_lost:"Rückbuchung: die Bank hat dem Kunden erstattet",
+      es_chargebackOpen:"Die Bank des Kunden hat eine Rückbuchung auf diese Zahlung eröffnet. Bis die Bank entscheidet (meist einige Wochen), kann nichts bewegt werden. Cuvori schickt der Bank den Auftrag, die Lieferung und den Chat.", es_chargebackWon:"Die Bank hat die Rückbuchung abgelehnt.", es_chargebackLost:"Die Bank hat dem Kunden über die Rückbuchung erstattet.",
+      es_confirming:"Zahlung wird beim Zahlungsanbieter bestätigt…", es_confirmed:"Zahlung gesichert.", es_notConfirmed:"Die Zahlung ist noch nicht bestätigt. Wenn abgebucht wurde, erscheint sie innerhalb einer Minute hier — Seite neu laden.",
+      es_payoutTiming:"Das Geld liegt im Stripe-Konto des Freelancers. Stripe zahlt es in wenigen Tagen auf sein Bankkonto aus (bei neuen Stripe-Konten bis zu 7 Tage).", es_payoutTimingFl:"Auf dein Stripe-Konto freigegeben. Stripe zahlt es in wenigen Tagen auf dein Bankkonto aus (bei einem neuen Konto bis zu 7 Tage).",
+      es_settling:"Der Zahlungsanbieter verarbeitet die Kartenzahlung noch. Cuvori versucht es automatisch jede Stunde erneut — nichts zu tun." },
+    ru:{ o_ev_chargeback:"Банк клиента открыл чарджбэк ({amt}). Cuvori отвечает историей заказа.", o_ev_chargeback_won:"Банк поддержал Cuvori — чарджбэк отклонён", o_ev_chargeback_lost:"Банк поддержал клиента — {amt} вернулись ему",
+      c_ev_chargeback_won:"Банк отклонил чарджбэк", c_ev_chargeback_lost:"Чарджбэк: банк вернул деньги клиенту",
+      es_chargebackOpen:"Банк клиента открыл чарджбэк по этому платежу. Пока банк не решит (обычно несколько недель), деньги не двигаются. Cuvori отправляет банку заказ, сдачу работы и переписку.", es_chargebackWon:"Банк отклонил чарджбэк.", es_chargebackLost:"Банк вернул деньги клиенту через чарджбэк.",
+      es_confirming:"Подтверждаем платёж у платёжного провайдера…", es_confirmed:"Оплата защищена.", es_notConfirmed:"Платёж ещё не подтверждён. Если деньги списаны, он появится здесь в течение минуты — обновите страницу.",
+      es_payoutTiming:"Деньги на Stripe-счёте фрилансера. Stripe переводит их на банковский счёт за несколько дней (до 7 дней для нового счёта).", es_payoutTimingFl:"Переведено на ваш Stripe-счёт. Stripe выплатит на ваш банковский счёт за несколько дней (до 7 для нового счёта).",
+      es_settling:"Платёжный провайдер ещё проводит платёж картой. Cuvori повторяет попытку автоматически каждый час — ничего делать не нужно." },
+    lt:{ o_ev_chargeback:"Kliento bankas pradėjo grąžinimo ginčą ({amt}). Cuvori atsako užsakymo istorija.", o_ev_chargeback_won:"Bankas palaikė Cuvori — ginčas atmestas", o_ev_chargeback_lost:"Bankas palaikė klientą — {amt} grąžinta jam",
+      c_ev_chargeback_won:"Bankas atmetė ginčą", c_ev_chargeback_lost:"Ginčas: bankas grąžino pinigus klientui",
+      es_chargebackOpen:"Kliento bankas pradėjo grąžinimo ginčą dėl šio mokėjimo. Kol bankas nenuspręs (paprastai kelios savaitės), pinigai nejuda. Cuvori bankui siunčia užsakymą, pristatymą ir susirašinėjimą.", es_chargebackWon:"Bankas ginčą atmetė.", es_chargebackLost:"Bankas per ginčą grąžino pinigus klientui.",
+      es_confirming:"Tvirtiname mokėjimą pas mokėjimų tiekėją…", es_confirmed:"Mokėjimas apsaugotas.", es_notConfirmed:"Mokėjimas dar nepatvirtintas. Jei pinigai nuskaičiuoti, jis čia atsiras per minutę — perkraukite puslapį.",
+      es_payoutTiming:"Pinigai yra laisvai samdomo specialisto Stripe sąskaitoje. Stripe juos į banką išmoka per kelias dienas (naujai sąskaitai – iki 7 dienų).", es_payoutTimingFl:"Pervesta į jūsų Stripe sąskaitą. Stripe į jūsų banką išmokės per kelias dienas (naujai sąskaitai – iki 7).",
+      es_settling:"Mokėjimų tiekėjas dar apdoroja kortelės mokėjimą. Cuvori automatiškai bando kas valandą — nieko daryti nereikia." },
+    es:{ o_ev_chargeback:"El banco del cliente abrió una devolución de cargo ({amt}). Cuvori responde con el historial del pedido.", o_ev_chargeback_won:"El banco dio la razón a Cuvori — la devolución fue rechazada", o_ev_chargeback_lost:"El banco dio la razón al cliente — {amt} volvieron a él",
+      c_ev_chargeback_won:"Devolución de cargo rechazada por el banco", c_ev_chargeback_lost:"Devolución de cargo: el banco reembolsó al cliente",
+      es_chargebackOpen:"El banco del cliente ha abierto una devolución de cargo sobre este pago. Nada se puede mover hasta que el banco decida (normalmente unas semanas). Cuvori envía al banco el pedido, la entrega y el chat.", es_chargebackWon:"El banco rechazó la devolución de cargo.", es_chargebackLost:"El banco reembolsó al cliente mediante la devolución de cargo.",
+      es_confirming:"Confirmando tu pago con el proveedor de pagos…", es_confirmed:"Pago asegurado.", es_notConfirmed:"El pago aún no está confirmado. Si se te cobró, aparecerá aquí en un minuto — recarga la página.",
+      es_payoutTiming:"El dinero está en la cuenta Stripe del freelancer. Stripe lo transfiere a su banco en unos días (hasta 7 para una cuenta Stripe nueva).", es_payoutTimingFl:"Liberado a tu cuenta Stripe. Stripe lo transfiere a tu banco en unos días (hasta 7 para una cuenta nueva).",
+      es_settling:"El proveedor de pagos aún está liquidando el pago con tarjeta. Cuvori lo reintenta automáticamente cada hora — no hay nada que hacer." },
+    pl:{ o_ev_chargeback:"Bank klienta otworzył obciążenie zwrotne ({amt}). Cuvori odpowiada historią zlecenia.", o_ev_chargeback_won:"Bank przyznał rację Cuvori — obciążenie zwrotne odrzucone", o_ev_chargeback_lost:"Bank przyznał rację klientowi — {amt} wróciło do niego",
+      c_ev_chargeback_won:"Obciążenie zwrotne odrzucone przez bank", c_ev_chargeback_lost:"Obciążenie zwrotne: bank zwrócił pieniądze klientowi",
+      es_chargebackOpen:"Bank klienta otworzył obciążenie zwrotne dla tej płatności. Dopóki bank nie zdecyduje (zwykle kilka tygodni), nic nie może się ruszyć. Cuvori wysyła bankowi zlecenie, dostawę i czat.", es_chargebackWon:"Bank odrzucił obciążenie zwrotne.", es_chargebackLost:"Bank zwrócił klientowi pieniądze przez obciążenie zwrotne.",
+      es_confirming:"Potwierdzamy płatność u dostawcy płatności…", es_confirmed:"Płatność zabezpieczona.", es_notConfirmed:"Płatność nie jest jeszcze potwierdzona. Jeśli pobrano pieniądze, pojawi się tu w ciągu minuty — odśwież stronę.",
+      es_payoutTiming:"Pieniądze są na koncie Stripe freelancera. Stripe wypłaca je na jego bank w ciągu kilku dni (do 7 dla nowego konta Stripe).", es_payoutTimingFl:"Uwolnione na Twoje konto Stripe. Stripe wypłaci je na Twój bank w ciągu kilku dni (do 7 dla nowego konta).",
+      es_settling:"Dostawca płatności wciąż rozlicza płatność kartą. Cuvori ponawia próbę automatycznie co godzinę — nic nie trzeba robić." },
+    uk:{ o_ev_chargeback:"Банк клієнта відкрив чарджбек ({amt}). Cuvori відповідає історією замовлення.", o_ev_chargeback_won:"Банк підтримав Cuvori — чарджбек відхилено", o_ev_chargeback_lost:"Банк підтримав клієнта — {amt} повернулися йому",
+      c_ev_chargeback_won:"Банк відхилив чарджбек", c_ev_chargeback_lost:"Чарджбек: банк повернув гроші клієнту",
+      es_chargebackOpen:"Банк клієнта відкрив чарджбек за цим платежем. Поки банк не вирішить (зазвичай кілька тижнів), гроші не рухаються. Cuvori надсилає банку замовлення, здачу роботи й листування.", es_chargebackWon:"Банк відхилив чарджбек.", es_chargebackLost:"Банк повернув гроші клієнту через чарджбек.",
+      es_confirming:"Підтверджуємо платіж у платіжного провайдера…", es_confirmed:"Оплату захищено.", es_notConfirmed:"Платіж ще не підтверджено. Якщо гроші списано, він з'явиться тут протягом хвилини — оновіть сторінку.",
+      es_payoutTiming:"Гроші на Stripe-рахунку фрілансера. Stripe виплачує їх на банківський рахунок за кілька днів (до 7 днів для нового рахунку).", es_payoutTimingFl:"Переведено на ваш Stripe-рахунок. Stripe виплатить на ваш банк за кілька днів (до 7 для нового рахунку).",
+      es_settling:"Платіжний провайдер ще проводить платіж карткою. Cuvori автоматично повторює спробу щогодини — нічого робити не потрібно." }
+  };
+  for(const code in T_MONEY){ if(T[code]) Object.assign(T[code], T_MONEY[code]); }
 
   state.people = {};          // user id -> {name}
   state.convs = {};           // other user key -> {id, other, name, last}
@@ -5702,7 +5748,9 @@
         <div><strong>${escapeHtml(r.title)}</strong> <span class="muted small">${money(r.price,r.currency)}${r.has_milestones?" · milestones":""}${r.amendments?" · "+r.amendments+" amendment(s)":""} · ${r.payment_mode==="escrow"?"protected":"direct"} · <span class="c-status st-${r.status}">${t(C_STATUS[r.status]||r.status)}</span>${r.payment_mode==="escrow"&&heldOf(r)?` · held ${money(heldOf(r)/100)}`:""}</span></div>
         <div class="muted small">${escapeHtml(r.client_name||r.client_email||"?")} → ${escapeHtml(r.editor_name||r.editor_email||"?")} · ${fmtDate(r.created_at)}${r.delivered_at?" · delivered "+fmtDate(r.delivered_at):""}${r.auto_release_at&&r.status==="delivered"?" · auto-release "+fmtDate(r.auto_release_at):""}</div>
         ${r.status==="disputed"?`<div class="notice danger" style="margin-top:6px"><strong>Dispute by ${r.dispute_by===r.editor?"freelancer":"client"}:</strong> ${escapeHtml(r.dispute_reason||"")}${safeUrl(r.delivery_url)?`<br>Delivery: <a href="${escapeHtml(safeUrl(r.delivery_url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.delivery_url)}</a>`:""}${r.delivery_note?`<br>Note: ${escapeHtml(r.delivery_note)}`:""}</div>`:""}
-      </div><div class="admin-actions">${["funded","delivered","disputed","resolving"].includes(r.status)&&r.payment_mode==="escrow"?`<button class="link-btn" data-res="release">Release to freelancer</button><button class="link-btn" data-res="split">Split</button><button class="link-btn danger-text" data-res="refund">Refund client</button>`:""}<button class="link-btn" data-cflag="${r.editor}" data-cname="${escapeHtml(r.editor_name||r.editor_email||"editor")}">Flag editor</button><button class="link-btn" data-cflag="${r.client}" data-cname="${escapeHtml(r.client_name||r.client_email||"client")}">Flag client</button></div></div>`).join("")||`<div class="muted">No contracts yet.</div>`}</div>`;
+        ${r.chargeback_status?`<div class="notice ${r.chargeback_status==="open"?"danger":""}" style="margin-top:6px"><strong>Card chargeback ${escapeHtml(r.chargeback_status)}</strong> — ${money((r.chargeback_cents||0)/100)} · ${escapeHtml(r.chargeback_id||"")}${r.chargeback_status==="open"?" · nothing can move until the bank decides; answer the dispute in the Stripe dashboard with the Order, the delivery and the chat":""}</div>`:""}
+        ${r.money_error?`<div class="notice danger" style="margin-top:6px"><strong>Needs a hand:</strong> ${escapeHtml(r.money_error)}<br><span class="muted small">Stripe refs: ${escapeHtml([r.stripe_payment_intent,r.stripe_transfer_id,r.stripe_refund_id].filter(Boolean).join(" · ")||"—")}. Releases and refunds are retried every hour; a release with no transfer yet can be turned into a refund below.</span></div>`:""}
+      </div><div class="admin-actions">${["funded","delivered","disputed","resolving"].includes(r.status)&&r.payment_mode==="escrow"&&r.chargeback_status!=="open"||(r.status==="releasing"&&!r.stripe_transfer_id&&r.payment_mode==="escrow")?`<button class="link-btn" data-res="release">Release to freelancer</button><button class="link-btn" data-res="split">Split</button><button class="link-btn danger-text" data-res="refund">Refund client</button>`:""}<button class="link-btn" data-cflag="${r.editor}" data-cname="${escapeHtml(r.editor_name||r.editor_email||"editor")}">Flag editor</button><button class="link-btn" data-cflag="${r.client}" data-cname="${escapeHtml(r.client_name||r.client_email||"client")}">Flag client</button></div></div>`).join("")||`<div class="muted">No contracts yet.</div>`}</div>`;
     $$("[data-cflag]",host).forEach(b=>b.addEventListener("click",()=>flagUserModal(b.dataset.cflag,b.dataset.cname,b.closest(".admin-row").dataset.cid,()=>openAdmin("contracts"))));
     $$("[data-res]",host).forEach(b=>b.addEventListener("click",()=>{
       const row=b.closest(".admin-row"); const r=rows.find(x=>x.id===row.dataset.cid); const d=b.dataset.res;
@@ -6616,7 +6664,7 @@
   const O_CARD_EVENTS={ proposed:"c_ev_proposed", accept:"c_ev_accept", client_accepted:"c_ev_client_accepted", freelancer_accepted:"c_ev_freelancer_accepted", decline:"c_ev_decline", cancel:"c_ev_cancel",
     mark_paid:"c_ev_mark_paid", confirm_paid:"c_ev_confirm_paid", complete:"c_ev_complete", funded:"c_ev_funded", deliver:"c_ev_deliver", request_changes:"c_ev_request_changes", dispute:"c_ev_dispute",
     approve:"c_ev_approve", auto_release:"c_ev_auto_release", resolved_release:"c_ev_resolved_release", resolved_refund:"c_ev_resolved_refund", resolved_split:"c_ev_resolved_split", terms_changed:"c_ev_terms_changed",
-    milestone_submitted:"c_ev_milestone_submitted", milestone_approved:"c_ev_milestone_approved", amendment_proposed:"c_ev_amendment_proposed", amendment_accepted:"c_ev_amendment_accepted", amendment_declined:"c_ev_amendment_declined", cancel_refund:"c_ev_cancel_refund" };
+    milestone_submitted:"c_ev_milestone_submitted", milestone_approved:"c_ev_milestone_approved", amendment_proposed:"c_ev_amendment_proposed", amendment_accepted:"c_ev_amendment_accepted", amendment_declined:"c_ev_amendment_declined", cancel_refund:"c_ev_cancel_refund", chargeback_won:"c_ev_chargeback_won", chargeback_lost:"c_ev_chargeback_lost" };
   function contractCardHtml(m){
     const p=m.payload||{}; const mine=m.sender===myId();
     const cid=/^[0-9a-f-]{36}$/i.test(String(p.contract_id||""))?p.contract_id:"";
@@ -6652,7 +6700,12 @@
     if(cancelled){ toast(t("es_cancelled")); return; }
     if(!paid) return;
     toast(t("es_confirming"));
-    for(let i=0;i<10;i++){ const { data:c } = await sb.from("contracts").select("status,funded_cents,amount_cents").eq("id",paid).maybeSingle(); if(c&&c.status!=="accepted"&&(c.funded_cents||0)>=(c.amount_cents||0)) break; await new Promise(r=>setTimeout(r,1500)); }
+    // 1) ask the payment functions to check with the provider directly (a lost or late webhook then changes nothing)
+    let ok=false;
+    try{ const j=await fnCall("stripe-confirm",{ contract_id:paid }); ok=!!j&&(j.result==="funded"||j.result==="already"); }catch(e){}
+    // 2) then wait for the row, in case the webhook is the one that lands first
+    for(let i=0;i<10&&!ok;i++){ const { data:c } = await sb.from("contracts").select("status,funded_cents,amount_cents").eq("id",paid).maybeSingle(); if(c&&c.status!=="accepted"&&(c.funded_cents||0)>=(c.amount_cents||0)){ ok=true; break; } await new Promise(r=>setTimeout(r,1500)); }
+    toast(t(ok?"es_confirmed":"es_notConfirmed"));
     refreshOrdersPage(); openOrder(paid);
   }
 
@@ -6762,9 +6815,12 @@
         if(iAmFl){ act("dispute","secondary danger-text",t("es_clientNotResponding"),()=>oNoteModal(t("es_disputeTitleEd"), t("es_disputeDescEd"), t("es_disputePh"), t("es_disputeBtn"), false, async note=>{ if(!note){ toast(t("a_fillAll")); return; } if(await rpc("dispute",note)()){ closeModal(); toast(t("es_disputeSent")); again(); } })); hint=fill(t("es_editorDeliveredHint"),{d:o.auto_release_at?fmtDate(o.auto_release_at):"—"}); }
       }
       if(o.status==="disputed"){ extra=`<div class="notice" style="margin-top:12px"><strong>${t("es_disputeBy")} ${escapeHtml(o.dispute_by===o.editor?flName:clName)}</strong><div style="white-space:pre-wrap;margin-top:4px">${escapeHtml(o.dispute_reason||"")}</div></div>`; hint=t("es_disputeHint"); }
-      if(o.status==="releasing"||o.status==="resolving") hint=t("es_processing");
+      if(o.status==="releasing"||o.status==="resolving") hint=o.money_error?t("es_settling"):t("es_processing");
       if(o.status==="completed"&&["release","split","refund"].includes(o.resolution)) hint=t("es_done_"+o.resolution);
-      if(o.status==="refunded") hint=t("es_refundedHint");
+      if(o.status==="completed"&&released>0) hint=(hint?hint+" ":"")+t(iAmFl?"es_payoutTimingFl":"es_payoutTiming");
+      if(o.status==="refunded") hint=o.resolution==="chargeback"?t("es_chargebackLost"):t("es_refundedHint");
+      if(o.chargeback_status==="open") extra=`<div class="notice danger" style="margin-top:12px"><strong>${escapeHtml(t("es_chargebackOpen"))}</strong></div>`+(extra||"");
+      else if(o.chargeback_status==="won") extra=`<div class="notice" style="margin-top:12px">${escapeHtml(t("es_chargebackWon"))}</div>`+(extra||"");
     } else {
       // direct payments: nothing is held by anyone; both confirm what happened outside Cuvori
       if(["accepted","paid_marked","paid"].includes(o.status)){
