@@ -1,7 +1,7 @@
 // Stripe → Cuvori. Hardened copy.
 // Platform endpoint events: checkout.session.completed, checkout.session.async_payment_succeeded,
 //   charge.refunded, charge.dispute.created, charge.dispute.closed. Connect endpoint (separate secret): account.updated.
-import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING } from "../lib/cuvori.mjs";
+import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING } from "../lib/cuvori.mjs"; import crypto from "node:crypto";
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 
 export default async (req) => {
@@ -12,7 +12,7 @@ export default async (req) => {
   let event = null, fromConnect = false;
   try { event = verifyWebhook(raw, sig, WEBHOOK_SECRET); } catch {}
   if (!event && CONNECT_SECRET) { try { event = verifyWebhook(raw, sig, CONNECT_SECRET); fromConnect = true; } catch {} }
-  if (!event) return bad("Invalid signature", 400);
+  if (!event) { let dt = null; const dv = []; for (const p of String(sig || "").split(",")) { const di = p.indexOf("="); if (di < 0) continue; const dk = p.slice(0, di).trim(), dvv = p.slice(di + 1).trim(); if (dk === "t") dt = dvv; else if (dk === "v1") dv.push(dvv); } const ds = (process.env.STRIPE_WEBHOOK_SECRET || "").trim(); const dh = dt && ds ? crypto.createHmac("sha256", ds).update(dt + "." + raw).digest("hex") : null; return json(400, { error: "Invalid signature", diag: { sawHeader: !!sig, t: dt, skew: dt ? Math.round(Date.now() / 1000 - Number(dt)) : null, v1Count: dv.length, bytes: Buffer.byteLength(raw, "utf8"), secretLength: ds.length, computed: dh ? dh.slice(0, 12) : null, received: dv[0] ? dv[0].slice(0, 12) : null } }); }
 
   try {
     const o = event.data && event.data.object || {};
