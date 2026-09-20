@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-9MgiRtYDH0cNA2P+Tb/UsO7Iojk6WLNAg6NwnQkyraE=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-fP3qhDUchH3iW0KJGy70WfemDxkIF6Uhrz7UlOQUx4A=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -104,6 +104,8 @@
     .quick-flags{display:flex;gap:3px;align-items:center}
     .flag-btn{width:40px;height:34px;border-radius:9px;border:1px solid transparent;background:transparent;font-size:19px;display:grid;place-items:center;line-height:1;padding:0}
     .flag-btn:hover{background:var(--panel-2)}
+    .flag-svg{width:22px;height:14px;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.15);display:inline-block;vertical-align:middle;flex:0 0 auto}
+    .lang-pop .flag-svg,#mobileLangList .flag-svg,#settingsLangGrid .flag-svg{width:24px;height:15px}
     .flag-btn.active{border-color:var(--accent);background:var(--accent-soft)}
     .lang-menu{position:relative}
     .lang-btn{padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:9px;font-weight:800;font-size:13px}
@@ -874,7 +876,7 @@
     .job-content{flex:1 1 auto}
     .job-list{grid-template-columns:minmax(0,1fr)}
     .jobs-layout > *{min-width:0}
-    @media(max-width:980px){ .quick-flags{display:none} }   /* the flags stay on desktop; on tablets and phones the language button next to Sign in takes over */
+    @media(max-width:980px) and (hover:none){ .quick-flags{display:none} }   /* the flags stay on any computer, whatever the window width; on phones and tablets the language button next to Sign in takes over */
     @media(max-width:1280px){ .nav-btn{padding:8px 8px;font-size:14px} .topbar{gap:10px} }
     @media(max-width:1180px){ .nav{display:none} .menu-btn{display:grid} .mobile-iconbar{display:flex} }
     @media(max-width:980px){ .header-actions #createAccountBtn{display:none} }
@@ -1641,9 +1643,10 @@
     renderList();
   }
 
+  // the flags are drawn (SVG), not emoji: Windows browsers show emoji flags as two plain letters
   const LANGS = [
-    ["en","EN","English","🇬🇧"],["de","DE","Deutsch","🇩🇪"],["ru","RU","Русский","🇷🇺"],
-    ["lt","LT","Lietuvių","🇱🇹"],["es","ES","Español","🇪🇸"],["pl","PL","Polski","🇵🇱"],["uk","UA","Українська","🇺🇦"]
+    ["en","EN","English",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="36" fill="#012169"/><path d="M0 0L60 36M60 0L0 36" stroke="#fff" stroke-width="7"/><path d="M0 0L60 36M60 0L0 36" stroke="#C8102E" stroke-width="2.5"/><path d="M30 0v36M0 18h60" stroke="#fff" stroke-width="11"/><path d="M30 0v36M0 18h60" stroke="#C8102E" stroke-width="6"/></svg>'],["de","DE","Deutsch",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#000"/><rect y="12" width="60" height="12" fill="#D00"/><rect y="24" width="60" height="12" fill="#FFCE00"/></svg>'],["ru","RU","Русский",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#fff"/><rect y="12" width="60" height="12" fill="#0039A6"/><rect y="24" width="60" height="12" fill="#D52B1E"/></svg>'],
+    ["lt","LT","Lietuvių",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#FDB913"/><rect y="12" width="60" height="12" fill="#006A44"/><rect y="24" width="60" height="12" fill="#C1272D"/></svg>'],["es","ES","Español",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="9" fill="#AA151B"/><rect y="9" width="60" height="18" fill="#F1BF00"/><rect y="27" width="60" height="9" fill="#AA151B"/></svg>'],["pl","PL","Polski",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="18" fill="#fff"/><rect y="18" width="60" height="18" fill="#DC143C"/></svg>'],["uk","UA","Українська",'<svg class="flag-svg" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="18" fill="#0057B7"/><rect y="18" width="60" height="18" fill="#FFD700"/></svg>']
   ];
 
   const T = {
