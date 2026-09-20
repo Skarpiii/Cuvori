@@ -5,7 +5,10 @@ import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned,
 export const config = { schedule: "@hourly" };
 
 export default async () => {
-  if (!escrowEnabled()) return json(200, { skipped: "escrow not configured" });
+  // jobs first: open posts past their date become "expired" (the owner can renew; the feed no longer shows them). Needs no Stripe.
+  let expired = 0;
+  try { expired = Number(await db.rpc("expire_jobs", {})) || 0; } catch (e) { console.error("expire_jobs failed", e.message); }
+  if (!escrowEnabled()) return json(200, { skipped: "escrow not configured", expired });
   const now = new Date().toISOString();
   const due = await db.select("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&order=auto_release_at.asc&limit=50`);
   const stuck = await db.select("contracts", `status=eq.releasing&payment_mode=eq.escrow&select=*&limit=50`);
@@ -39,5 +42,5 @@ export default async () => {
       done.push(m.id);
     } catch (e) { failed.push({ id: m.id, why: e.message }); console.error("milestone auto-release failed for", m.id, e.message); }
   }
-  return json(200, { released: done, failed: failed.length });
+  return json(200, { released: done, failed: failed.length, expired });
 };
