@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-jO0IPlLON+JGYKkzIhponBYHQiLQzjP7OWcWWWWQZJc=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-aOM2yzO8GqBOU93iQC6eovuidWyUr+MoEUW9qtUj1nA=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -4102,6 +4102,12 @@
     if(!["google","facebook"].includes(provider)) return;
     if(!REAL){ toast(t("p_welcomeToast")); closeModal(); route("account"); return; }
     try{
+      // A social sign-in leaves the site and comes back. Remember the normal
+      // destination too (chat intents are already stored by joinPrompt).
+      try{
+        const pending=JSON.parse(localStorage.getItem("cuvori_afterAuth")||"null");
+        if(!pending || !pending.chat) localStorage.setItem("cuvori_afterAuth",JSON.stringify({route:"account"}));
+      }catch(e){}
       const { data, error } = await sb.auth.signInWithOAuth({ provider, options:{ redirectTo: location.origin+location.pathname } });
       if(error) throw error;
       if(data && data.url) location.href=data.url;
@@ -4110,12 +4116,32 @@
   // after a sign-in (e-mail or Google/Facebook) go back to what the visitor wanted: the chat they tried to open
   function afterAuthResume(){
     let a=null; try{ a=JSON.parse(localStorage.getItem("cuvori_afterAuth")||"null"); localStorage.removeItem("cuvori_afterAuth"); }catch(e){}
-    if(!a||!a.chat||!signedIn()) return;
+    if(!a||!signedIn()) return;
+    if(a.route){ route(a.route); return; }
+    if(!a.chat) return;
     const key=a.chat; const open=()=>{ if(/^u:/.test(key)) openChat(key); };
     if(REAL){ setTimeout(open, 900); } else open();
   }
   function displayName(){ const p=state.auth.profile; return (p && (p.first_name||p.email)) || (REAL ? t("a_guest") : "Egidijus"); }
   function initials(){ const n=displayName(); return n.split(/[\s@.]+/).map(x=>x.replace(/[^\p{L}\p{N}]/gu,"")).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join("") || "C"; }
+
+  // Supabase restores the session before the profile query finishes. Build a
+  // temporary profile from the session so the header can switch to signed-in
+  // immediately instead of looking unresponsive while the database loads.
+  function profileFromSession(session){
+    if(!session || !session.user) return null;
+    const u=session.user, m=u.user_metadata||{};
+    const full=String(m.full_name||m.name||"").trim();
+    const first=String(m.first_name||m.given_name||(full?full.split(/\s+/)[0]:"")).replace(/[<>\x00-\x1f\x7f]/g,"").slice(0,80);
+    return { id:u.id, email:u.email||"", first_name:first, role:"client" };
+  }
+  function showSessionImmediately(session){
+    const old=state.auth.profile;
+    state.auth.session=session||null;
+    if(!session) state.auth.profile=null;
+    else if(!old || old.id!==session.user.id) state.auth.profile=profileFromSession(session);
+    applyAuthUI();
+  }
 
   async function loadProfile(){
     if(!REAL || !state.auth.session) { state.auth.profile=null; return; }
@@ -4125,7 +4151,10 @@
       await new Promise(r=>setTimeout(r,600));
       ({ data } = await sb.rpc("my_profile").maybeSingle());
     }
-    state.auth.profile = data || { id:uid, email:state.auth.session.user.email, first_name:state.auth.session.user.user_metadata?.first_name||"", role:"client" };
+    // Ignore a slow response from a session that has since signed out or been
+    // replaced by another account.
+    if(!state.auth.session || state.auth.session.user.id!==uid) return;
+    state.auth.profile = data || profileFromSession(state.auth.session);
   }
   const MIB_ICONS={
     home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
@@ -4180,14 +4209,27 @@
     renderMobileIconbar();
     refreshReco();
   }
+  let authHydrationVersion=0;
+  async function finishAuthChange(event, session, version){
+    if(session) await loadProfile(); else state.auth.profile=null;
+    const currentId=state.auth.session&&state.auth.session.user ? state.auth.session.user.id : null;
+    const expectedId=session&&session.user ? session.user.id : null;
+    if(version!==authHydrationVersion || currentId!==expectedId) return;
+    applyAuthUI();
+    loadRealData();
+    if(event==="PASSWORD_RECOVERY"){ newPasswordModal(); return; }
+    if(event==="SIGNED_IN"){
+      if(typeof maybeAskRules==="function") maybeAskRules();
+    }
+  }
   async function refreshAuth(){
     if(!REAL) { applyAuthUI(); return; }
     const { data } = await sb.auth.getSession();
-    state.auth.session = data.session;
-    await loadProfile();
-    applyAuthUI();
-    loadRealData();
-    if(typeof maybeAskRules==="function") maybeAskRules();
+    const session=data.session, version=++authHydrationVersion;
+    showSessionImmediately(session);
+    if(session) afterAuthResume();
+    await finishAuthChange("INITIAL_SESSION",session,version);
+    if(session && typeof maybeAskRules==="function") maybeAskRules();
   }
   function authError(e){
     const m=(e&&e.message||"").toLowerCase();
@@ -4268,10 +4310,18 @@
     $("#saveProfileBtn").addEventListener("click",doSaveProfile);
     if(REAL){
       $("#demoBanner")?.classList.add("hidden");
-      sb.auth.onAuthStateChange(async (event, session)=>{
-        state.auth.session=session;
-        if(event==="PASSWORD_RECOVERY"){ await loadProfile(); applyAuthUI(); newPasswordModal(); return; }
-        if(event==="SIGNED_IN"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); if(event!=="TOKEN_REFRESHED") loadRealData(); if(event==="SIGNED_IN"){ afterAuthResume(); if(typeof maybeAskRules==="function") maybeAskRules(); } }
+      sb.auth.onAuthStateChange((event, session)=>{
+        // Do not await another Supabase request inside this callback: the auth
+        // client may still hold its internal lock, which made OAuth logins look
+        // stuck. Update the visible state now and hydrate in the next task.
+        if(event==="TOKEN_REFRESHED"){
+          state.auth.session=session||null;
+          return;
+        }
+        const version=++authHydrationVersion;
+        showSessionImmediately(session);
+        if(event==="SIGNED_IN") afterAuthResume();
+        setTimeout(()=>{ finishAuthChange(event,session,version); },0);
       });
     } else {
       $("#demoBanner")?.classList.remove("hidden");
