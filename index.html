@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-xAYDQoZsrlbFqcAJWeaOnrGBPdLGBekX2IqtgujgkmU=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-rB/hsjuPS5qjvsbj6Y55ramgrdJYfv5TWGI1IvNod3c=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -1112,9 +1112,9 @@
           <div class="form-section">
             <div class="form-section-head"><span class="num">01</span><h3 data-i18n="p_basicsTitle">The basics</h3></div>
             <div class="form-grid">
-              <div style="grid-column:1/-1"><label data-i18n="labelProfessionalNeeded">Professional needed</label><select id="jobRole"></select></div>
-              <div style="grid-column:1/-1" id="jobSpecs"></div>
               <div style="grid-column:1/-1"><label data-i18n="labelJobTitle">Job title</label><input id="jobTitle" maxlength="150" data-i18n-placeholder="jobTitlePlaceholder" placeholder="e.g. YouTube documentary editor" /></div>
+              <div><label data-i18n="labelProfessionalNeeded">Professional needed</label><select id="jobRole"></select></div>
+              <div style="grid-column:1/-1" id="jobSpecs"></div>
             </div>
           </div>
           <div class="form-section">
@@ -3277,18 +3277,19 @@
   }
 
   function route(name){
+    if(typeof AUTH_CB!=="undefined" && AUTH_CB.pending) name="home";   // sign-in tokens in the address, not a page: Supabase reads them first
     let rq=null; if(name.includes("?")){ rq=new URLSearchParams(name.split("?")[1]); name=name.split("?")[0]; }
     if(name.startsWith("professionals/")){ const slug=decodeURIComponent(name.slice(14)); name="home"; if(typeof setProfession==="function") setProfession(slug,{noRoute:true,silent:!PROF.loaded}); }
     if(name==="orders") name="contracts";                       // the Orders page (the internal id stays for the markup)
     if(name==="admin" && !(typeof isAdmin==="function" && isAdmin())) name="home";
-    const page=($("#page-"+name) && !(name==="profile" && !state.currentProfile)) ? name : "home";
+    const page=(/^[a-z0-9_-]+$/i.test(name) && $("#page-"+name) && !(name==="profile" && !state.currentProfile)) ? name : "home";
     $$(".page").forEach(p=>p.classList.remove("active"));
     $("#page-"+page).classList.add("active");
     $$(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.route===page));
     $$(".mobile-nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.route===page));
     $$(".mib").forEach(b=>b.classList.toggle("active",b.dataset.mib===page));
     closeMobileMenu();
-    history.replaceState(null,"", (page==="home" && state.ps && state.ps.profession) ? "#professionals/"+state.ps.profession : "#"+(page==="contracts"?"orders":page));
+    if(!(typeof AUTH_CB!=="undefined" && AUTH_CB.pending)) history.replaceState(null,"", (page==="home" && state.ps && state.ps.profession) ? "#professionals/"+state.ps.profession : "#"+(page==="contracts"?"orders":page));
     if(page==="contracts" && typeof refreshContractsPage==="function") refreshContractsPage();
     if(page==="home" && REAL && typeof runProfileSearch==="function" && state.homeSeen){ loadProfessionConfig().then(()=>{ renderFilterBar(); runProfileSearch(); }); }   // fresh counts and results on each visit; the first paint is done by loadEditors
     if(page==="home") state.homeSeen=true;
@@ -4077,6 +4078,18 @@
   const sb = (window.supabase && CFG.supabaseUrl && CFG.supabaseAnonKey) ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
   const REAL = !!sb;
   state.auth = { session:null, profile:null };
+  // Google/Facebook and password-reset links come back with the tokens in the address (#access_token=…). Supabase reads them a moment
+  // after the page loads, so until then the router must neither take them for a page name nor rewrite the address.
+  const AUTH_CB = (()=>{ let h=""; try{ h=new URLSearchParams(location.hash.slice(1)); }catch(e){ h=new URLSearchParams(""); }
+    const pending = REAL && (!!(h.get("access_token")||h.get("refresh_token")||h.get("error")||h.get("error_description")) || /(^|[?&])code=/.test(location.search));
+    return { pending, recovery:h.get("type")==="recovery", error:h.get("error_description")||h.get("error")||"" }; })();
+  function finishAuthCallback(){
+    if(!AUTH_CB.pending) return;
+    AUTH_CB.pending=false;
+    history.replaceState(null,"", location.pathname+"#home");
+    if(state.auth.session){ route("account"); if(!AUTH_CB.recovery) toast(t("p_welcomeToast")); }
+    else toast(AUTH_CB.error ? AUTH_CB.error.replace(/\+/g," ") : t("a_error"));
+  }
 
   function signedIn(){ return REAL ? !!state.auth.session : true; }
   function requireAuth(){ if(!signedIn()){ joinPrompt(null); return false; } if(isBannedMe()){ toast(t("ban_notice")); return false; } return true; }
@@ -4102,12 +4115,6 @@
     if(!["google","facebook"].includes(provider)) return;
     if(!REAL){ toast(t("p_welcomeToast")); closeModal(); route("account"); return; }
     try{
-      // A social sign-in leaves the site and comes back. Remember the normal
-      // destination too (chat intents are already stored by joinPrompt).
-      try{
-        const pending=JSON.parse(localStorage.getItem("cuvori_afterAuth")||"null");
-        if(!pending || !pending.chat) localStorage.setItem("cuvori_afterAuth",JSON.stringify({route:"account"}));
-      }catch(e){}
       const { data, error } = await sb.auth.signInWithOAuth({ provider, options:{ redirectTo: location.origin+location.pathname } });
       if(error) throw error;
       if(data && data.url) location.href=data.url;
@@ -4116,32 +4123,12 @@
   // after a sign-in (e-mail or Google/Facebook) go back to what the visitor wanted: the chat they tried to open
   function afterAuthResume(){
     let a=null; try{ a=JSON.parse(localStorage.getItem("cuvori_afterAuth")||"null"); localStorage.removeItem("cuvori_afterAuth"); }catch(e){}
-    if(!a||!signedIn()) return;
-    if(a.route){ route(a.route); return; }
-    if(!a.chat) return;
+    if(!a||!a.chat||!signedIn()) return;
     const key=a.chat; const open=()=>{ if(/^u:/.test(key)) openChat(key); };
     if(REAL){ setTimeout(open, 900); } else open();
   }
   function displayName(){ const p=state.auth.profile; return (p && (p.first_name||p.email)) || (REAL ? t("a_guest") : "Egidijus"); }
   function initials(){ const n=displayName(); return n.split(/[\s@.]+/).map(x=>x.replace(/[^\p{L}\p{N}]/gu,"")).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join("") || "C"; }
-
-  // Supabase restores the session before the profile query finishes. Build a
-  // temporary profile from the session so the header can switch to signed-in
-  // immediately instead of looking unresponsive while the database loads.
-  function profileFromSession(session){
-    if(!session || !session.user) return null;
-    const u=session.user, m=u.user_metadata||{};
-    const full=String(m.full_name||m.name||"").trim();
-    const first=String(m.first_name||m.given_name||(full?full.split(/\s+/)[0]:"")).replace(/[<>\x00-\x1f\x7f]/g,"").slice(0,80);
-    return { id:u.id, email:u.email||"", first_name:first, role:"client" };
-  }
-  function showSessionImmediately(session){
-    const old=state.auth.profile;
-    state.auth.session=session||null;
-    if(!session) state.auth.profile=null;
-    else if(!old || old.id!==session.user.id) state.auth.profile=profileFromSession(session);
-    applyAuthUI();
-  }
 
   async function loadProfile(){
     if(!REAL || !state.auth.session) { state.auth.profile=null; return; }
@@ -4151,10 +4138,7 @@
       await new Promise(r=>setTimeout(r,600));
       ({ data } = await sb.rpc("my_profile").maybeSingle());
     }
-    // Ignore a slow response from a session that has since signed out or been
-    // replaced by another account.
-    if(!state.auth.session || state.auth.session.user.id!==uid) return;
-    state.auth.profile = data || profileFromSession(state.auth.session);
+    state.auth.profile = data || { id:uid, email:state.auth.session.user.email, first_name:state.auth.session.user.user_metadata?.first_name||"", role:"client" };
   }
   const MIB_ICONS={
     home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
@@ -4209,27 +4193,16 @@
     renderMobileIconbar();
     refreshReco();
   }
-  let authHydrationVersion=0;
-  async function finishAuthChange(event, session, version){
-    if(session) await loadProfile(); else state.auth.profile=null;
-    const currentId=state.auth.session&&state.auth.session.user ? state.auth.session.user.id : null;
-    const expectedId=session&&session.user ? session.user.id : null;
-    if(version!==authHydrationVersion || currentId!==expectedId) return;
-    applyAuthUI();
-    loadRealData();
-    if(event==="PASSWORD_RECOVERY"){ newPasswordModal(); return; }
-    if(event==="SIGNED_IN"){
-      if(typeof maybeAskRules==="function") maybeAskRules();
-    }
-  }
   async function refreshAuth(){
     if(!REAL) { applyAuthUI(); return; }
     const { data } = await sb.auth.getSession();
-    const session=data.session, version=++authHydrationVersion;
-    showSessionImmediately(session);
-    if(session) afterAuthResume();
-    await finishAuthChange("INITIAL_SESSION",session,version);
-    if(session && typeof maybeAskRules==="function") maybeAskRules();
+    state.auth.session = data.session;
+    await loadProfile();
+    applyAuthUI();
+    loadRealData();
+    const recovery=AUTH_CB.recovery && AUTH_CB.pending;
+    finishAuthCallback();
+    if(!recovery && typeof maybeAskRules==="function") maybeAskRules();   // a password-reset link: the "new password" box stays on top; the rules come on the next visit
   }
   function authError(e){
     const m=(e&&e.message||"").toLowerCase();
@@ -4310,18 +4283,10 @@
     $("#saveProfileBtn").addEventListener("click",doSaveProfile);
     if(REAL){
       $("#demoBanner")?.classList.add("hidden");
-      sb.auth.onAuthStateChange((event, session)=>{
-        // Do not await another Supabase request inside this callback: the auth
-        // client may still hold its internal lock, which made OAuth logins look
-        // stuck. Update the visible state now and hydrate in the next task.
-        if(event==="TOKEN_REFRESHED"){
-          state.auth.session=session||null;
-          return;
-        }
-        const version=++authHydrationVersion;
-        showSessionImmediately(session);
-        if(event==="SIGNED_IN") afterAuthResume();
-        setTimeout(()=>{ finishAuthChange(event,session,version); },0);
+      sb.auth.onAuthStateChange(async (event, session)=>{
+        state.auth.session=session;
+        if(event==="PASSWORD_RECOVERY"){ await loadProfile(); applyAuthUI(); newPasswordModal(); return; }
+        if(event==="SIGNED_IN"||event==="USER_UPDATED"||event==="SIGNED_OUT"){ await loadProfile(); applyAuthUI(); if(event!=="TOKEN_REFRESHED") loadRealData(); if(event==="SIGNED_IN"){ afterAuthResume(); if(typeof maybeAskRules==="function") maybeAskRules(); } }
       });
     } else {
       $("#demoBanner")?.classList.remove("hidden");
@@ -4880,17 +4845,6 @@
   };
   for(const code in T_MONEY){ if(T[code]) Object.assign(T[code], T_MONEY[code]); }
 
-  const T_JOB_FORM={
-    en:{ jobChooseProfession:"Choose a profession", jobChooseHint:"Choose a profession first to see its specialisations, skills, software and other options." },
-    de:{ jobChooseProfession:"Beruf auswählen", jobChooseHint:"Wähle zuerst einen Beruf, um Spezialisierungen, Fähigkeiten, Software und weitere Optionen zu sehen." },
-    ru:{ jobChooseProfession:"Выберите профессию", jobChooseHint:"Сначала выберите профессию, чтобы увидеть специализации, навыки, программы и другие параметры." },
-    lt:{ jobChooseProfession:"Pasirinkite profesiją", jobChooseHint:"Pirmiausia pasirinkite profesiją, kad matytumėte specializacijas, įgūdžius, programas ir kitus pasirinkimus." },
-    es:{ jobChooseProfession:"Elige una profesión", jobChooseHint:"Elige primero una profesión para ver sus especialidades, habilidades, software y otras opciones." },
-    pl:{ jobChooseProfession:"Wybierz zawód", jobChooseHint:"Najpierw wybierz zawód, aby zobaczyć specjalizacje, umiejętności, programy i pozostałe opcje." },
-    uk:{ jobChooseProfession:"Оберіть професію", jobChooseHint:"Спочатку оберіть професію, щоб побачити спеціалізації, навички, програми та інші параметри." }
-  };
-  for(const code in T_JOB_FORM){ if(T[code]) Object.assign(T[code], T_JOB_FORM[code]); }
-
   state.people = {};          // user id -> {name}
   state.convs = {};           // other user key -> {id, other, name, last}
   state.chatSubs = {};        // conversation id -> realtime channel
@@ -4908,65 +4862,21 @@
   function pickRest(options, selected){ return (selected||[]).filter(y=>!options.some(x=>x.toLowerCase()===String(y).toLowerCase())); }
   function pickValues(root, cls, inputSel){ const split=v=>v.split(",").map(x=>x.trim()).filter(Boolean); return [...$$("."+cls+".selected",root).map(b=>b.dataset.s),...split($(inputSel,root).value)].filter((x,i,arr)=>arr.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i); }
   const ROLE_EN={ editor:"Editor", videographer:"Videographer", photographer:"Photographer", editor_photographer:"Editor Photographer" };
-  // Post a job uses the same profession/filter configuration as professional profiles.
-  // A client chooses the profession first; only then are its relevant fields shown.
+  // Post a job: the professions a client can ask for are the ones open for joining; the second select is
+  // that profession's main speciality list (video categories, shoot types, …), from the same configuration
   function jobProfessions(){ const list=(typeof joinableProfessions==="function"?joinableProfessions():[]); return list.length?list:PROF.professions.filter(p=>["video-editor","videographer","photographer"].includes(p.slug)); }
   function jobSpecKey(slug){ return typeof primaryMultiKey==="function" ? primaryMultiKey(slug) : null; }
-  function jobDetailFilters(slug){
-    return profFilters(slug).filter(x=>!["price","languages","location","availability"].includes(x.def.kind) && x.key!=="remote" && ["multi","single","bool","range","tags"].includes(x.def.kind));
-  }
-  function jobQuickFilterKeys(slug){ return jobDetailFilters(slug).filter(x=>x.primary_filter && x.def.kind==="multi").map(x=>x.key); }
-  function jobFieldHtml(x, values){
-    const d=x.def, k=x.key, v=values[k];
-    if(d.kind==="multi"){
-      const known=new Set((d.options||[]).map(o=>o.key)), own=(Array.isArray(v)?v:[]).filter(a=>!known.has(a));
-      return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}</strong><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-opt${(Array.isArray(v)?v:[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>${d.allow_custom?`<div style="margin-top:8px">${tagInputHtml("jobOwn_"+k,{options:[],selected:own,placeholder:t("sv_ownPh"),allowFree:true})}</div>`:""}</div>`;
-    }
-    if(d.kind==="single") return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}</strong><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-one${v===o.key?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div></div>`;
-    if(d.kind==="bool") return `<div class="fblock"><label class="switch-row" style="border:0;padding:6px 0"><strong>${escapeHtml(pl(d.labels))}</strong><input type="checkbox" class="switch job-bool" data-k="${escapeHtml(k)}" ${v?"checked":""}></label></div>`;
-    if(d.kind==="range") return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}${d.unit?` (${escapeHtml(d.unit)})`:""}</strong><input type="number" class="job-range" data-k="${escapeHtml(k)}" min="${d.min_value??0}" max="${d.max_value??""}" value="${v??""}"></div>`;
-    if(d.kind==="tags") return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}</strong><input class="job-tags" data-k="${escapeHtml(k)}" maxlength="400" placeholder="${escapeHtml(t("pf_tagsPh"))}" value="${escapeHtml((Array.isArray(v)?v:[]).join(", "))}"></div>`;
-    return "";
-  }
-  function fillJobCatSelect(clear){
+  // the list filters a job can carry: the profession's primary multi-select filters (specialities, software, shoot types …)
+  function jobFilterKeys(slug){ return profFilters(slug).filter(x=>x.primary_filter && x.def.kind==="multi").map(x=>x.key); }
+  function fillJobCatSelect(){
     const role=$("#jobRole"), box=$("#jobSpecs"); if(!box||!role) return;
-    const cur=role.value, details=!clear&&cur?jobReadDetails():{};
-    role.innerHTML=`<option value="">${escapeHtml(t("jobChooseProfession"))}</option>`+jobProfessions().map(p=>`<option value="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</option>`).join("");
+    const cur=role.value; role.innerHTML=jobProfessions().map(p=>`<option value="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</option>`).join("");
     if(cur && [...role.options].some(o=>o.value===cur)) role.value=cur;
-    if(!role.value){ box.innerHTML=`<div class="notice muted">${escapeHtml(t("jobChooseHint"))}</div>`; box.dataset.prof=""; updateJobPreview(); return; }
-    box.dataset.prof=role.value;
-    box.innerHTML=jobDetailFilters(role.value).map(x=>jobFieldHtml(x,details)).join("");
+    const chosen={}; $$(".job-opt.selected",box).forEach(b=>{ (chosen[b.dataset.k]=chosen[b.dataset.k]||[]).push(b.dataset.v); });
+    box.innerHTML=jobFilterKeys(role.value).map(k=>{ const d=filterDef(k); return `<div style="margin-bottom:10px"><label>${escapeHtml(pl(d.labels))}</label><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-opt${(chosen[k]||[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div></div>`; }).join("");
     $$(".job-opt",box).forEach(b=>b.addEventListener("click",()=>{ b.classList.toggle("selected"); updateJobPreview(); }));
-    $$(".job-one",box).forEach(b=>b.addEventListener("click",()=>{ const on=b.classList.contains("selected"); $$(`.job-one[data-k="${b.dataset.k}"]`,box).forEach(x=>x.classList.remove("selected")); if(!on)b.classList.add("selected"); updateJobPreview(); }));
-    $$(".job-bool,.job-range,.job-tags",box).forEach(el=>{ el.addEventListener("input",updateJobPreview); el.addEventListener("change",updateJobPreview); });
-    $$(".taginput",box).forEach(ti=>tagInputBind(box,ti.id,[]));
   }
-  function jobReadDetails(){
-    const role=$("#jobRole"), box=$("#jobSpecs"), d={}; if(!role||!box||!role.value) return d;
-    for(const x of jobDetailFilters(role.value)){
-      const k=x.key, f=x.def;
-      if(f.kind==="multi"){
-        const vals=$$(`.job-opt[data-k="${k}"].selected`,box).map(b=>b.dataset.v);
-        if(f.allow_custom){ const own=tagInputValues(box,"jobOwn_"+k).map(v=>String(v).trim().slice(0,40)).filter(v=>v&&!/[<>]/.test(v)).slice(0,10); vals.push(...own.filter(v=>!vals.includes(v))); }
-        if(vals.length)d[k]=vals;
-      }else if(f.kind==="single"){ const one=$(`.job-one[data-k="${k}"].selected`,box); if(one)d[k]=one.dataset.v;
-      }else if(f.kind==="bool"){ const el=$(`.job-bool[data-k="${k}"]`,box); if(el&&el.checked)d[k]=true;
-      }else if(f.kind==="range"){ const el=$(`.job-range[data-k="${k}"]`,box); if(el&&el.value!==""){ let n=Number(el.value); if(Number.isFinite(n)){ if(f.min_value!=null)n=Math.max(f.min_value,n); if(f.max_value!=null)n=Math.min(f.max_value,n); d[k]=Math.round(n); } }
-      }else if(f.kind==="tags"){ const el=$(`.job-tags[data-k="${k}"]`,box); const vals=(el?el.value:"").split(",").map(v=>v.trim().slice(0,40)).filter(v=>v&&!/[<>]/.test(v)).slice(0,30); if(vals.length)d[k]=vals; }
-    }
-    return d;
-  }
-  function jobDetailPills(details){
-    const out=[];
-    for(const [k,v] of Object.entries(details||{})){
-      const f=filterDef(k);
-      if(Array.isArray(v)) v.forEach(x=>out.push(optName(k,x)));
-      else if(v===true) out.push(filterName(k));
-      else if(typeof v==="number") out.push(filterName(k)+": "+v+(f&&f.unit?" "+f.unit:""));
-      else if(typeof v==="string") out.push(optName(k,v));
-    }
-    return out;
-  }
+  function jobReadDetails(){ const d={}; $$("#jobSpecs .job-opt.selected").forEach(b=>{ (d[b.dataset.k]=d[b.dataset.k]||[]).push(b.dataset.v); }); return d; }
   const ROLE_TO_KEY = { editor:"roleEditor", videographer:"roleVideographer", photographer:"optPhotographer", editor_photographer:"roleEditorPhotographer" };
   const UNIT_TO_KEY = { hour:"perHour", project:"perProject", day:"perDay" };
   const COUNTRY_NAME = { DE:"countryGermany", ES:"countrySpain", KR:"countrySouthKorea", LT:"countryLithuania" };
@@ -5165,44 +5075,18 @@
   state.js = { profession:null, f:{} };
   function renderJobFilterBar(){
     const row=$("#jobProfRow"), chips=$("#jobFilterRow"); if(!row||!chips) return;
-    const profs=jobProfessions();
+    const present=new Set($$("#jobList .job[data-job]:not(.demo-hidden)").map(j=>j.dataset.role).filter(Boolean));
+    const profs=PROF.professions.filter(p=>present.has(p.slug) || p.slug===state.js.profession).sort((a,b)=>a.sort_order-b.sort_order);
     row.innerHTML=`<span class="filter-label">${escapeHtml(t("p_roleFilter"))}</span><button class="chip prof-chip${state.js.profession?"":" selected"}" data-prof="">${escapeHtml(t("pf_all"))}</button>`+
       profs.map(p=>`<button class="chip prof-chip${state.js.profession===p.slug?" selected":""}" data-prof="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</button>`).join("");
     $$(".prof-chip",row).forEach(b=>b.addEventListener("click",()=>{ const slug=b.dataset.prof||null; if(slug!==state.js.profession){ state.js.profession=slug; state.js.f={}; } renderJobFilterBar(); runJobSearch(); }));
-    const keys=state.js.profession?jobQuickFilterKeys(state.js.profession):[];
+    const keys=state.js.profession?jobFilterKeys(state.js.profession):[];
     const n=Object.keys(state.js.f).length;
     chips.innerHTML=keys.map(k=>{ const d=filterDef(k); return (d.options||[]).map(o=>`<button class="chip${(state.js.f[k]||[]).includes(o.key)?" selected":""}" data-jk="${escapeHtml(k)}" data-jv="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join(""); }).join("")+
-      (state.js.profession?`<button class="chip link" id="allJobFilters">${escapeHtml(t("allFilters"))}${n?` <b class="chip-count">${n}</b>`:""}</button>`:"")+
       (n?`<button class="chip link" id="clearJobChips">${escapeHtml(t("pf_clear"))}</button>`:"");
-    chips.classList.toggle("hidden", !state.js.profession);
+    chips.classList.toggle("hidden", !keys.length);
     $$("[data-jk]",chips).forEach(b=>b.addEventListener("click",()=>{ const k=b.dataset.jk, v=b.dataset.jv; const cur=(state.js.f[k]||[]).slice(); const i=cur.indexOf(v); if(i>=0) cur.splice(i,1); else cur.push(v); if(cur.length) state.js.f[k]=cur; else delete state.js.f[k]; renderJobFilterBar(); runJobSearch(); }));
-    $("#allJobFilters",chips)?.addEventListener("click",openAllJobFilters);
     $("#clearJobChips",chips)?.addEventListener("click",()=>{ state.js.f={}; renderJobFilterBar(); runJobSearch(); });
-  }
-  function openAllJobFilters(){
-    const slug=state.js.profession, p=profBySlug(slug); if(!slug||!p) return;
-    const f=state.js.f, block=(title,inner)=>`<div class="fblock"><strong>${escapeHtml(title)}</strong>${inner}</div>`;
-    const html=jobDetailFilters(slug).map(x=>{ const d=x.def,k=x.key,v=f[k];
-      if(d.kind==="multi") return block(pl(d.labels),`<div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip jf-opt${(Array.isArray(v)?v:[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>`);
-      if(d.kind==="single") return block(pl(d.labels),`<div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip jf-one${v===o.key?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>`);
-      if(d.kind==="bool") return block(pl(d.labels),`<label class="switch-row" style="border:0;padding:6px 0"><span>${escapeHtml(pl(d.labels))}</span><input type="checkbox" class="switch jf-bool" data-k="${escapeHtml(k)}" ${v===true?"checked":""}></label>`);
-      if(d.kind==="range"){ const r=v&&typeof v==="object"?v:{}; return block(pl(d.labels)+(d.unit?` (${escapeHtml(d.unit)})`:""),`<div class="frow"><input type="number" class="jf-range" data-k="${escapeHtml(k)}" data-b="min" min="${d.min_value??0}" max="${d.max_value??""}" placeholder="${escapeHtml(t("pf_min"))}" value="${r.min??""}"><span>–</span><input type="number" class="jf-range" data-k="${escapeHtml(k)}" data-b="max" min="${d.min_value??0}" max="${d.max_value??""}" placeholder="${escapeHtml(t("pf_max"))}" value="${r.max??""}"></div>`); }
-      if(d.kind==="tags") return block(pl(d.labels),`<input class="jf-tags" data-k="${escapeHtml(k)}" placeholder="${escapeHtml(t("pf_tagsPh"))}" value="${escapeHtml((Array.isArray(v)?v:[]).join(", "))}">`);
-      return "";
-    }).join("");
-    openModal(t("allFiltersModalTitle")+" · "+pl(p.labels),html+`<div class="two-col" style="gap:8px;margin-top:16px"><button class="primary" id="applyJobFilters">${escapeHtml(t("applyFiltersBtn"))}</button><button class="secondary" id="resetJobFilters">${escapeHtml(t("pf_clear"))}</button></div>`,root=>{
-      $$(".jf-opt",root).forEach(b=>b.addEventListener("click",()=>b.classList.toggle("selected")));
-      $$(".jf-one",root).forEach(b=>b.addEventListener("click",()=>{ const on=b.classList.contains("selected"); $$(`.jf-one[data-k="${b.dataset.k}"]`,root).forEach(x=>x.classList.remove("selected")); if(!on)b.classList.add("selected"); }));
-      $("#resetJobFilters",root).addEventListener("click",()=>{ state.js.f={}; closeModal(); renderJobFilterBar(); runJobSearch(); });
-      $("#applyJobFilters",root).addEventListener("click",()=>{ const nf={};
-        $$(".jf-opt.selected",root).forEach(b=>{ (nf[b.dataset.k]=nf[b.dataset.k]||[]).push(b.dataset.v); });
-        $$(".jf-one.selected",root).forEach(b=>nf[b.dataset.k]=b.dataset.v);
-        $$(".jf-bool:checked",root).forEach(b=>nf[b.dataset.k]=true);
-        const ranges={}; $$(".jf-range",root).forEach(i=>{ if(i.value!=="")(ranges[i.dataset.k]=ranges[i.dataset.k]||{})[i.dataset.b]=Number(i.value); }); Object.assign(nf,ranges);
-        $$(".jf-tags",root).forEach(i=>{ const vals=i.value.split(",").map(v=>v.trim()).filter(Boolean).slice(0,30); if(vals.length)nf[i.dataset.k]=vals; });
-        state.js.f=nf; closeModal(); renderJobFilterBar(); runJobSearch();
-      });
-    },"wide");
   }
   function renderRealJobs(){
     if(!REAL) return;
@@ -5227,7 +5111,7 @@
         <div class="job-top"><div><h3>${escapeHtml(j.title)}</h3><div class="muted">${escapeHtml(who)} · ${escapeHtml(j.location||t("p_remote"))}</div></div><strong>${escapeHtml(j.budget||"€ —")}</strong></div>
         <p class="muted">${escapeHtml(j.description||"")}</p>
         ${jtTrustHtml(j,false)}
-        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${jobDetailPills(det).slice(0,8).map(v=>`<span class="pill">${escapeHtml(v)}</span>`).join("")}<span class="job-time muted" title="${escapeHtml(jtExact(j.created_at))}">${escapeHtml(jtAgo(j.created_at))}</span></div></div>`;
+        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${Object.entries(det).flatMap(([k,vs])=>(Array.isArray(vs)?vs:[]).slice(0,4).map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}<span class="job-time muted" title="${escapeHtml(jtExact(j.created_at))}">${escapeHtml(jtAgo(j.created_at))}</span></div></div>`;
       el.addEventListener("click",()=>openJob(el));
       list.prepend(el);
     });
@@ -5239,15 +5123,14 @@
   async function publishJobReal(){
     const role=$("#jobRole"), pricing=$("#jobPricing");
     const loc=$("#jobLoc").value.trim(), title=$("#jobTitle").value.trim();
-    if(!role.value){ toast(t("jobChooseProfession")); role.focus(); return; }
-    const slug=role.value; const details=jobReadDetails(); const spec=(details.video_specialty||[])[0]||"";
+    const slug=role.value||"video-editor"; const details=jobReadDetails(); const spec=(details.video_specialty||[])[0]||"";
     const legacyRole={ "video-editor":"editor", videographer:"videographer", photographer:"photographer" }[slug] || "editor";
     const row={ owner:myId(), title, status:"open", role_needed:legacyRole, profession_slug:slug, category:CAT_KEYS.includes(spec)?spec:"catOther",
       details,
       description:$("#jobDesc").value.trim(), location:loc, remote:(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc)), pricing:pricing.selectedIndex===0?"project":"hourly", budget:$("#jobBudget").value.trim(), deadline:$("#jobDeadline").value||null };
     const { data:ins, error } = await sb.from("jobs").insert(row).select("id,status");
     if(error){ toast(jtErr(error)); console.error(error); return; }
-    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); role.value=""; fillJobCatSelect(true); updateJobPreview();
+    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); $$("#jobSpecs .job-opt.selected").forEach(b=>b.classList.remove("selected")); updateJobPreview();
     const hidden=Array.isArray(ins)&&ins[0]&&ins[0].status==="hidden";
     toast(t(hidden?"jt_postedReview":"d_jobPosted")); route("jobs"); loadJobs();
   }
@@ -7305,16 +7188,7 @@
       if(ok && state.jt.secured && j.dataset.secured!=="1") ok=false;
       if(ok && state.jt.within && j.dataset.posted && jtDays(j.dataset.posted)>=Number(state.jt.within)) ok=false;
       if(ok && Object.keys(state.js.f).length){ let det={}; try{ det=JSON.parse(j.dataset.details||"{}"); }catch(e){}
-        for(const [k,want] of Object.entries(state.js.f)){
-          const have=det[k];
-          if(Array.isArray(want)){
-            const hv=Array.isArray(have)?have.map(v=>String(v).toLowerCase()):[];
-            if(!want.some(v=>hv.includes(String(v).toLowerCase()))){ ok=false; break; }
-          }else if(want&&typeof want==="object"){
-            const n=Number(have); if(!Number.isFinite(n)||(want.min!=null&&n<want.min)||(want.max!=null&&n>want.max)){ ok=false; break; }
-          }else if(want===true){ if(have!==true){ ok=false; break; }
-          }else if(have!==want){ ok=false; break; }
-        } }
+        for(const [k,vs] of Object.entries(state.js.f)){ const have=Array.isArray(det[k])?det[k]:[]; if(!vs.some(v=>have.includes(v))){ ok=false; break; } } }
       j.classList.toggle("hidden",!ok); if(ok) n++;
     });
     $("#jobCount").textContent=t(n===1?"p_jobCountOne":"p_jobCountOther").replace("{n}",n);
@@ -7328,19 +7202,17 @@
     $("#pvMeta").textContent=t("p_pvYou")+" · "+(loc||t("p_remote"));
     $("#pvBudget").textContent=budget||"€ —";
     $("#pvDesc").textContent=desc||t("p_pvDesc");
-    const ro=role.options[role.selectedIndex], det=jobReadDetails();
-    $("#pvTags").innerHTML=(role.value&&ro?`<span class="pill">${escapeHtml(ro.textContent)}</span>`:"")+jobDetailPills(det).slice(0,10).map(v=>`<span class="pill">${escapeHtml(v)}</span>`).join("");
+    const ro=role.options[role.selectedIndex]; const det=jobReadDetails();
+    $("#pvTags").innerHTML=`<span class="pill">${escapeHtml(ro?ro.textContent:"")}</span>`+Object.entries(det).flatMap(([k,vs])=>vs.map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("");
   }
 
   function publishJobFromForm(){
     if(!requireAuth()) return;
-    const role=$("#jobRole");
-    if(!role.value){ toast(t("jobChooseProfession")); role.focus(); return; }
     if(REAL){ if(!$("#jobTitle").value.trim()){ toast(t("toastAddJobTitle")); return; } return publishJobReal(); }
     const title=$("#jobTitle").value.trim();
     if(!title){toast(t("toastAddJobTitle"));$("#jobTitle").focus();return;}
-    const pricing=$("#jobPricing");
-    const roleVal=role.value; const det=jobReadDetails();
+    const role=$("#jobRole"), pricing=$("#jobPricing");
+    const roleVal=role.value||"video-editor"; const det=jobReadDetails();
     const loc=$("#jobLoc").value.trim(), desc=$("#jobDesc").value.trim(), budget=$("#jobBudget").value.trim()||"€ —";
     const where=(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc))?"remote":"onsite";
     const j=document.createElement("div");
@@ -7348,10 +7220,11 @@
     j.innerHTML=`<div class="job-avatar alt">EC</div><div class="job-content">
       <div class="job-top"><div><h3>${escapeHtml(title)}</h3><div class="muted">${t("p_pvYou")} · ${escapeHtml(loc||t("p_remote"))}</div></div><strong>${escapeHtml(budget)}</strong></div>
       <p class="muted">${escapeHtml(desc||t("p_pvDesc"))}</p>
-      <div class="job-meta"><span class="pill">${escapeHtml(role.options[role.selectedIndex].textContent)}</span>${jobDetailPills(det).slice(0,8).map(v=>`<span class="pill">${escapeHtml(v)}</span>`).join("")}<span class="job-time muted">${t("p_posted")} 0d</span></div></div>`;
+      <div class="job-meta"><span class="pill">${escapeHtml(role.options[role.selectedIndex].textContent)}</span>${Object.entries(det).flatMap(([k,vs])=>vs.map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}<span class="job-time muted">${t("p_posted")} 0d</span></div></div>`;
     j.addEventListener("click",()=>openJob(j));
     $("#jobList").prepend(j);
-    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); role.value=""; fillJobCatSelect(true); updateJobPreview();
+    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value="");
+    updateJobPreview();
     toast(t("toastJobPublished")); route("jobs"); runJobSearch();
   }
 
@@ -7386,7 +7259,7 @@
     $("#toggleJobFilters").addEventListener("click",()=>$(".filter-panel").classList.toggle("open"));
     // Post a job
     $$("#page-post-job input,#page-post-job textarea,#page-post-job select").forEach(i=>{i.addEventListener("input",updateJobPreview);i.addEventListener("change",updateJobPreview);});
-    $("#jobRole")?.addEventListener("change",()=>{ fillJobCatSelect(true); updateJobPreview(); });   // profession first, then its complete set of options
+    $("#jobRole")?.addEventListener("change",()=>{ fillJobCatSelect(); updateJobPreview(); });   // the speciality list follows the profession
     fillJobCatSelect(); renderJobFilterBar(); updateJobPreview();
     // How it works
     $$("#howSeg .seg-btn").forEach(b=>b.addEventListener("click",()=>{

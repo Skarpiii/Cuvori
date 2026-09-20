@@ -233,14 +233,21 @@
     return q;
   }
 
+  function oauthSession(provider, ev){ const email=provider+"-user@test.com"; let u=users[email]; let id;
+    if(!u){ id=uuid(); users[email]={id,password:"oauth"}; db.profiles.push({id,email,first_name:provider==="google"?"Greta":"Fabio",role:"client",is_admin:Object.keys(users).length===1,banned:false,rules_version:null,created_at:new Date().toISOString()}); recId(id,"email",email,email); } else id=u.id;
+    session={user:{id,email,user_metadata:{full_name:provider==="google"?"Greta Google":"Fabio Facebook"}}}; setTimeout(()=>emit(ev||"SIGNED_IN"),0); }
+  // supabase-js reads the tokens out of the address a moment after the page loads (first getSession); a page that rewrote the address before that loses the sign-in
+  let urlDone=false;
+  function consumeUrl(){ if(urlDone) return; urlDone=true; let h; try{ h=new URLSearchParams(location.hash.slice(1)); }catch(e){ return; }
+    const tok=h.get("access_token"); if(tok && /^mock-/.test(tok)) oauthSession(tok.slice(5), h.get("type")==="recovery" ? "PASSWORD_RECOVERY" : "SIGNED_IN"); }   // a reset link fires PASSWORD_RECOVERY instead of SIGNED_IN, like the real client
   const client = {
     auth:{
-      async getSession(){ return {data:{session}}; },
+      async getSession(){ consumeUrl(); return {data:{session}}; },
       onAuthStateChange(f){ listeners.push(f); return {data:{subscription:{unsubscribe(){}}}}; },
       async signUp({email,password,options}){ if(users[email]) return {data:{},error:{message:"User already registered"}}; const id=uuid(); users[email]={id,password}; db.profiles.push({id,email,first_name:options.data.first_name,role:"client",is_admin:Object.keys(users).length===1,banned:false,created_at:new Date().toISOString()}); recId(id,"email",email,email); session={user:{id,email,user_metadata:{first_name:options.data.first_name}}}; setTimeout(()=>emit("SIGNED_IN"),0); return {data:{session},error:null}; },
-      async signInWithOAuth({provider,options}){ if(!window.__mockOAuth) return {data:{url:null},error:{message:"Unsupported provider: provider is not enabled"}}; const email=provider+"-user@test.com"; let u=users[email]; let id;
-        if(!u){ id=uuid(); users[email]={id,password:"oauth"}; db.profiles.push({id,email,first_name:provider==="google"?"Greta":"Fabio",role:"client",is_admin:Object.keys(users).length===1,banned:false,rules_version:null,created_at:new Date().toISOString()}); recId(id,"email",email,email); } else id=u.id;
-        session={user:{id,email,user_metadata:{full_name:provider==="google"?"Greta Google":"Fabio Facebook"}}}; setTimeout(()=>emit("SIGNED_IN"),0); return {data:{url:null,provider},error:null}; },
+      async signInWithOAuth({provider,options}){ if(!window.__mockOAuth) return {data:{url:null},error:{message:"Unsupported provider: provider is not enabled"}};
+        if(window.__mockOAuthRedirect){ return {data:{url:options.redirectTo+"?mock_oauth=1#access_token=mock-"+provider+"&refresh_token=r&expires_in=3600&token_type=bearer",provider},error:null}; }   // like the real thing: leave and come back with tokens in the address
+        oauthSession(provider); return {data:{url:null,provider},error:null}; },
       async signInWithPassword({email,password}){ const u=users[email]; if(!u||u.password!==password) return {data:{},error:{message:"Invalid login credentials"}}; session={user:{id:u.id,email,user_metadata:{}}}; setTimeout(()=>emit("SIGNED_IN"),0); return {data:{session},error:null}; },
       async signOut(){ session=null; setTimeout(()=>emit("SIGNED_OUT"),0); return {error:null}; },
       async resetPasswordForEmail(){ return {error:null}; },
