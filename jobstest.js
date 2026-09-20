@@ -12,13 +12,19 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   const clearModal=()=>p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   const signup=async(name,email)=>{ await p.goto(url+'#account'); await p.waitForTimeout(300); if(await p.locator('#signOutBtn').isVisible()){ await p.click('#signOutBtn'); await p.waitForTimeout(400);} await p.goto(url+'#create-account'); await p.waitForTimeout(300); await p.click('#authSeg [data-auth="signup"]'); await p.fill('#suName',name); await p.fill('#suEmail',email); await p.fill('#suPass','password123'); await p.check('#suAgree'); await p.click('[data-auth-signup]'); await p.waitForTimeout(900); await clearModal(); };
   const signin=async(e)=>{ await clearModal(); await p.goto(url+'#account'); await p.waitForTimeout(300); if(await p.locator('#signOutBtn').isVisible()){ await p.click('#signOutBtn'); await p.waitForTimeout(400);} await p.click('#signInBtn'); await p.waitForTimeout(200); await p.fill('#siEmail',e); await p.fill('#siPass','password123'); await p.click('[data-auth-signin]'); await p.waitForTimeout(1200); await clearModal(); };
-  const post=async(title,desc,budget)=>{ await p.goto(url+'#post-job'); await p.waitForTimeout(300); await p.selectOption('#jobRole','video-editor'); await p.fill('#jobTitle',title); await p.fill('#jobDesc',desc); await p.fill('#jobBudget',budget||'€300'); await p.click('#publishJob'); await p.waitForTimeout(900); };
+  // the profession is chosen the way a client does it: type a word, pick from the list
+  const pickRole=async(slug)=>{ await p.click('#jobRoleSearch'); await p.fill('#jobRoleSearch',slug.replace(/-/g,' ')); await p.waitForTimeout(150); await p.click(`#jobRoleList .pp-opt[data-slug="${slug}"]`); await p.waitForTimeout(200); };
+  const post=async(title,desc,budget,slug)=>{ await p.goto(url+'#post-job'); await p.waitForTimeout(300); await pickRole(slug||'video-editor'); await p.fill('#jobTitle',title); await p.fill('#jobDesc',desc); await p.fill('#jobBudget',budget||'€300'); await p.click('#publishJob'); await p.waitForTimeout(900); };
   const toastText=()=>p.evaluate(()=>{ const t=[...document.querySelectorAll('#toastWrap .toast')].pop(); return t?t.textContent:''; });
   const jobs=()=>p.evaluate(()=>window.__mockdb.jobs.map(j=>({title:j.title,status:j.status,hidden_reason:j.hidden_reason,expires_at:j.expires_at,risk:j.risk_score})));
   try {
   // ---------- the first account is the admin; the second is a client ----------
   await signup('Admin','admin@test.com');
   await signup('Cleo','cleo@test.com');
+  // a job with no profession is refused before anything is saved
+  await p.goto(url+'#post-job'); await p.waitForTimeout(300);
+  await p.fill('#jobTitle','Something'); await p.click('#publishJob'); await p.waitForTimeout(400);
+  ok((await toastText()).toLowerCase().includes('choose who you need') && await p.evaluate(()=>window.__mockdb.jobs.length)===0,'a job without a profession is refused, nothing is saved');
   await post('YouTube video editor for a travel series','Ten episodes, 12 minutes each, footage on Google Drive: https://drive.google.com/folder/abc','€1,200');
   let j=await jobs();
   ok(j.length===1 && j[0].status==='open' && j[0].expires_at && (new Date(j[0].expires_at)-Date.now())>29*86400000,'a normal job goes live at once and expires in 30 days unless renewed');
