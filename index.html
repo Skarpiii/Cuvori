@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-aOM2yzO8GqBOU93iQC6eovuidWyUr+MoEUW9qtUj1nA=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-3V+16m4BBYrBMh31DDptU132g4G5wFAo207yi0yPtjY=' 'sha256-xAYDQoZsrlbFqcAJWeaOnrGBPdLGBekX2IqtgujgkmU=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -1112,9 +1112,9 @@
           <div class="form-section">
             <div class="form-section-head"><span class="num">01</span><h3 data-i18n="p_basicsTitle">The basics</h3></div>
             <div class="form-grid">
-              <div style="grid-column:1/-1"><label data-i18n="labelJobTitle">Job title</label><input id="jobTitle" maxlength="150" data-i18n-placeholder="jobTitlePlaceholder" placeholder="e.g. YouTube documentary editor" /></div>
-              <div><label data-i18n="labelProfessionalNeeded">Professional needed</label><select id="jobRole"></select></div>
+              <div style="grid-column:1/-1"><label data-i18n="labelProfessionalNeeded">Professional needed</label><select id="jobRole"></select></div>
               <div style="grid-column:1/-1" id="jobSpecs"></div>
+              <div style="grid-column:1/-1"><label data-i18n="labelJobTitle">Job title</label><input id="jobTitle" maxlength="150" data-i18n-placeholder="jobTitlePlaceholder" placeholder="e.g. YouTube documentary editor" /></div>
             </div>
           </div>
           <div class="form-section">
@@ -4880,6 +4880,17 @@
   };
   for(const code in T_MONEY){ if(T[code]) Object.assign(T[code], T_MONEY[code]); }
 
+  const T_JOB_FORM={
+    en:{ jobChooseProfession:"Choose a profession", jobChooseHint:"Choose a profession first to see its specialisations, skills, software and other options." },
+    de:{ jobChooseProfession:"Beruf auswählen", jobChooseHint:"Wähle zuerst einen Beruf, um Spezialisierungen, Fähigkeiten, Software und weitere Optionen zu sehen." },
+    ru:{ jobChooseProfession:"Выберите профессию", jobChooseHint:"Сначала выберите профессию, чтобы увидеть специализации, навыки, программы и другие параметры." },
+    lt:{ jobChooseProfession:"Pasirinkite profesiją", jobChooseHint:"Pirmiausia pasirinkite profesiją, kad matytumėte specializacijas, įgūdžius, programas ir kitus pasirinkimus." },
+    es:{ jobChooseProfession:"Elige una profesión", jobChooseHint:"Elige primero una profesión para ver sus especialidades, habilidades, software y otras opciones." },
+    pl:{ jobChooseProfession:"Wybierz zawód", jobChooseHint:"Najpierw wybierz zawód, aby zobaczyć specjalizacje, umiejętności, programy i pozostałe opcje." },
+    uk:{ jobChooseProfession:"Оберіть професію", jobChooseHint:"Спочатку оберіть професію, щоб побачити спеціалізації, навички, програми та інші параметри." }
+  };
+  for(const code in T_JOB_FORM){ if(T[code]) Object.assign(T[code], T_JOB_FORM[code]); }
+
   state.people = {};          // user id -> {name}
   state.convs = {};           // other user key -> {id, other, name, last}
   state.chatSubs = {};        // conversation id -> realtime channel
@@ -4897,21 +4908,65 @@
   function pickRest(options, selected){ return (selected||[]).filter(y=>!options.some(x=>x.toLowerCase()===String(y).toLowerCase())); }
   function pickValues(root, cls, inputSel){ const split=v=>v.split(",").map(x=>x.trim()).filter(Boolean); return [...$$("."+cls+".selected",root).map(b=>b.dataset.s),...split($(inputSel,root).value)].filter((x,i,arr)=>arr.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i); }
   const ROLE_EN={ editor:"Editor", videographer:"Videographer", photographer:"Photographer", editor_photographer:"Editor Photographer" };
-  // Post a job: the professions a client can ask for are the ones open for joining; the second select is
-  // that profession's main speciality list (video categories, shoot types, …), from the same configuration
+  // Post a job uses the same profession/filter configuration as professional profiles.
+  // A client chooses the profession first; only then are its relevant fields shown.
   function jobProfessions(){ const list=(typeof joinableProfessions==="function"?joinableProfessions():[]); return list.length?list:PROF.professions.filter(p=>["video-editor","videographer","photographer"].includes(p.slug)); }
   function jobSpecKey(slug){ return typeof primaryMultiKey==="function" ? primaryMultiKey(slug) : null; }
-  // the list filters a job can carry: the profession's primary multi-select filters (specialities, software, shoot types …)
-  function jobFilterKeys(slug){ return profFilters(slug).filter(x=>x.primary_filter && x.def.kind==="multi").map(x=>x.key); }
-  function fillJobCatSelect(){
-    const role=$("#jobRole"), box=$("#jobSpecs"); if(!box||!role) return;
-    const cur=role.value; role.innerHTML=jobProfessions().map(p=>`<option value="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</option>`).join("");
-    if(cur && [...role.options].some(o=>o.value===cur)) role.value=cur;
-    const chosen={}; $$(".job-opt.selected",box).forEach(b=>{ (chosen[b.dataset.k]=chosen[b.dataset.k]||[]).push(b.dataset.v); });
-    box.innerHTML=jobFilterKeys(role.value).map(k=>{ const d=filterDef(k); return `<div style="margin-bottom:10px"><label>${escapeHtml(pl(d.labels))}</label><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-opt${(chosen[k]||[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div></div>`; }).join("");
-    $$(".job-opt",box).forEach(b=>b.addEventListener("click",()=>{ b.classList.toggle("selected"); updateJobPreview(); }));
+  function jobDetailFilters(slug){
+    return profFilters(slug).filter(x=>!["price","languages","location","availability"].includes(x.def.kind) && x.key!=="remote" && ["multi","single","bool","range","tags"].includes(x.def.kind));
   }
-  function jobReadDetails(){ const d={}; $$("#jobSpecs .job-opt.selected").forEach(b=>{ (d[b.dataset.k]=d[b.dataset.k]||[]).push(b.dataset.v); }); return d; }
+  function jobQuickFilterKeys(slug){ return jobDetailFilters(slug).filter(x=>x.primary_filter && x.def.kind==="multi").map(x=>x.key); }
+  function jobFieldHtml(x, values){
+    const d=x.def, k=x.key, v=values[k];
+    if(d.kind==="multi"){
+      const known=new Set((d.options||[]).map(o=>o.key)), own=(Array.isArray(v)?v:[]).filter(a=>!known.has(a));
+      return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}</strong><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-opt${(Array.isArray(v)?v:[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>${d.allow_custom?`<div style="margin-top:8px">${tagInputHtml("jobOwn_"+k,{options:[],selected:own,placeholder:t("sv_ownPh"),allowFree:true})}</div>`:""}</div>`;
+    }
+    if(d.kind==="single") return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}</strong><div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip job-one${v===o.key?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div></div>`;
+    if(d.kind==="bool") return `<div class="fblock"><label class="switch-row" style="border:0;padding:6px 0"><strong>${escapeHtml(pl(d.labels))}</strong><input type="checkbox" class="switch job-bool" data-k="${escapeHtml(k)}" ${v?"checked":""}></label></div>`;
+    if(d.kind==="range") return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}${d.unit?` (${escapeHtml(d.unit)})`:""}</strong><input type="number" class="job-range" data-k="${escapeHtml(k)}" min="${d.min_value??0}" max="${d.max_value??""}" value="${v??""}"></div>`;
+    if(d.kind==="tags") return `<div class="fblock"><strong>${escapeHtml(pl(d.labels))}</strong><input class="job-tags" data-k="${escapeHtml(k)}" maxlength="400" placeholder="${escapeHtml(t("pf_tagsPh"))}" value="${escapeHtml((Array.isArray(v)?v:[]).join(", "))}"></div>`;
+    return "";
+  }
+  function fillJobCatSelect(clear){
+    const role=$("#jobRole"), box=$("#jobSpecs"); if(!box||!role) return;
+    const cur=role.value, details=!clear&&cur?jobReadDetails():{};
+    role.innerHTML=`<option value="">${escapeHtml(t("jobChooseProfession"))}</option>`+jobProfessions().map(p=>`<option value="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</option>`).join("");
+    if(cur && [...role.options].some(o=>o.value===cur)) role.value=cur;
+    if(!role.value){ box.innerHTML=`<div class="notice muted">${escapeHtml(t("jobChooseHint"))}</div>`; box.dataset.prof=""; updateJobPreview(); return; }
+    box.dataset.prof=role.value;
+    box.innerHTML=jobDetailFilters(role.value).map(x=>jobFieldHtml(x,details)).join("");
+    $$(".job-opt",box).forEach(b=>b.addEventListener("click",()=>{ b.classList.toggle("selected"); updateJobPreview(); }));
+    $$(".job-one",box).forEach(b=>b.addEventListener("click",()=>{ const on=b.classList.contains("selected"); $$(`.job-one[data-k="${b.dataset.k}"]`,box).forEach(x=>x.classList.remove("selected")); if(!on)b.classList.add("selected"); updateJobPreview(); }));
+    $$(".job-bool,.job-range,.job-tags",box).forEach(el=>{ el.addEventListener("input",updateJobPreview); el.addEventListener("change",updateJobPreview); });
+    $$(".taginput",box).forEach(ti=>tagInputBind(box,ti.id,[]));
+  }
+  function jobReadDetails(){
+    const role=$("#jobRole"), box=$("#jobSpecs"), d={}; if(!role||!box||!role.value) return d;
+    for(const x of jobDetailFilters(role.value)){
+      const k=x.key, f=x.def;
+      if(f.kind==="multi"){
+        const vals=$$(`.job-opt[data-k="${k}"].selected`,box).map(b=>b.dataset.v);
+        if(f.allow_custom){ const own=tagInputValues(box,"jobOwn_"+k).map(v=>String(v).trim().slice(0,40)).filter(v=>v&&!/[<>]/.test(v)).slice(0,10); vals.push(...own.filter(v=>!vals.includes(v))); }
+        if(vals.length)d[k]=vals;
+      }else if(f.kind==="single"){ const one=$(`.job-one[data-k="${k}"].selected`,box); if(one)d[k]=one.dataset.v;
+      }else if(f.kind==="bool"){ const el=$(`.job-bool[data-k="${k}"]`,box); if(el&&el.checked)d[k]=true;
+      }else if(f.kind==="range"){ const el=$(`.job-range[data-k="${k}"]`,box); if(el&&el.value!==""){ let n=Number(el.value); if(Number.isFinite(n)){ if(f.min_value!=null)n=Math.max(f.min_value,n); if(f.max_value!=null)n=Math.min(f.max_value,n); d[k]=Math.round(n); } }
+      }else if(f.kind==="tags"){ const el=$(`.job-tags[data-k="${k}"]`,box); const vals=(el?el.value:"").split(",").map(v=>v.trim().slice(0,40)).filter(v=>v&&!/[<>]/.test(v)).slice(0,30); if(vals.length)d[k]=vals; }
+    }
+    return d;
+  }
+  function jobDetailPills(details){
+    const out=[];
+    for(const [k,v] of Object.entries(details||{})){
+      const f=filterDef(k);
+      if(Array.isArray(v)) v.forEach(x=>out.push(optName(k,x)));
+      else if(v===true) out.push(filterName(k));
+      else if(typeof v==="number") out.push(filterName(k)+": "+v+(f&&f.unit?" "+f.unit:""));
+      else if(typeof v==="string") out.push(optName(k,v));
+    }
+    return out;
+  }
   const ROLE_TO_KEY = { editor:"roleEditor", videographer:"roleVideographer", photographer:"optPhotographer", editor_photographer:"roleEditorPhotographer" };
   const UNIT_TO_KEY = { hour:"perHour", project:"perProject", day:"perDay" };
   const COUNTRY_NAME = { DE:"countryGermany", ES:"countrySpain", KR:"countrySouthKorea", LT:"countryLithuania" };
@@ -5110,18 +5165,44 @@
   state.js = { profession:null, f:{} };
   function renderJobFilterBar(){
     const row=$("#jobProfRow"), chips=$("#jobFilterRow"); if(!row||!chips) return;
-    const present=new Set($$("#jobList .job[data-job]:not(.demo-hidden)").map(j=>j.dataset.role).filter(Boolean));
-    const profs=PROF.professions.filter(p=>present.has(p.slug) || p.slug===state.js.profession).sort((a,b)=>a.sort_order-b.sort_order);
+    const profs=jobProfessions();
     row.innerHTML=`<span class="filter-label">${escapeHtml(t("p_roleFilter"))}</span><button class="chip prof-chip${state.js.profession?"":" selected"}" data-prof="">${escapeHtml(t("pf_all"))}</button>`+
       profs.map(p=>`<button class="chip prof-chip${state.js.profession===p.slug?" selected":""}" data-prof="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</button>`).join("");
     $$(".prof-chip",row).forEach(b=>b.addEventListener("click",()=>{ const slug=b.dataset.prof||null; if(slug!==state.js.profession){ state.js.profession=slug; state.js.f={}; } renderJobFilterBar(); runJobSearch(); }));
-    const keys=state.js.profession?jobFilterKeys(state.js.profession):[];
+    const keys=state.js.profession?jobQuickFilterKeys(state.js.profession):[];
     const n=Object.keys(state.js.f).length;
     chips.innerHTML=keys.map(k=>{ const d=filterDef(k); return (d.options||[]).map(o=>`<button class="chip${(state.js.f[k]||[]).includes(o.key)?" selected":""}" data-jk="${escapeHtml(k)}" data-jv="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join(""); }).join("")+
+      (state.js.profession?`<button class="chip link" id="allJobFilters">${escapeHtml(t("allFilters"))}${n?` <b class="chip-count">${n}</b>`:""}</button>`:"")+
       (n?`<button class="chip link" id="clearJobChips">${escapeHtml(t("pf_clear"))}</button>`:"");
-    chips.classList.toggle("hidden", !keys.length);
+    chips.classList.toggle("hidden", !state.js.profession);
     $$("[data-jk]",chips).forEach(b=>b.addEventListener("click",()=>{ const k=b.dataset.jk, v=b.dataset.jv; const cur=(state.js.f[k]||[]).slice(); const i=cur.indexOf(v); if(i>=0) cur.splice(i,1); else cur.push(v); if(cur.length) state.js.f[k]=cur; else delete state.js.f[k]; renderJobFilterBar(); runJobSearch(); }));
+    $("#allJobFilters",chips)?.addEventListener("click",openAllJobFilters);
     $("#clearJobChips",chips)?.addEventListener("click",()=>{ state.js.f={}; renderJobFilterBar(); runJobSearch(); });
+  }
+  function openAllJobFilters(){
+    const slug=state.js.profession, p=profBySlug(slug); if(!slug||!p) return;
+    const f=state.js.f, block=(title,inner)=>`<div class="fblock"><strong>${escapeHtml(title)}</strong>${inner}</div>`;
+    const html=jobDetailFilters(slug).map(x=>{ const d=x.def,k=x.key,v=f[k];
+      if(d.kind==="multi") return block(pl(d.labels),`<div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip jf-opt${(Array.isArray(v)?v:[]).includes(o.key)?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>`);
+      if(d.kind==="single") return block(pl(d.labels),`<div class="chips" style="justify-content:flex-start">${(d.options||[]).map(o=>`<button type="button" class="chip jf-one${v===o.key?" selected":""}" data-k="${escapeHtml(k)}" data-v="${escapeHtml(o.key)}">${escapeHtml(pl(o.labels))}</button>`).join("")}</div>`);
+      if(d.kind==="bool") return block(pl(d.labels),`<label class="switch-row" style="border:0;padding:6px 0"><span>${escapeHtml(pl(d.labels))}</span><input type="checkbox" class="switch jf-bool" data-k="${escapeHtml(k)}" ${v===true?"checked":""}></label>`);
+      if(d.kind==="range"){ const r=v&&typeof v==="object"?v:{}; return block(pl(d.labels)+(d.unit?` (${escapeHtml(d.unit)})`:""),`<div class="frow"><input type="number" class="jf-range" data-k="${escapeHtml(k)}" data-b="min" min="${d.min_value??0}" max="${d.max_value??""}" placeholder="${escapeHtml(t("pf_min"))}" value="${r.min??""}"><span>–</span><input type="number" class="jf-range" data-k="${escapeHtml(k)}" data-b="max" min="${d.min_value??0}" max="${d.max_value??""}" placeholder="${escapeHtml(t("pf_max"))}" value="${r.max??""}"></div>`); }
+      if(d.kind==="tags") return block(pl(d.labels),`<input class="jf-tags" data-k="${escapeHtml(k)}" placeholder="${escapeHtml(t("pf_tagsPh"))}" value="${escapeHtml((Array.isArray(v)?v:[]).join(", "))}">`);
+      return "";
+    }).join("");
+    openModal(t("allFiltersModalTitle")+" · "+pl(p.labels),html+`<div class="two-col" style="gap:8px;margin-top:16px"><button class="primary" id="applyJobFilters">${escapeHtml(t("applyFiltersBtn"))}</button><button class="secondary" id="resetJobFilters">${escapeHtml(t("pf_clear"))}</button></div>`,root=>{
+      $$(".jf-opt",root).forEach(b=>b.addEventListener("click",()=>b.classList.toggle("selected")));
+      $$(".jf-one",root).forEach(b=>b.addEventListener("click",()=>{ const on=b.classList.contains("selected"); $$(`.jf-one[data-k="${b.dataset.k}"]`,root).forEach(x=>x.classList.remove("selected")); if(!on)b.classList.add("selected"); }));
+      $("#resetJobFilters",root).addEventListener("click",()=>{ state.js.f={}; closeModal(); renderJobFilterBar(); runJobSearch(); });
+      $("#applyJobFilters",root).addEventListener("click",()=>{ const nf={};
+        $$(".jf-opt.selected",root).forEach(b=>{ (nf[b.dataset.k]=nf[b.dataset.k]||[]).push(b.dataset.v); });
+        $$(".jf-one.selected",root).forEach(b=>nf[b.dataset.k]=b.dataset.v);
+        $$(".jf-bool:checked",root).forEach(b=>nf[b.dataset.k]=true);
+        const ranges={}; $$(".jf-range",root).forEach(i=>{ if(i.value!=="")(ranges[i.dataset.k]=ranges[i.dataset.k]||{})[i.dataset.b]=Number(i.value); }); Object.assign(nf,ranges);
+        $$(".jf-tags",root).forEach(i=>{ const vals=i.value.split(",").map(v=>v.trim()).filter(Boolean).slice(0,30); if(vals.length)nf[i.dataset.k]=vals; });
+        state.js.f=nf; closeModal(); renderJobFilterBar(); runJobSearch();
+      });
+    },"wide");
   }
   function renderRealJobs(){
     if(!REAL) return;
@@ -5146,7 +5227,7 @@
         <div class="job-top"><div><h3>${escapeHtml(j.title)}</h3><div class="muted">${escapeHtml(who)} · ${escapeHtml(j.location||t("p_remote"))}</div></div><strong>${escapeHtml(j.budget||"€ —")}</strong></div>
         <p class="muted">${escapeHtml(j.description||"")}</p>
         ${jtTrustHtml(j,false)}
-        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${Object.entries(det).flatMap(([k,vs])=>(Array.isArray(vs)?vs:[]).slice(0,4).map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}<span class="job-time muted" title="${escapeHtml(jtExact(j.created_at))}">${escapeHtml(jtAgo(j.created_at))}</span></div></div>`;
+        <div class="job-meta"><span class="pill">${escapeHtml(profName(jslug))}</span>${jobDetailPills(det).slice(0,8).map(v=>`<span class="pill">${escapeHtml(v)}</span>`).join("")}<span class="job-time muted" title="${escapeHtml(jtExact(j.created_at))}">${escapeHtml(jtAgo(j.created_at))}</span></div></div>`;
       el.addEventListener("click",()=>openJob(el));
       list.prepend(el);
     });
@@ -5158,14 +5239,15 @@
   async function publishJobReal(){
     const role=$("#jobRole"), pricing=$("#jobPricing");
     const loc=$("#jobLoc").value.trim(), title=$("#jobTitle").value.trim();
-    const slug=role.value||"video-editor"; const details=jobReadDetails(); const spec=(details.video_specialty||[])[0]||"";
+    if(!role.value){ toast(t("jobChooseProfession")); role.focus(); return; }
+    const slug=role.value; const details=jobReadDetails(); const spec=(details.video_specialty||[])[0]||"";
     const legacyRole={ "video-editor":"editor", videographer:"videographer", photographer:"photographer" }[slug] || "editor";
     const row={ owner:myId(), title, status:"open", role_needed:legacyRole, profession_slug:slug, category:CAT_KEYS.includes(spec)?spec:"catOther",
       details,
       description:$("#jobDesc").value.trim(), location:loc, remote:(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc)), pricing:pricing.selectedIndex===0?"project":"hourly", budget:$("#jobBudget").value.trim(), deadline:$("#jobDeadline").value||null };
     const { data:ins, error } = await sb.from("jobs").insert(row).select("id,status");
     if(error){ toast(jtErr(error)); console.error(error); return; }
-    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); $$("#jobSpecs .job-opt.selected").forEach(b=>b.classList.remove("selected")); updateJobPreview();
+    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); role.value=""; fillJobCatSelect(true); updateJobPreview();
     const hidden=Array.isArray(ins)&&ins[0]&&ins[0].status==="hidden";
     toast(t(hidden?"jt_postedReview":"d_jobPosted")); route("jobs"); loadJobs();
   }
@@ -7223,7 +7305,16 @@
       if(ok && state.jt.secured && j.dataset.secured!=="1") ok=false;
       if(ok && state.jt.within && j.dataset.posted && jtDays(j.dataset.posted)>=Number(state.jt.within)) ok=false;
       if(ok && Object.keys(state.js.f).length){ let det={}; try{ det=JSON.parse(j.dataset.details||"{}"); }catch(e){}
-        for(const [k,vs] of Object.entries(state.js.f)){ const have=Array.isArray(det[k])?det[k]:[]; if(!vs.some(v=>have.includes(v))){ ok=false; break; } } }
+        for(const [k,want] of Object.entries(state.js.f)){
+          const have=det[k];
+          if(Array.isArray(want)){
+            const hv=Array.isArray(have)?have.map(v=>String(v).toLowerCase()):[];
+            if(!want.some(v=>hv.includes(String(v).toLowerCase()))){ ok=false; break; }
+          }else if(want&&typeof want==="object"){
+            const n=Number(have); if(!Number.isFinite(n)||(want.min!=null&&n<want.min)||(want.max!=null&&n>want.max)){ ok=false; break; }
+          }else if(want===true){ if(have!==true){ ok=false; break; }
+          }else if(have!==want){ ok=false; break; }
+        } }
       j.classList.toggle("hidden",!ok); if(ok) n++;
     });
     $("#jobCount").textContent=t(n===1?"p_jobCountOne":"p_jobCountOther").replace("{n}",n);
@@ -7237,17 +7328,19 @@
     $("#pvMeta").textContent=t("p_pvYou")+" · "+(loc||t("p_remote"));
     $("#pvBudget").textContent=budget||"€ —";
     $("#pvDesc").textContent=desc||t("p_pvDesc");
-    const ro=role.options[role.selectedIndex]; const det=jobReadDetails();
-    $("#pvTags").innerHTML=`<span class="pill">${escapeHtml(ro?ro.textContent:"")}</span>`+Object.entries(det).flatMap(([k,vs])=>vs.map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("");
+    const ro=role.options[role.selectedIndex], det=jobReadDetails();
+    $("#pvTags").innerHTML=(role.value&&ro?`<span class="pill">${escapeHtml(ro.textContent)}</span>`:"")+jobDetailPills(det).slice(0,10).map(v=>`<span class="pill">${escapeHtml(v)}</span>`).join("");
   }
 
   function publishJobFromForm(){
     if(!requireAuth()) return;
+    const role=$("#jobRole");
+    if(!role.value){ toast(t("jobChooseProfession")); role.focus(); return; }
     if(REAL){ if(!$("#jobTitle").value.trim()){ toast(t("toastAddJobTitle")); return; } return publishJobReal(); }
     const title=$("#jobTitle").value.trim();
     if(!title){toast(t("toastAddJobTitle"));$("#jobTitle").focus();return;}
-    const role=$("#jobRole"), pricing=$("#jobPricing");
-    const roleVal=role.value||"video-editor"; const det=jobReadDetails();
+    const pricing=$("#jobPricing");
+    const roleVal=role.value; const det=jobReadDetails();
     const loc=$("#jobLoc").value.trim(), desc=$("#jobDesc").value.trim(), budget=$("#jobBudget").value.trim()||"€ —";
     const where=(!loc || /remote|удал|nuotol|zdaln|віддал|fern/i.test(loc))?"remote":"onsite";
     const j=document.createElement("div");
@@ -7255,11 +7348,10 @@
     j.innerHTML=`<div class="job-avatar alt">EC</div><div class="job-content">
       <div class="job-top"><div><h3>${escapeHtml(title)}</h3><div class="muted">${t("p_pvYou")} · ${escapeHtml(loc||t("p_remote"))}</div></div><strong>${escapeHtml(budget)}</strong></div>
       <p class="muted">${escapeHtml(desc||t("p_pvDesc"))}</p>
-      <div class="job-meta"><span class="pill">${escapeHtml(role.options[role.selectedIndex].textContent)}</span>${Object.entries(det).flatMap(([k,vs])=>vs.map(v=>`<span class="pill">${escapeHtml(optName(k,v))}</span>`)).join("")}<span class="job-time muted">${t("p_posted")} 0d</span></div></div>`;
+      <div class="job-meta"><span class="pill">${escapeHtml(role.options[role.selectedIndex].textContent)}</span>${jobDetailPills(det).slice(0,8).map(v=>`<span class="pill">${escapeHtml(v)}</span>`).join("")}<span class="job-time muted">${t("p_posted")} 0d</span></div></div>`;
     j.addEventListener("click",()=>openJob(j));
     $("#jobList").prepend(j);
-    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value="");
-    updateJobPreview();
+    $$("#page-post-job input,#page-post-job textarea").forEach(i=>i.value=""); role.value=""; fillJobCatSelect(true); updateJobPreview();
     toast(t("toastJobPublished")); route("jobs"); runJobSearch();
   }
 
@@ -7294,7 +7386,7 @@
     $("#toggleJobFilters").addEventListener("click",()=>$(".filter-panel").classList.toggle("open"));
     // Post a job
     $$("#page-post-job input,#page-post-job textarea,#page-post-job select").forEach(i=>{i.addEventListener("input",updateJobPreview);i.addEventListener("change",updateJobPreview);});
-    $("#jobRole")?.addEventListener("change",()=>{ fillJobCatSelect(); updateJobPreview(); });   // the speciality list follows the profession
+    $("#jobRole")?.addEventListener("change",()=>{ fillJobCatSelect(true); updateJobPreview(); });   // profession first, then its complete set of options
     fillJobCatSelect(); renderJobFilterBar(); updateJobPreview();
     // How it works
     $$("#howSeg .seg-btn").forEach(b=>b.addEventListener("click",()=>{
