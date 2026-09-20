@@ -29,8 +29,21 @@ const url = 'file://' + path.resolve(__dirname, '..') + '/index.html';
 
       await p.click('#jobRoleSearch'); await p.waitForTimeout(300);
       ok((await opts()).length >= 25, 'the picker offers every open profession' + S);
+      ok((await p.textContent('#jobRoleList .pp-count')).includes('30'), 'the top of the list says how many there are' + S);
+      ok(await p.locator('#jobRoleCaret').isVisible(), 'the field carries a chevron, so it reads as a drop-down too' + S);
       ok(await p.locator('#jobRoleList .pp-group').count() >= 5, 'they are grouped by trade, with a heading for each' + S);
       ok(await p.locator('#jobRoleList .pp-opt[data-slug="game-developer"]').count() === 0, 'a profession that is not open yet is not offered' + S);
+
+      const box = await p.locator('#jobRoleList').evaluate(e => ({ client: e.clientHeight, scroll: e.scrollHeight }));
+      ok(box.scroll > box.client + 20, 'the list is longer than the box, so it scrolls' + S);
+      await p.locator('#jobRoleList').hover();
+      const pageBefore = await p.evaluate(() => document.scrollingElement.scrollTop);
+      await p.mouse.wheel(0, 500); await p.waitForTimeout(250);
+      const inside = await p.locator('#jobRoleList').evaluate(e => e.scrollTop);
+      ok(inside > 200, 'the wheel scrolls the list' + S);
+      ok(await p.evaluate(() => document.scrollingElement.scrollTop) === pageBefore, '…and the page behind it stays where it was' + S);
+      ok((await p.locator('#jobRoleList .pp-opt').last().textContent()) === 'No-code website builder', 'scrolling reaches the last profession' + S);
+      await p.locator('#jobRoleList').evaluate(e => e.scrollTop = 0); await p.waitForTimeout(150);
 
       ok((await type('logo')).join() === 'Brand & logo designer', 'typing "logo" finds the brand designer' + S);
       ok((await type('tłumacz')).join() === 'Translator', 'a Polish word finds the translator' + S);
@@ -68,6 +81,10 @@ const url = 'file://' + path.resolve(__dirname, '..') + '/index.html';
       ok((await p.textContent('#pvTags')).includes('SEO specialist') && (await p.textContent('#pvTags')).includes('Local SEO') && (await p.textContent('#pvTags')).includes('Ahrefs'),
         'the live preview shows the profession and every chip chosen' + S);
 
+      await p.click('#jobRoleSearch'); await p.waitForTimeout(300);
+      ok(await p.locator('#jobRoleList .pp-opt').count() >= 25 && await p.inputValue('#jobRole') === 'seo-specialist',
+        'clicking the field again shows all of them without losing the one already chosen' + S);
+      await p.keyboard.press('Escape'); await p.waitForTimeout(150);
       await p.click('#jobRoleClear'); await p.waitForTimeout(250);
       ok(await p.locator('#jobSpecs .job-opt').count() === 0 && (await p.textContent('#pvTags')).trim() === '',
         'clearing the profession clears its options and the preview' + S);
