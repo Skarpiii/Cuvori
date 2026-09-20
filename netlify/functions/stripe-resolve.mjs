@@ -1,5 +1,7 @@
 // POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents } from "../lib/cuvori.mjs";
+// Decides a dispute (release / refund / split), and can take over a release that got stuck before any
+// transfer was made (freelancer's account closed, for example) so the client is not left waiting for ever.
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -13,6 +15,7 @@ export default safe(async (req) => {
   const c = await db.contract(body.contract_id);
   if (!c) return bad("Not found", 404);
   if (c.payment_mode !== "escrow") return bad("This order is not holding money", 409);
+  if (chargebackOpen(c)) return bad("A card chargeback is open on this payment. Nothing can move until the bank decides.", 409);
   const total = heldCents(c);                                            // what is still held: released milestones stay released
   if (!total) return bad("This order is not holding money", 409);
 
@@ -31,7 +34,14 @@ export default safe(async (req) => {
     }
     const refundCents = total - editorCents;
     const now = new Date().toISOString();
-    row = await db.claim(c.id, ["funded", "delivered", "disputed"], { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null });
+    const from = ["funded", "delivered", "disputed"];
+    // a release that never got its transfer (no id, none at the provider) can be taken over
+    if (c.status === "releasing" && !c.stripe_transfer_id) {
+      const made = (await transfersOf(c)).filter(t => !t.reversed && !(t.metadata.milestone_id || ""));
+      if (made.length) return bad("A transfer for this order already exists at the provider; let the release finish (it is retried every hour)", 409);
+      from.push("releasing");
+    }
+    row = await db.claim(c.id, from, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, money_error: null });
     if (!row) return bad("This order is not holding money", 409);
     row.was_disputed = c.status === "disputed";
   }

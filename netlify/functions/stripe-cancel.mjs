@@ -1,7 +1,7 @@
 // POST { contract_id } (freelancer) — give a funded Order back: everything still held goes back to the
 // client. A client who wants out after funding asks the freelancer (or opens a dispute); money never
 // moves on one side's say-so in the other direction.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, orderEvent } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, orderEvent, chargebackOpen } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -15,6 +15,7 @@ export default safe(async (req) => {
   if (c.payment_mode !== "escrow") return bad("This order is not holding money", 409);
   const held = heldCents(c);
   if (!held) return bad("This order is not holding money", 409);
+  if (chargebackOpen(c)) return bad("A card chargeback is open on this payment. Nothing can move until the bank decides.", 409);
   let row = c.status === "resolving" && c.resolution === "refund" && c.resolved_by === me.id ? c : null;   // resume
   if (!row) {
     const now = new Date().toISOString();

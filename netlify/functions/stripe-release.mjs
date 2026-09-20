@@ -1,5 +1,5 @@
 // POST { contract_id, milestone_id? } (client) — "Approve & release". Whole Order, or one milestone.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, releaseMilestone, readJson, safe, isBanned, heldCents, payoutAccount } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, releaseMilestone, readJson, safe, isBanned, heldCents, payoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -11,6 +11,7 @@ export default safe(async (req) => {
   const c = await db.contract(id);
   if (!c || c.client !== me.id) return bad("Not your order", 403);
   if (c.payment_mode !== "escrow") return bad("Nothing to release right now", 409);
+  if (chargebackOpen(c)) return bad("A card chargeback is open on this payment. Nothing can move until the bank decides.", 409);
   if (await isBanned(c.editor)) return bad("This order is under review by Cuvori", 409);
 
   if (milestone_id) {
@@ -18,7 +19,7 @@ export default safe(async (req) => {
     const m = await db.milestone(milestone_id);
     if (!m || m.order_id !== c.id) return bad("Not your milestone", 403);
     const acct = await payoutAccount(c.editor);
-    if (!acct || !acct.payouts_enabled) return bad("The freelancer's Stripe account is not ready yet", 409);
+    if (!accountReady(acct)) return bad("The freelancer's Stripe account is not ready yet", 409);
     const transfer = await releaseMilestone(c, m, me.id, "approve");
     return json(200, { ok: true, transfer, released: m.amount_cents });
   }
@@ -29,7 +30,7 @@ export default safe(async (req) => {
   let row = c.status === "releasing" && c.resolution === "release" ? c : null;          // resume an interrupted release
   if (!row) {
     const acct = await payoutAccount(c.editor);
-    if (!acct || !acct.payouts_enabled) return bad("The freelancer's Stripe account is not ready yet", 409);
+    if (!accountReady(acct)) return bad("The freelancer's Stripe account is not ready yet", 409);
     const now = new Date().toISOString();
     row = await db.claim(id, ["funded", "delivered"], { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_by: me.id, resolved_at: now, auto_release_at: null });
     if (!row) return bad("Nothing to release right now", 409);

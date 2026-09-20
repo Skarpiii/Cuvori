@@ -1,7 +1,7 @@
 // POST { contract_id } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, payoutAccount, isBanned, centsOf, MIN_CENTS, MAX_CENTS, heldCents } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, payoutAccount, accountReady, isBanned, centsOf, MIN_CENTS, MAX_CENTS, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -20,9 +20,10 @@ export default safe(async (req) => {
   if (c.status === "accepted") { amount = price; kind = "fund"; }
   else if (["funded", "delivered"].includes(c.status) && price > (c.funded_cents || 0)) { amount = price - (c.funded_cents || 0); kind = "topup"; }
   else return bad("This order is not waiting for payment", 409);
+  if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
   if (await isBanned(c.editor)) return bad("This freelancer cannot receive payments", 409);
   const acct = await payoutAccount(c.editor);
-  if (!acct || !acct.payouts_enabled) return bad("The freelancer has not finished setting up payouts yet. Ask them to connect Stripe in Settings → Payout details.", 409);
+  if (!accountReady(acct)) return bad("The freelancer has not finished setting up payouts yet. Ask them to connect Stripe in Settings → Payout details.", 409);
 
   const cc = typeof country === "string" && /^[A-Za-z]{2}$/.test(country) ? country.toUpperCase() : null;
   const kind_c = customer === "business" ? "business" : customer === "consumer" ? "consumer" : "any";
@@ -47,5 +48,7 @@ export default safe(async (req) => {
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
   const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&amount_cents=eq.${price}`, patch);
   if (!rows || !rows.length) { await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {}); return bad("The order changed, reload", 409); }
+  // only one live Checkout per Order: the previous page (another tab, an old link) can no longer be paid
+  if (c.stripe_checkout_id && c.stripe_checkout_id !== session.id && isSession(c.stripe_checkout_id)) await stripe("POST", `/checkout/sessions/${c.stripe_checkout_id}/expire`).catch(() => {});
   return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
 });
