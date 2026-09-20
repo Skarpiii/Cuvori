@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-12Z2HRrfZkVESs0sSEntAe0+4k15fi8gIpeHPpRQOGA=' 'sha256-jsRNdGpbUC3gr/gXuXsZln3j8Ta5Gs5F26p+a3U6qTM=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-12Z2HRrfZkVESs0sSEntAe0+4k15fi8gIpeHPpRQOGA=' 'sha256-kVsdOxgYcrh3hD6gJDSfNixxx/AttcQcSXUMjmgjTkk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -1141,7 +1141,7 @@
           <div class="form-section">
             <div class="form-section-head"><span class="num">01</span><h3 data-i18n="p_basicsTitle">The basics</h3></div>
             <div class="form-grid">
-              <div style="grid-column:1/-1"><label data-i18n="labelJobTitle">Job title</label><input id="jobTitle" maxlength="150" data-i18n-placeholder="jobTitlePlaceholder" placeholder="e.g. YouTube documentary editor" /></div>
+              <div style="grid-column:1/-1"><label data-i18n="labelJobTitle">Job title</label><input id="jobTitle" maxlength="150" data-i18n-placeholder="jobTitlePlaceholder" placeholder="Needed: Wedding photographer, 2 days, Munich, Aug 14–15" /></div>
               <div><label data-i18n="labelProfessionalNeeded">Professional needed</label>
                 <div class="pp" id="jobRolePick">
                   <input id="jobRoleSearch" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="jobRoleList" aria-autocomplete="list" data-i18n-placeholder="pj_rolePh" placeholder="Type to search: editor, designer, translator…">
@@ -1271,8 +1271,20 @@
         <div>
           <h2 style="margin-bottom:4px" id="accountName">Egidijus</h2>
           <div class="muted" style="margin-bottom:12px"><span id="accountEmail">you@example.com</span> · <span id="accountRole">Client</span></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="secondary" data-route="settings" data-i18n="editProfileBtn">Edit profile</button><button class="secondary" data-route="join-editor" data-i18n="createEditorProfileBtn">Create editor profile</button><button class="primary hidden" id="myProfileBtn" data-i18n="myProfileBtn">My editor profile</button><button class="secondary hidden" id="adminBtn" data-admin-open data-i18n="adminPanel">Admin panel</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="secondary" data-route="join-editor" data-i18n="createEditorProfileBtn">Create editor profile</button><button class="primary hidden" id="myProfileBtn" data-i18n="myProfileBtn">My editor profile</button><button class="secondary hidden" id="adminBtn" data-admin-open data-i18n="adminPanel">Admin panel</button></div>
         </div>
+      </div>
+      <div class="panel" id="accountProfilePanel" style="margin-top:14px">
+            <h3 data-i18n="p_setProfile">Profile</h3>
+            <div class="form-grid">
+              <div><label data-i18n="firstNameLabel">First name</label><input id="profileFirstName" maxlength="80" value="Egidijus"></div>
+              <div><label data-i18n="emailLabel">Email</label><input id="profileEmail" type="email" value="you@example.com" readonly></div>
+              <div><label data-i18n="labelLocation">Location</label><input data-i18n-placeholder="filterLocationPlaceholder" placeholder="Search location"></div>
+              <div><label data-i18n="languagesLabel">Languages</label><input data-i18n-placeholder="filterLanguagesPlaceholder" placeholder="Type languages"></div>
+              <div><label data-i18n="accountTypeLabel">Account type</label><select id="accountTypeSelect"><option value="client" data-i18n="roleClient">Client</option><option value="editor" data-i18n="roleEditor">Editor</option></select></div>
+            </div>
+            <div class="form-actions"><button class="primary" id="saveProfileBtn" data-i18n="p_saveChanges">Save changes</button></div>
+            <div class="danger-zone real-only hidden"><strong data-i18n="dz_title">Delete account</strong><p class="muted small" style="margin:4px 0 10px" data-i18n="dz_deleteDesc">This removes your account and everything in it: profile, videos, jobs, messages and reviews. It cannot be undone.</p><button class="secondary" id="deleteAccountBtn" data-i18n="dz_deleteBtn">Delete my account</button></div>
       </div>
       <div id="recoHost"></div>
       <div class="stat-row">
@@ -1313,26 +1325,13 @@
       <div class="page-head"><div><h1 data-i18n="settings">Settings</h1></div></div>
       <div class="settings-layout">
         <nav class="settings-nav">
-          <button class="snav active" data-set="profile" data-i18n="p_setProfile">Profile</button>
-          <button class="snav" data-set="password" data-i18n="settingChangePassword">Change password</button>
+          <button class="snav active" data-set="password" data-i18n="settingChangePassword">Change password</button>
           <button class="snav" data-set="notifications" data-i18n="p_setNotifications">Notifications</button>
           <button class="snav" data-set="language" data-i18n="language">Language</button>
           <button class="snav editor-only hidden" data-set="payout" data-i18n="pay_title">Payout details</button>
           <button class="snav" data-set="help" data-i18n="settingHelp">Help &amp; support</button>
         </nav>
         <div class="settings-body">
-          <div class="panel set-pane active" data-set-pane="profile">
-            <h3 data-i18n="p_setProfile">Profile</h3>
-            <div class="form-grid">
-              <div><label data-i18n="firstNameLabel">First name</label><input id="profileFirstName" maxlength="80" value="Egidijus"></div>
-              <div><label data-i18n="emailLabel">Email</label><input id="profileEmail" type="email" value="you@example.com" readonly></div>
-              <div><label data-i18n="labelLocation">Location</label><input data-i18n-placeholder="filterLocationPlaceholder" placeholder="Search location"></div>
-              <div><label data-i18n="languagesLabel">Languages</label><input data-i18n-placeholder="filterLanguagesPlaceholder" placeholder="Type languages"></div>
-              <div><label data-i18n="accountTypeLabel">Account type</label><select id="accountTypeSelect"><option value="client" data-i18n="roleClient">Client</option><option value="editor" data-i18n="roleEditor">Editor</option></select></div>
-            </div>
-            <div class="form-actions"><button class="primary" id="saveProfileBtn" data-i18n="p_saveChanges">Save changes</button></div>
-            <div class="danger-zone real-only hidden"><strong data-i18n="dz_title">Delete account</strong><p class="muted small" style="margin:4px 0 10px" data-i18n="dz_deleteDesc">This removes your account and everything in it: profile, videos, jobs, messages and reviews. It cannot be undone.</p><button class="secondary" id="deleteAccountBtn" data-i18n="dz_deleteBtn">Delete my account</button></div>
-          </div>
           <div class="panel set-pane" data-set-pane="payout">
             <h3 data-i18n="pay_title">Payout details</h3>
             <p class="muted" data-i18n="pay_desc">How clients should pay you. Shown only to clients you are in a conversation with, once a contract is accepted. Cuvori never handles the money and takes no fee.</p>
@@ -1342,7 +1341,7 @@
             <div style="margin-top:14px"><label data-i18n="pay_noteLabel">Note for clients (optional)</label><textarea id="payoutNote" data-i18n-placeholder="pay_notePh" placeholder="e.g. Please write the contract title in the payment reference."></textarea></div>
             <div class="form-actions"><button class="primary" id="savePayoutBtn" data-i18n="p_saveChanges">Save changes</button></div>
           </div>
-          <div class="panel set-pane" data-set-pane="password">
+          <div class="panel set-pane active" data-set-pane="password">
             <h3 data-i18n="settingChangePassword">Change password</h3>
             <div class="form-grid">
               <div style="grid-column:1/-1"><label data-i18n="currentPasswordPlaceholder">Current password</label><input type="password" id="pwCurrent"></div>
@@ -1711,7 +1710,7 @@
       perDay:"day", job3Desc:"One-day commercial shoot. Camera and basic lighting kit preferred.", 
       pillVideography:"Videography", cityMunich:"Munich", 
       postJobSubtitle:"Say who you need — from video editors and photographers to designers, writers, marketers and developers.", labelJobTitle:"Job title", 
-      jobTitlePlaceholder:"e.g. YouTube documentary editor", labelProfessionalNeeded:"Professional needed", 
+      jobTitlePlaceholder:"Needed: Wedding photographer, 2 days, Munich, Aug 14–15", labelProfessionalNeeded:"Professional needed", 
       optEditor:"Editor", optVideographer:"Videographer", optPhotographer:"Photographer", labelBudget:"Budget", 
       budgetPlaceholder:"e.g. €500 or €30/hour", labelLocation:"Location", locationPlaceholder:"Remote or location", 
       labelProjectDetails:"Project details", 
@@ -1823,7 +1822,7 @@
       perDay:"Tag", job3Desc:"Eintägiges Werbeshooting. Kamera und einfaches Lichtset erwünscht.", 
       pillVideography:"Videografie", cityMunich:"München", 
       postJobSubtitle:"Sag, wen du brauchst — von Videoeditoren und Fotografen bis zu Designern, Textern, Marketern und Entwicklern.", labelJobTitle:"Jobtitel", 
-      jobTitlePlaceholder:"z. B. YouTube-Dokumentation schneiden", labelProfessionalNeeded:"Gesuchte Fachkraft", 
+      jobTitlePlaceholder:"Gesucht: Hochzeitsfotograf, 2 Tage, München, 14.–15. Aug.", labelProfessionalNeeded:"Gesuchte Fachkraft", 
       optEditor:"Editor", optVideographer:"Videograf", optPhotographer:"Fotograf", labelBudget:"Budget", 
       budgetPlaceholder:"z. B. 500 € oder 30 €/Stunde", labelLocation:"Standort", 
       locationPlaceholder:"Remote oder Standort", labelProjectDetails:"Projektdetails", 
@@ -1943,7 +1942,7 @@
       job3Meta:"Бренд · Мюнхен", perDay:"день", 
       job3Desc:"Однодневная рекламная съёмка. Желательны камера и базовый свет.", pillVideography:"Видеосъёмка", 
       cityMunich:"Мюнхен", postJobSubtitle:"Опишите, кто вам нужен — от видеомонтажёров и фотографов до дизайнеров, копирайтеров, маркетологов и разработчиков.", 
-      labelJobTitle:"Название вакансии", jobTitlePlaceholder:"напр. Монтаж документального YouTube-видео", 
+      labelJobTitle:"Название вакансии", jobTitlePlaceholder:"Нужен: свадебный фотограф, 2 дня, Мюнхен, 14–15 авг.", 
       labelProfessionalNeeded:"Нужный специалист", optEditor:"Редактор", optVideographer:"Видеограф", 
       optPhotographer:"Фотограф", labelBudget:"Бюджет", budgetPlaceholder:"напр. €500 или €30/час", 
       labelLocation:"Локация", locationPlaceholder:"Удалённо или локация", labelProjectDetails:"Детали проекта", 
@@ -2066,7 +2065,7 @@
       job3Desc:"Vienos dienos reklaminis filmavimas. Pageidautina kamera ir bazinis apšvietimas.", 
       pillVideography:"Videografija", cityMunich:"Miunchenas", 
       postJobSubtitle:"Parašykite, ko ieškote — nuo editorių ir fotografų iki dizainerių, tekstų kūrėjų, rinkodaros specialistų ir programuotojų.", labelJobTitle:"Darbo pavadinimas", 
-      jobTitlePlaceholder:"pvz., YouTube dokumentikos montuotojas", 
+      jobTitlePlaceholder:"Reikia: vestuvių fotografo, 2 dienoms, Miunchenas, rugp. 14–15", 
       labelProfessionalNeeded:"Reikalingas specialistas", optEditor:"Editorius", optVideographer:"Videografas", 
       optPhotographer:"Fotografas", labelBudget:"Biudžetas", budgetPlaceholder:"pvz., 500 € arba 30 €/val.", 
       labelLocation:"Vieta", locationPlaceholder:"Nuotoliniu būdu arba vieta", 
@@ -2190,7 +2189,7 @@
       job3Desc:"Rodaje publicitario de un día. Se prefiere cámara propia y kit básico de iluminación.", 
       pillVideography:"Videografía", cityMunich:"Múnich", 
       postJobSubtitle:"Cuéntanos a quién necesitas: de editores de vídeo y fotógrafos a diseñadores, redactores, especialistas en marketing y desarrolladores.", 
-      labelJobTitle:"Título del trabajo", jobTitlePlaceholder:"p. ej. Editor de documental para YouTube", 
+      labelJobTitle:"Título del trabajo", jobTitlePlaceholder:"Se necesita: fotógrafo de bodas, 2 días, Múnich, 14–15 ago.", 
       labelProfessionalNeeded:"Profesional necesario", optEditor:"Editor", optVideographer:"Videógrafo", 
       optPhotographer:"Fotógrafo", labelBudget:"Presupuesto", budgetPlaceholder:"p. ej. 500 € o 30 €/hora", 
       labelLocation:"Ubicación", locationPlaceholder:"Remoto o ubicación", 
@@ -2313,7 +2312,7 @@
       job3Desc:"Jednodniowa sesja reklamowa. Mile widziane własna kamera i podstawowy zestaw oświetlenia.", 
       pillVideography:"Wideografia", cityMunich:"Monachium", 
       postJobSubtitle:"Napisz, kogo potrzebujesz — od montażystów i fotografów po grafików, copywriterów, marketerów i programistów.", 
-      labelJobTitle:"Tytuł zlecenia", jobTitlePlaceholder:"np. Montaż dokumentu na YouTube", 
+      labelJobTitle:"Tytuł zlecenia", jobTitlePlaceholder:"Potrzebny: fotograf ślubny, 2 dni, Monachium, 14–15 sie.", 
       labelProfessionalNeeded:"Potrzebny specjalista", optEditor:"Montażysta", optVideographer:"Wideograf", 
       optPhotographer:"Fotograf", labelBudget:"Budżet", budgetPlaceholder:"np. 500 € lub 30 €/godz.", 
       labelLocation:"Lokalizacja", locationPlaceholder:"Zdalnie lub lokalizacja", 
@@ -2431,7 +2430,7 @@
       job3Meta:"Бренд · Мюнхен", perDay:"день", 
       job3Desc:"Одноденна рекламна зйомка. Бажані камера та базове освітлення.", pillVideography:"Відеозйомка", 
       cityMunich:"Мюнхен", postJobSubtitle:"Опишіть, хто вам потрібен — від відеомонтажерів і фотографів до дизайнерів, копірайтерів, маркетологів і розробників.", 
-      labelJobTitle:"Назва роботи", jobTitlePlaceholder:"напр., Монтаж документального відео для YouTube", 
+      labelJobTitle:"Назва роботи", jobTitlePlaceholder:"Потрібен: весільний фотограф, 2 дні, Мюнхен, 14–15 серп.", 
       labelProfessionalNeeded:"Потрібний фахівець", optEditor:"Редактор", optVideographer:"Відеограф", 
       optPhotographer:"Фотограф", labelBudget:"Бюджет", budgetPlaceholder:"напр., €500 або €30/год", 
       labelLocation:"Локація", locationPlaceholder:"Віддалено або локація", labelProjectDetails:"Деталі проєкту", 
@@ -4226,7 +4225,7 @@
     $$("[data-admin-open]").forEach(b=>b.classList.toggle("hidden", !isAdmin()));
     $$(".real-only").forEach(el=>el.classList.toggle("hidden", !(REAL && on)));
     $$(".editor-only").forEach(el=>el.classList.toggle("hidden", !(REAL && on && isEditor())));
-    if(!(REAL && on && isEditor()) && $(".set-pane[data-set-pane='payout']")?.classList.contains("active")) $(".snav[data-set='profile']")?.click();
+    if(!(REAL && on && isEditor()) && $(".set-pane[data-set-pane='payout']")?.classList.contains("active")) $(".snav[data-set='password']")?.click();
     applyBanUI(); renderMyReviewsPanel();
     renderMobileIconbar();
     refreshReco();

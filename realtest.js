@@ -552,7 +552,7 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await signin('jonas@test.com'); await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   await p.evaluate(()=>{ window.__savedReviews=JSON.parse(JSON.stringify(window.__mockdb.reviews)); });
   // Jonas deletes his own account -> fingerprints kept as ghost
-  await p.goto(url+'#settings'); await p.waitForTimeout(400); await p.click('#deleteAccountBtn'); await p.waitForTimeout(300); await p.fill('#dzWord','DELETE'); await p.click('#dzGo'); await p.waitForTimeout(900);
+  await p.goto(url+'#account'); await p.waitForTimeout(400); await p.click('#deleteAccountBtn'); await p.waitForTimeout(300); await p.fill('#dzWord','DELETE'); await p.click('#dzGo'); await p.waitForTimeout(900);
   ok(await p.evaluate(()=>window.__mockdb.deleted_user_identifiers.length>=2),'identifiers kept after a flagged user deletes the account');
   // new editor account using the same PayPal for payouts
   await p.goto(url+'#create-account'); await p.waitForTimeout(300); await p.click('#authSeg [data-auth="signup"]'); await p.fill('#suName','Tomas'); await p.fill('#suEmail','tomas@test.com'); await p.fill('#suPass','password123'); await p.check('#suAgree'); await p.click('[data-auth-signup]'); await p.waitForTimeout(900);
@@ -663,8 +663,8 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.goto(url+'#join-editor'); await p.waitForTimeout(300); await p.fill('#inviteCode',code); await p.click('#inviteBtn'); await p.waitForTimeout(1800);
   ok(await p.evaluate(()=>window.__mockdb.profiles.find(x=>x.email==='tom@test.com').role==='editor'),'admin-created invite code works');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
-  await p.goto(url+'#settings'); await p.waitForTimeout(400);
-  ok(await p.locator('#deleteAccountBtn').isVisible(),'Delete my account visible in settings');
+  await p.goto(url+'#account'); await p.waitForTimeout(400);
+  ok(await p.locator('#deleteAccountBtn').isVisible(),'Delete my account sits on the Account page, no extra click');
   await p.click('#deleteAccountBtn'); await p.waitForTimeout(300); await p.fill('#dzWord','DELETE'); await p.click('#dzGo'); await p.waitForTimeout(900);
   ok(await p.evaluate(()=>!window.__mockdb.profiles.some(x=>x.email==='tom@test.com')),'self-delete removed the account');
   ok(await p.locator('#signInBtn').isVisible(),'signed out after deleting');

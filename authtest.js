@@ -47,8 +47,11 @@ const log=[]; const ok=(c,m)=>log.push((c?'PASS ':'FAIL ')+m);
   ok(await p.locator('#signOutBtn').isVisible(),'sign out button visible');
   ok(await p.locator('#myProfileBtn').isHidden(),'client: no editor profile button');
   ok(await p.locator('.reco-card').count()===0,'client: no progress reminder');
-  // settings: role select disabled in real mode
-  await p.goto(url+'#settings'); await p.waitForTimeout(400);
+  // the profile form is on the Account page itself; the role select is not editable by hand
+  await p.goto(url+'#account'); await p.waitForTimeout(400);
+  ok(await p.locator('#accountProfilePanel').isVisible() && await p.locator('#profileFirstName').isVisible(),'Account opens straight onto the profile form, no "Edit profile" detour');
+  ok(await p.locator('[data-i18n="editProfileBtn"]').count()===0,'…so the extra Edit profile button is gone');
+  ok(await p.locator('[data-i18n="createEditorProfileBtn"]').isVisible(),'…and Create editor profile has taken its place');
   ok(await p.locator('#accountTypeSelect').isDisabled(),'account type cannot be changed by hand');
   // invite -> editor
   await p.goto(url+'#join-editor'); await p.waitForTimeout(300);
