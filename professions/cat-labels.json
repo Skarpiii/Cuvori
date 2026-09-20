@@ -1,0 +1,137 @@
+{
+ "catCommercial": {
+  "en": "Commercial",
+  "de": "Werbung",
+  "ru": "Реклама",
+  "lt": "Reklama",
+  "es": "Publicidad",
+  "pl": "Reklama",
+  "uk": "Реклама"
+ },
+ "catYoutubeLong": {
+  "en": "YouTube long-form",
+  "de": "YouTube Langform",
+  "ru": "YouTube длинные видео",
+  "lt": "YouTube ilgi video",
+  "es": "YouTube formato largo",
+  "pl": "YouTube długie formy",
+  "uk": "YouTube довгі відео"
+ },
+ "catShorts": {
+  "en": "Shorts / Reels / TikTok",
+  "de": "Shorts / Reels / TikTok",
+  "ru": "Shorts / Reels / TikTok",
+  "lt": "Shorts / Reels / TikTok",
+  "es": "Shorts / Reels / TikTok",
+  "pl": "Shorts / Reels / TikTok",
+  "uk": "Shorts / Reels / TikTok"
+ },
+ "catDocumentary": {
+  "en": "Documentary",
+  "de": "Dokumentation",
+  "ru": "Документалистика",
+  "lt": "Dokumentika",
+  "es": "Documental",
+  "pl": "Dokument",
+  "uk": "Документалістика"
+ },
+ "catPodcasts": {
+  "en": "Podcasts",
+  "de": "Podcasts",
+  "ru": "Подкасты",
+  "lt": "Podkastai",
+  "es": "Podcasts",
+  "pl": "Podcasty",
+  "uk": "Подкасти"
+ },
+ "catMusic": {
+  "en": "Music videos",
+  "de": "Musikvideos",
+  "ru": "Музыкальные клипы",
+  "lt": "Muzikiniai vaizdo klipai",
+  "es": "Videoclips musicales",
+  "pl": "Teledyski",
+  "uk": "Музичні кліпи"
+ },
+ "catWedding": {
+  "en": "Weddings & events",
+  "de": "Hochzeiten & Events",
+  "ru": "Свадьбы и мероприятия",
+  "lt": "Vestuvės ir renginiai",
+  "es": "Bodas y eventos",
+  "pl": "Śluby i eventy",
+  "uk": "Весілля та події"
+ },
+ "catCorporate": {
+  "en": "Corporate & interviews",
+  "de": "Unternehmen & Interviews",
+  "ru": "Корпоративное и интервью",
+  "lt": "Verslui ir interviu",
+  "es": "Corporativo y entrevistas",
+  "pl": "Firmowe i wywiady",
+  "uk": "Корпоративне та інтерв'ю"
+ },
+ "catRealEstate": {
+  "en": "Real estate",
+  "de": "Immobilien",
+  "ru": "Недвижимость",
+  "lt": "Nekilnojamasis turtas",
+  "es": "Inmobiliaria",
+  "pl": "Nieruchomości",
+  "uk": "Нерухомість"
+ },
+ "catGaming": {
+  "en": "Gaming & streams",
+  "de": "Gaming & Streams",
+  "ru": "Игры и стримы",
+  "lt": "Žaidimai ir transliacijos",
+  "es": "Gaming y streams",
+  "pl": "Gaming i streamy",
+  "uk": "Ігри та стріми"
+ },
+ "catEducation": {
+  "en": "Courses & tutorials",
+  "de": "Kurse & Tutorials",
+  "ru": "Курсы и уроки",
+  "lt": "Kursai ir pamokos",
+  "es": "Cursos y tutoriales",
+  "pl": "Kursy i tutoriale",
+  "uk": "Курси та уроки"
+ },
+ "catMotion": {
+  "en": "Motion graphics & animation",
+  "de": "Motion Graphics & Animation",
+  "ru": "Моушн-графика и анимация",
+  "lt": "Motion grafika ir animacija",
+  "es": "Motion graphics y animación",
+  "pl": "Motion graphics i animacja",
+  "uk": "Моушн-графіка та анімація"
+ },
+ "catColor": {
+  "en": "Color grading",
+  "de": "Farbkorrektur",
+  "ru": "Цветокоррекция",
+  "lt": "Spalvų korekcija",
+  "es": "Etalonaje",
+  "pl": "Korekcja koloru",
+  "uk": "Кольорокорекція"
+ },
+ "catTravel": {
+  "en": "Travel & vlogs",
+  "de": "Reisen & Vlogs",
+  "ru": "Путешествия и влоги",
+  "lt": "Kelionės ir vlogai",
+  "es": "Viajes y vlogs",
+  "pl": "Podróże i vlogi",
+  "uk": "Подорожі та влоги"
+ },
+ "catOther": {
+  "en": "Other",
+  "de": "Sonstiges",
+  "ru": "Другое",
+  "lt": "Kita",
+  "es": "Otro",
+  "pl": "Inne",
+  "uk": "Інше"
+ }
+}
