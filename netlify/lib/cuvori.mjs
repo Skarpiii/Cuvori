@@ -7,7 +7,8 @@
 import crypto from "node:crypto";
 
 export const SUPABASE_URL = process.env.SUPABASE_URL || "https://tnxujwlfatcvxzevllfr.supabase.co";
-export const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+// Supabase's dashboard now calls this the "secret key"; accept either name so a sensible copy-paste works
+export const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || "";
 export const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
 export const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 export const SITE_URL = (process.env.SITE_URL || process.env.URL || "https://cuvori.netlify.app").replace(/\/$/, "");
