@@ -193,7 +193,10 @@ export async function payoutAccount(editorId) {
   if (!acct || !acct.metadata || acct.metadata.cuvori_user !== editorId) return null;
   return acct;
 }
-export const accountReady = (a) => !!(a && a.payouts_enabled && (a.capabilities ? a.capabilities.transfers === "active" : true));
+// Stripe's summary booleans cover the full indirect-charge path: the platform charge,
+// transfer to the connected account, and the connected account's external payout.
+// Checking the raw transfers capability alone can miss a restriction elsewhere in that path.
+export const accountReady = (a) => !!(a && a.charges_enabled && a.payouts_enabled);
 
 // ---- money movements ----
 export async function transfersOf(c) { const r = await stripe("GET", "/transfers", { transfer_group: `contract_${c.id}`, limit: 100 }); return (r.data || []).filter(t => t.metadata && t.metadata.contract_id === c.id); }

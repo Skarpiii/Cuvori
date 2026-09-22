@@ -375,6 +375,17 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   reset();
 }
 
+// ---------- B25b: do not take a client's money while Stripe says the freelancer's charge path is restricted
+{
+  const acct = STRIPE.accounts.acct_1EditorAAAAAAAA;
+  acct.charges_enabled = false;
+  const c = mk();
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  vuln(r.status === 200 || c.stripe_checkout_id, `B25b freelancer payouts enabled but charge path restricted -> checkout ${r.status}, session created=${!!c.stripe_checkout_id}`);
+  acct.charges_enabled = true;
+  reset();
+}
+
 // ---------- B26: the freelancer's account cannot give the money back (reversal refused): the facts are still recorded
 {
   const c = mk(); const f = await fund(fx, c); c.status = "delivered";
