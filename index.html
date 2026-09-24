@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-hQ4oGIa29UNi9somvKhLGW1HRbQwUg4+/omn8UpBUgw=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-UAFQzVUyGDSMN1eRRrvg89UbcCnWBuMgfR8IciK8oFI=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -628,6 +628,7 @@
     .lang-grid button{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;font-weight:700;color:var(--text)}
     .lang-grid button:hover{border-color:#c9d2de}
     .lang-grid button.active{border-color:var(--accent);background:var(--accent-soft)}
+    .acct-set-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
     .help-list{display:grid;gap:8px}
     .help-item{display:grid;gap:3px;text-align:left;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px;color:var(--text)}
     .help-item:hover{border-color:#c9d2de;background:#fff}
@@ -1264,7 +1265,7 @@
     <section id="page-account" class="page">
       <div class="page-head">
         <div><h1 data-i18n="account">Account</h1></div>
-        <div style="display:flex;gap:8px"><button class="secondary" data-route="settings" data-i18n="settings">Settings</button><button class="secondary hidden" id="signOutBtn" data-i18n="signOut">Sign out</button></div>
+        <div style="display:flex;gap:8px"><button class="secondary hidden" id="signOutBtn" data-i18n="signOut">Sign out</button></div>
       </div>
       <div class="panel profile-hero account-hero">
         <div class="avatar account-avatar">EC</div>
@@ -1285,6 +1286,16 @@
             </div>
             <div class="form-actions"><button class="primary" id="saveProfileBtn" data-i18n="p_saveChanges">Save changes</button></div>
             <div class="danger-zone real-only hidden"><strong data-i18n="dz_title">Delete account</strong><p class="muted small" style="margin:4px 0 10px" data-i18n="dz_deleteDesc">This removes your account and everything in it: profile, videos, jobs, messages and reviews. It cannot be undone.</p><button class="secondary" id="deleteAccountBtn" data-i18n="dz_deleteBtn">Delete my account</button></div>
+      </div>
+      <div class="panel" id="accountSettingsPanel" style="margin-top:14px">
+        <h3 data-i18n="settings">Settings</h3>
+        <div class="acct-set-grid">
+          <button class="help-item" data-acct-set="password" data-i18n="settingChangePassword">Change password</button>
+          <button class="help-item" data-acct-set="notifications" data-i18n="p_setNotifications">Notifications</button>
+          <button class="help-item" data-acct-set="language" data-i18n="language">Language</button>
+          <button class="help-item editor-only hidden" data-acct-set="payout" data-i18n="pay_title">Payout details</button>
+          <button class="help-item" data-acct-set="help" data-i18n="settingHelp">Help &amp; support</button>
+        </div>
       </div>
       <div id="recoHost"></div>
       <div class="stat-row">
@@ -7434,6 +7445,12 @@
     $$(".snav").forEach(b=>b.addEventListener("click",()=>{
       $$(".snav").forEach(x=>x.classList.toggle("active",x===b));
       $$(".set-pane").forEach(p=>p.classList.toggle("active",p.dataset.setPane===b.dataset.set));
+    }));
+    // the Account page opens a settings section straight away, so there is no separate Settings button
+    $$("[data-acct-set]").forEach(b=>b.addEventListener("click",()=>{
+      const k=b.dataset.acctSet;
+      route("settings");
+      setTimeout(()=>$(".snav[data-set='"+k+"']")?.click(),0);
     }));
     $$("[data-save-toast]").forEach(b=>b.addEventListener("click",()=>toast(t("p_savedToast"))));
     $$("[data-help-contact]").forEach(b=>b.addEventListener("click",contactSupport));
