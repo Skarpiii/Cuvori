@@ -24,7 +24,7 @@ export default safe(async (req) => {
   }
   if (!acct) {
     acct = await stripe("POST", "/accounts", { type: "express", email: me.email, capabilities: { transfers: { requested: true } },
-      business_type: "individual", metadata: { cuvori_user: me.id }, settings: { payouts: { schedule: { interval: "daily" } } } }, { idempotency: `acct_${me.id}` });
+      business_type: "individual", metadata: { cuvori_user: me.id }, settings: { payouts: { schedule: { interval: "daily" } } } }, { idempotency: `acct2_${me.id}` });
     if (payout) await db.update("payout_details", `id=eq.${me.id}`, { stripe_account_id: acct.id });
     else await db.insert("payout_details", { id: me.id, methods: [], note: "", stripe_account_id: acct.id });
   }
