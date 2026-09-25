@@ -32,18 +32,22 @@ export default safe(async (req) => {
   const currency = (c.currency || "EUR").toLowerCase();
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: `Order: ${String(c.title || "").slice(0, 180) || "Cuvori order"}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing (charged by the payment provider, not Cuvori)" } } });
+  // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
+  // replays the answer for the same idempotency key). That needs the same request each time, so the expiry
+  // is a fixed point 60–90 min ahead rather than "now + 30 min".
+  const slot = Math.floor(Date.now() / 1800e3);
   const session = await stripe("POST", "/checkout/sessions", {
     mode: "payment",
     client_reference_id: c.id,
     customer_email: me.email,
-    expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    expires_at: (slot + 3) * 1800,
     payment_method_types: ["card"],
     success_url: `${SITE_URL}/#orders?paid=${c.id}`,
     cancel_url: `${SITE_URL}/#orders?cancelled=${c.id}`,
     line_items: items,
     payment_intent_data: { transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
     metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind },
-  }, { idempotency: `checkout_${c.id}_${kind}_${amount}_${fee}_${me.id}_${Math.floor(Date.now() / 1800e3)}` });
+  }, { idempotency: `checkout_${c.id}_${kind}_${amount}_${fee}_${me.id}_${slot}` });
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
   const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&amount_cents=eq.${price}`, patch);

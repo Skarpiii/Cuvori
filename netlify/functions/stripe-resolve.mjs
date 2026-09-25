@@ -1,7 +1,7 @@
 // POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
 // Decides a dispute (release / refund / split), and can take over a release that got stuck before any
 // transfer was made (freelancer's account closed, for example) so the client is not left waiting for ever.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf, lockOrder } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -35,13 +35,20 @@ export default safe(async (req) => {
     const refundCents = total - editorCents;
     const now = new Date().toISOString();
     const from = ["funded", "delivered", "disputed"];
-    // a release that never got its transfer (no id, none at the provider) can be taken over
-    if (c.status === "releasing" && !c.stripe_transfer_id) {
-      const made = (await transfersOf(c)).filter(t => !t.reversed && !(t.metadata.milestone_id || ""));
-      if (made.length) return bad("A transfer for this order already exists at the provider; let the release finish (it is retried every hour)", 409);
-      from.push("releasing");
-    }
-    row = await db.claim(c.id, from, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, money_error: null });
+    // under the order lock: a release that is being finished right now (the client's retry, the hourly job) cannot
+    // land its transfer between this check and the claim
+    const unlock = await lockOrder(c.id);
+    try {
+      // a release that never got its transfer (no id, none at the provider) can be taken over
+      if (c.status === "releasing" && !c.stripe_transfer_id) {
+        const made = (await transfersOf(c)).filter(t => !t.reversed && !(t.metadata.milestone_id || ""));
+        if (made.length) return bad("A transfer for this order already exists at the provider; let the release finish (it is retried every hour)", 409);
+        from.push("releasing");
+      }
+      // a fresh decision: ids left by an interrupted earlier settlement must not make this one skip a move (what they
+      // moved is already in the counters; the provider is asked before any transfer or refund is made anyway)
+      row = await db.claim(c.id, from, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, money_error: null, stripe_transfer_id: null, stripe_refund_id: null });
+    } finally { await unlock(); }
     if (!row) return bad("This order is not holding money", 409);
     row.was_disputed = c.status === "disputed";
   }

@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, payoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, payoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -21,9 +21,9 @@ export default async () => {
     try {
       if (chargebackOpen(c)) { skipped.push({ id: c.id, why: "chargeback open" }); continue; }
       const cents = heldCents(c);
-      if (!cents) throw new Error("amount missing");
       let row = c;
       if (c.status === "delivered") {
+        if (!cents) throw new Error("amount missing");
         if (await isBanned(c.editor)) { failed.push({ id: c.id, why: "freelancer banned" }); continue; }
         const acct = await payoutAccount(c.editor);
         if (!accountReady(acct)) { failed.push({ id: c.id, why: "freelancer account not ready" }); continue; }
@@ -51,6 +51,20 @@ export default async () => {
       await releaseMilestone(c, m, null, m.status === "approved" ? "approve" : "auto_release");
       done.push(m.id);
     } catch (e) { failed.push({ id: m.id, why: e.message }); console.error("milestone auto-release failed for", m.id, e.message); }
+  }
+  // chargebacks whose pull-back from the freelancer did not go through at the time (provider said no, or did not answer)
+  const owedBack = (await db.select("contracts", `chargeback_status=eq.open&payment_mode=eq.escrow&money_error=like.chargeback:*&select=id,chargeback_id,money_error&limit=20`).catch(() => [])) || [];
+  for (const c of owedBack) {
+    if (!String(c.money_error || "").startsWith("chargeback:")) continue;
+    try { await coverChargeback(c.id, c.chargeback_id); done.push(c.id); }
+    catch (e) { failed.push({ id: c.id, why: e.message }); console.error("pull-back retry failed for", c.id, e.message); }
+  }
+  // freelancers still owed a re-payment after a won chargeback (the provider could not pay at the time)
+  const owed = (await db.select("contracts", `chargeback_status=eq.won&payment_mode=eq.escrow&money_error=like.chargeback%20won*&select=*&limit=20`).catch(() => [])) || [];
+  for (const c of owed) {
+    if (!String(c.money_error || "").startsWith("chargeback won")) continue;
+    try { if (await repayWon(c)) done.push(c.id); else failed.push({ id: c.id, why: c.money_error }); }
+    catch (e) { failed.push({ id: c.id, why: e.message }); console.error("re-payment retry failed for", c.id, e.message); }
   }
   return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired });
 };
