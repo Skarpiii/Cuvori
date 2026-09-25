@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-C5T0iZ3k7di5NjtbxXhIADz5OhH6xp/Qsnf2coDWWJ8=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-ciCVK1mqCXnSCI/uC4WDd6nhH7FpcZ6uJ6fuJ8joCTc=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -355,6 +355,18 @@
     .timeline{height:10px;border-radius:99px;background:var(--panel-3);position:relative;margin:14px 0 24px}
     .timeline .marker{position:absolute;top:-5px;width:19px;height:19px;background:var(--warn);border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.2);transform:translateX(-50%)}
     .modal.wide{width:min(1180px,96vw)}
+    /* "pop": a small panel that drops down under the top-right buttons instead of a centred dialog */
+    .modal-backdrop.pop{background:rgba(11,18,32,.14);backdrop-filter:none;place-items:start end;padding:calc(var(--header-h) + 8px) 14px 18px}
+    .modal.pop{width:min(380px,calc(100vw - 28px));max-height:min(72vh,600px);border-radius:16px}
+    .modal.pop .modal-head{padding:12px 16px;font-size:15px}
+    .modal.pop .modal-body{padding:10px}
+    .acct-menu{display:grid;gap:2px}
+    .acct-menu .who{padding:8px 10px 12px;border-bottom:1px solid var(--line);margin-bottom:6px}
+    .acct-menu .who strong{display:block;font-size:15px}
+    .acct-menu button{text-align:left;background:transparent;border:0;color:var(--text);padding:10px 12px;border-radius:10px;font-weight:650;font-size:14px}
+    .acct-menu button:hover{background:var(--panel-2)}
+    .acct-menu .sep{height:1px;background:var(--line);margin:6px 4px}
+    .acct-menu .danger-text{color:#b42318}
     .review-layout{display:grid;grid-template-columns:minmax(0,1.6fr) 340px;gap:18px;align-items:start}
     .review-video-wrap{position:relative;background:#000;border-radius:14px;overflow:hidden}
     .review-video{width:100%;display:block;aspect-ratio:16/9;background:#000}
@@ -929,9 +941,9 @@
       <button class="primary dark" id="createAccountBtn" data-route="create-account" data-auth-open="signup" data-i18n="createAccount">Create account</button>
       <button id="messagesBtn" class="icon-btn attention" aria-label="Messages" title="Messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="badge" id="messageBadge">2</span></button>
       <button id="notificationsBtn" class="icon-btn attention" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="badge" id="notifBadge">!</span></button>
-      <button class="icon-btn m-avatar hidden" id="mAvatarBtn" data-route="account" aria-label="Account"><span class="account-avatar">EG</span></button>
+      <button class="icon-btn m-avatar hidden" id="mAvatarBtn" data-acct-menu aria-label="Account"><span class="account-avatar">EG</span></button>
       <button class="icon-btn m-signout hidden" id="signOutBtnH" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></button>
-      <button class="secondary account-btn" data-route="account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span data-i18n="account">Account</span></button>
+      <button class="secondary account-btn" data-acct-menu><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span data-i18n="account">Account</span></button>
       <div class="quick-flags" id="quickFlags"></div>
       <div class="lang-menu">
         <button id="langBtn" class="lang-btn">EN ▾</button>
@@ -3235,7 +3247,7 @@
   function openModal(title, bodyHtml, onReady, cls){
     const locked=String(cls||"").includes("locked");   // has to be answered: no × and no click-away
     $("#modalRoot").innerHTML = `
-      <div class="modal-backdrop">
+      <div class="modal-backdrop ${String(cls||"").includes("pop")?"pop":""}">
         <div class="modal ${cls||""}">
           <div class="modal-head"><strong>${escapeHtml(title)}</strong>${locked?"":`<button class="close-x" data-close-modal>×</button>`}</div>
           <div class="modal-body">${bodyHtml}</div>
@@ -4070,7 +4082,40 @@
       bindRecoButtons(root);
       const seen=JSON.parse(localStorage.getItem("cuvoriSeenConvs")||"{}"); Object.values(state.convs).forEach(c=>seen[c.id]=new Date().toISOString()); localStorage.setItem("cuvoriSeenConvs",JSON.stringify(seen));
       state.unreadMsgs=0; updateNotifBadge();
-    });
+    },"pop");
+  }
+
+  // ---- the Account button: a small menu that drops down under it ----
+  function openAccountMenu(){
+    if(!signedIn()){ route("create-account"); return; }
+    const p=state.auth.profile||{};
+    const item=(k,label,cls)=>`<button type="button" data-am="${k}" class="${cls||""}">${escapeHtml(label)}</button>`;
+    const html=`<div class="acct-menu">
+      <div class="who"><strong>${escapeHtml(displayName())}</strong><span class="muted small">${escapeHtml(p.email||"")}</span></div>
+      ${item("account",t("account"))}
+      ${(REAL&&isEditor())?item("profile",t("myProfileBtn")):""}
+      ${item("contracts",t("contracts"))}
+      ${isAdmin()?item("admin",t("adminPanel")):""}
+      <div class="sep"></div>
+      ${item("set:password",t("settingChangePassword"))}
+      ${item("set:notifications",t("p_setNotifications"))}
+      ${item("set:language",t("language"))}
+      ${(REAL&&isEditor())?item("set:payout",t("pay_title")):""}
+      ${item("set:help",t("settingHelp"))}
+      <div class="sep"></div>
+      ${item("signout",t("signOut"),"danger-text")}
+    </div>`;
+    openModal(t("account"), html, root=>{
+      $$("[data-am]",root).forEach(b=>b.addEventListener("click",async()=>{
+        const k=b.dataset.am; closeModal();
+        if(k==="account") return route("account");
+        if(k==="profile"){ if(REAL){ await loadOwnEditorProfile(); } return openProfile(ownKey()); }
+        if(k==="contracts") return route("contracts");
+        if(k==="admin") return openAdmin();
+        if(k==="signout") return $("#signOutBtn")?.click();
+        if(k.startsWith("set:")){ const pane=k.slice(4); route("settings"); setTimeout(()=>$(".snav[data-set='"+pane+"']")?.click(),0); }
+      }));
+    }, "pop");
   }
   function showNotifications(){
     if(REAL) return showNotificationsReal();
@@ -4084,7 +4129,7 @@
       bindRecoButtons(root);
       state.notifications.forEach(n=>n.unread=false);
       updateNotifBadge();
-    });
+    },"pop");
   }
 
   // ---------- Real accounts (Supabase). Falls back to demo mode when not configured. ----------
@@ -5175,8 +5220,10 @@
         <div><label>${t("d_respondsHours")}</label><input id="epResp" type="number" min="1" value="${r.responds_hours||24}"></div>
         <div><label>${t("d_revisions")}</label><input id="epRev" type="number" min="0" value="${r.revisions!=null?r.revisions:2}"></div>
         <div><label class="switch-row" style="border:0;padding:8px 0"><span><strong>${t("d_public")}</strong><span class="muted small">${t("d_publicHint")}</span></span><input type="checkbox" class="switch" id="epPublic" ${r.is_public?"checked":""}></label></div>
+        ${(REAL&&isEditor())?`<div style="grid-column:1/-1" id="epPayout"><label>${t("pay_title")}</label><div class="muted small" style="margin:-2px 0 8px">${t("pay_desc")}</div><div id="epStripeBox" class="hidden"></div><div id="epPayRows" style="margin-top:10px"></div><button type="button" class="secondary small-btn" id="epAddPay">${t("pay_add")}</button><div style="margin-top:10px"><label>${t("pay_noteLabel")}</label><textarea id="epPayNote" maxlength="500" style="min-height:60px" placeholder="${escapeHtml(t("pay_notePh"))}"></textarea></div></div>`:""}
       </div>
       <button class="primary" id="epSave" style="margin-top:14px">${t("p_saveChanges")}</button>`, root=>{
+        if($("#epPayout",root)){ (async()=>{ await loadPayout(); renderPayoutRows($("#epPayRows",root)); $("#epPayNote",root).value=PAYOUT.note||""; renderStripeBox($("#epStripeBox",root)); })(); $("#epAddPay",root).addEventListener("click",()=>{ collectPayoutFrom($("#epPayRows",root),$("#epPayNote",root)); PAYOUT.methods.push({type:"bank",details:""}); renderPayoutRows($("#epPayRows",root)); }); }
         tagInputBind(root,"epLangTags",(filterDef("languages")||{}).options||[]);
         avBindPicker(root); svcBind(root);
         $("#epAddCred",root).addEventListener("click",()=>{ $("#epCreds",root).insertAdjacentHTML("beforeend",credRowHtml({},p.projects)); $("#epCreds .cred-row:last-child .cr-title",root).focus(); });
@@ -5198,6 +5245,7 @@
           if(!r.id && !r.display_name){ upd.rate_amount=services[0].rate_amount; if(["hour","project","day"].includes(services[0].rate_unit)) upd.rate_unit=services[0].rate_unit; }
           const { error } = await sb.from("editor_profiles").upsert(upd);
           if(error){ toast(errText(error)); console.error(error); return; }
+          if($("#epPayout",root)) await savePayout($("#epPayRows",root),$("#epPayNote",root));   // the payout details on the same form
           if(!(await svcSave(services))) return;
           if(root.dataset.avTouched==="1"){ const a=avReadPicker(root); await avSaveStatus(a.availability, a.free_from); }
           closeModal(); toast(t("d_profileSaved"));
@@ -5755,19 +5803,23 @@
   function payoutRowHtml(m,i){
     return `<div class="payout-row" data-i="${i}"><select class="po-type">${Object.keys(PAY_TYPES).map(k=>`<option value="${k}" ${m.type===k?"selected":""}>${t(PAY_TYPES[k])}</option>`).join("")}</select><input class="po-details" placeholder="${t("pay_detailsPh")}" value="${escapeHtml(m.details||"")}"><button class="link-btn danger-text po-del" type="button">×</button></div>`;
   }
-  function renderPayoutPane(){
-    const host=$("#payoutRows"); if(!host) return;
+  function renderPayoutRows(host){
+    if(!host) return;
     host.innerHTML=PAYOUT.methods.map(payoutRowHtml).join("")||`<div class="muted small">${t("pay_none")}</div>`;
+    $$(".po-del",host).forEach(b=>b.addEventListener("click",()=>{ collectPayoutFrom(host, host.id==="epPayRows"?$("#epPayNote"):$("#payoutNote")); PAYOUT.methods.splice(+b.closest(".payout-row").dataset.i,1); renderPayoutRows(host); }));
+  }
+  function renderPayoutPane(){
+    renderPayoutRows($("#payoutRows"));
     const n=$("#payoutNote"); if(n) n.value=PAYOUT.note||"";
-    $$(".po-del",host).forEach(b=>b.addEventListener("click",()=>{ collectPayout(); PAYOUT.methods.splice(+b.closest(".payout-row").dataset.i,1); renderPayoutPane(); }));
   }
-  function collectPayout(){
-    PAYOUT.methods=$$("#payoutRows .payout-row").map(r=>({ type:$(".po-type",r).value, details:$(".po-details",r).value.trim() }));
-    PAYOUT.note=($("#payoutNote")||{}).value||"";
+  function collectPayoutFrom(host, noteEl){
+    PAYOUT.methods=$$(".payout-row",host).map(r=>({ type:$(".po-type",r).value, details:$(".po-details",r).value.trim() }));
+    PAYOUT.note=(noteEl||{}).value||"";
   }
-  async function savePayout(){
+  function collectPayout(){ collectPayoutFrom($("#payoutRows"),$("#payoutNote")); }
+  async function savePayout(host, noteEl){
     if(!requireAuth()) return;
-    collectPayout();
+    if(host) collectPayoutFrom(host, noteEl); else collectPayout();
     const methods=PAYOUT.methods.filter(m=>m.details);
     const { error } = await sb.from("payout_details").upsert({ id:myId(), methods, note:PAYOUT.note.trim(), updated_at:new Date().toISOString() });
     if(error){ toast(errText(error)); console.error(error); return; }
@@ -5897,15 +5949,15 @@
 
   // ----- editor: Stripe connect box in Settings → Payout details -----
   let STRIPE_ME=null;
-  function renderStripeBox(){
-    const host=$("#stripeBox"); if(!host) return;
+  function renderStripeBox(hostEl){
+    const host=hostEl||$("#stripeBox"); if(!host) return;
     if(!ESCROW.enabled){ host.classList.add("hidden"); return; }
     host.classList.remove("hidden");
     const s=STRIPE_ME;
     const st = !s||!s.connected ? `<span class="c-status st-proposed">${t("st_notConnected")}</span>` : s.payouts_enabled ? `<span class="c-status st-paid">${t("st_ready")}</span>` : `<span class="c-status st-accepted">${t("st_pending")}</span>`;
     host.innerHTML=`<div class="pay-box"><strong>${t("st_title")}</strong> ${st}<p class="muted small" style="margin:6px 0 10px">${t("st_desc")}</p><button class="primary" id="stripeConnectBtn">${!s||!s.connected?t("st_connect"):s.payouts_enabled?t("st_manage"):t("st_continue")}</button></div>`;
     // Stripe takes a second or two to answer: the button says so and cannot be pressed twice meanwhile
-    $("#stripeConnectBtn").addEventListener("click",async()=>{ const b=$("#stripeConnectBtn"); const label=b.textContent; b.disabled=true; b.textContent=t("st_connecting");
+    $("#stripeConnectBtn",host).addEventListener("click",async()=>{ const b=$("#stripeConnectBtn",host); const label=b.textContent; b.disabled=true; b.textContent=t("st_connecting");
       try{ const j=await fnCall("stripe-connect",{}); if(j.url){ location.href=j.url; return; } }catch(e){ toast(e.message); }
       b.disabled=false; b.textContent=label; });
   }
@@ -5993,7 +6045,7 @@
   function initEscrow(){ loadEscrowStatus(); window.__reloadEscrow=async()=>{ await loadEscrowStatus(); await loadStripeMe(); }; }
 
   function initContracts(){
-    $("#savePayoutBtn")?.addEventListener("click",savePayout);
+    $("#savePayoutBtn")?.addEventListener("click",()=>savePayout());
     $("#addPayoutBtn")?.addEventListener("click",()=>{ collectPayout(); PAYOUT.methods.push({type:"bank",details:""}); renderPayoutPane(); });
   }
 
@@ -7068,7 +7120,7 @@
       ${termsHtml}${histHtml}
       ${hint?`<div class="muted small" style="margin-top:10px">${hint}</div>`:""}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">${actions.map(([a,cls,l])=>`<button class="${cls}" data-caction="${a}">${l}</button>`).join("")}</div>`, root=>{
-        actions.forEach(([a,cls,l,fn])=>{ const btn=root.querySelector(`[data-caction="${a}"]`); if(btn) btn.addEventListener("click",async()=>{ btn.disabled=true; try{ await fn(); }finally{ btn.disabled=false; } }); });
+        actions.forEach(([a,cls,l,fn])=>{ const btn=root.querySelector(`[data-caction="${a}"]`); if(btn) btn.addEventListener("click",async()=>{ const l0=btn.textContent; btn.disabled=true; btn.textContent=t("st_connecting"); try{ await fn(); }finally{ btn.disabled=false; btn.textContent=l0; } }); });
         $("[data-set-open]",root)?.addEventListener("click",()=>{ closeModal(); route("settings"); setTimeout(()=>$(".snav[data-set='payout']")?.click(),50); });
         $$("[data-msact]",root).forEach(btn=>btn.addEventListener("click",async()=>{ const m=ms.find(x=>x.id===btn.dataset.ms); if(!m) return; const a=btn.dataset.msact;
           if(a==="release") return releaseMs(m);
@@ -7268,6 +7320,7 @@
     $("#messagesBtn").addEventListener("click",()=>sidebar(!sidebarIsOpen()));
     $("#closeSidebar").addEventListener("click",()=>sidebar(false));
     $("#notificationsBtn").addEventListener("click",showNotifications);
+    $$("[data-acct-menu]").forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); openAccountMenu(); }));
 
     $$(".contact").forEach(c=>c.addEventListener("click",()=>openChat(c.dataset.person)));
     $("#peopleSearch").addEventListener("input",e=>{
