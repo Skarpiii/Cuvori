@@ -15,7 +15,8 @@ export const SITE_URL = (process.env.SITE_URL || process.env.URL || "https://cuv
 // the page may live on another host (GitHub Pages) and call these functions across origins
 export const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || `${SITE_URL},https://cuvori.io,https://www.cuvori.io`).split(",").map(s => s.trim().replace(/\/$/, "")).filter(Boolean);
 export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
-export const MIN_CENTS = 100, MAX_CENTS = 100000000;
+// Stripe takes at most 999,999.99 per payment, and the processing fee rides on top of the price
+export const MIN_CENTS = 100, MAX_CENTS = 95000000;
 export const HOLDING = ["funded", "delivered", "disputed"];
 
 export function escrowEnabled() { return !!(STRIPE_KEY && SERVICE_KEY); }
@@ -177,6 +178,31 @@ export async function moneyKey(scope) {
   catch (e) { const again = await db.one("money_keys", `scope=eq.${q(scope)}&select=key`); if (again && again.key) return again.key; throw e; }
 }
 export const dropKey = (scope) => db.remove("money_keys", `scope=eq.${q(scope)}`).catch(() => {});
+// A one-time claim: the first caller gets it, every other caller is told no. Postgres decides (the scope is
+// the table's primary key), so two functions running at the same moment cannot both win.
+async function claimScope(scope) {
+  try { await db.insert("money_keys", { scope, key: `claim:${crypto.randomUUID().slice(0, 12)}` }); return true; }
+  catch (e) { if (e.status === 409) return false; throw e; }
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// One money move per Order at a time. A milestone release and a whole-order settlement both read the held
+// amount and then move money; two of them at once could each pass that check. The lock is a money_keys row
+// that the holder removes when done. A second request waits for its turn (up to 5 s, then a plain message);
+// a lock older than 90 s belongs to a function that died and is taken over.
+const LOCK_STALE_MS = 90e3, LOCK_WAIT_MS = 5000, LOCK_POLL_MS = 200;
+export async function lockOrder(id) {
+  const scope = `lock:${id}`;
+  const until = Date.now() + LOCK_WAIT_MS;
+  do {
+    if (await claimScope(scope)) return () => dropKey(scope);
+    const row = await db.one("money_keys", `scope=eq.${q(scope)}&select=created_at`);
+    if (row && row.created_at && Date.now() - Date.parse(row.created_at) > LOCK_STALE_MS) {          // only that stale row, never a fresh one taken meanwhile
+      await db.remove("money_keys", `scope=eq.${q(scope)}&created_at=lt.${q(new Date(Date.now() - LOCK_STALE_MS).toISOString())}`).catch(() => {}); continue;
+    }
+    await sleep(LOCK_POLL_MS);
+  } while (Date.now() < until);
+  throw fail("Another payment step on this order is still running. Please try again in a moment.", 409);
+}
 async function moneyPost(scope, path, body) {
   const key = await moneyKey(scope);
   try { return await stripe("POST", path, body, { idempotency: key }); }
@@ -206,8 +232,11 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   if (!Number.isInteger(editorCents) || editorCents <= 0) throw new Error("bad release amount");
   if (purpose === "release" && editorCents > heldCents(c)) throw new Error("bad release amount");
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
+  // a transfer for the same milestone / the same settlement attempt is never made twice. Whole-order releases carry
+  // the attempt (the decision's timestamp): a later, different decision on the same Order may transfer again.
+  const attemptTag = milestoneId || purpose !== "release" ? "" : String(c.resolved_at || "");
   const existing = await transfersOf(c);
-  const prior = existing.find(t => !t.reversed && (t.metadata.milestone_id || "") === (milestoneId || "") && (t.metadata.purpose || "release") === purpose);
+  const prior = existing.find(t => !t.reversed && (t.metadata.milestone_id || "") === (milestoneId || "") && (t.metadata.purpose || "release") === purpose && (!t.metadata.attempt || t.metadata.attempt === attemptTag));
   if (prior) { if (prior.amount !== editorCents) throw new Error(`transfer ${prior.id} exists with a different amount`); return prior.id; }
   const acct = await payoutAccount(c.editor);
   if (!accountReady(acct)) throw fail(NOT_READY);
@@ -217,9 +246,9 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   const charges = [...new Set(funds.map(f => f.charge_ref).filter(isStripeId))]; if (!charges.length && isStripeId(c.stripe_charge_id)) charges.push(c.stripe_charge_id);
   const fundedFrom = funds.length ? funds.length : (c.stripe_payment_intent ? 1 : 0);
   const source = purpose === "release" && charges.length === 1 && fundedFrom <= 1 ? charges[0] : undefined;
-  const scope = `transfer:${c.id}:${milestoneId || ""}:${purpose}`;
+  const scope = `transfer:${c.id}:${milestoneId || ""}:${purpose}${attemptTag ? ":" + attemptTag : ""}`;
   const body = { amount: editorCents, currency: (c.currency || "EUR").toLowerCase(), destination: acct.id, transfer_group: `contract_${c.id}`,
-    description: `Cuvori order ${c.id}${milestoneId ? " milestone " + milestoneId : ""}`, metadata: { contract_id: c.id, milestone_id: milestoneId || "", purpose } };
+    description: `Cuvori order ${c.id}${milestoneId ? " milestone " + milestoneId : ""}`, metadata: { contract_id: c.id, milestone_id: milestoneId || "", purpose, attempt: attemptTag } };
   const attempt = async (src, sc) => moneyPost(sc, "/transfers", src ? { ...body, source_transaction: src } : body);
   try {
     try { return (await attempt(source, scope)).id; }
@@ -236,34 +265,41 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   }
 }
 // Give money back to the client: spread over the payments it came from (top-ups first), each one only
-// as far as that payment still allows. Returns the refund ids.
+// as far as that payment still allows. Money already given back from the Stripe dashboard (not by Cuvori)
+// is already out of the held amount, so it only shrinks what a payment can still return; Cuvori's own
+// earlier refunds count towards the plan, so a retry never pays twice. Returns the refund ids.
+const OURS = (r) => !!(r.metadata && (r.metadata.contract_id || r.metadata.reason));
 export async function refundToClient(c, cents) {
   if (!Number.isInteger(cents) || cents <= 0) throw new Error("bad refund amount");
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
   const funds = await fundRows(c);
   const sources = funds.length ? funds.map(f => ({ pi: f.provider_ref, amount: f.amount_cents })).reverse() : (c.stripe_payment_intent ? [{ pi: c.stripe_payment_intent, amount: nz(c.funded_cents) || centsOf(c) || 0 }] : []);
   if (!sources.length) throw new Error("no payment to refund");
-  // what each payment should have given back once this refund is complete (deterministic, so a retry lands on the same plan)
-  let left = cents; const plan = [];
-  for (const s of sources) { if (left <= 0) break; if (!isPi(s.pi)) continue; const part = Math.min(left, s.amount); plan.push({ pi: s.pi, cents: part }); left -= part; }
-  if (left > 0) throw new Error("refund exceeds what was paid");
-  const ids = [];
   try {
-    for (const p of plan) {
-      const existing = await stripe("GET", "/refunds", { payment_intent: p.pi, limit: 50 });
-      const ours = (existing.data || []).filter(r => r.metadata && r.metadata.contract_id === c.id && !r.metadata.reason && r.status !== "failed" && r.status !== "canceled");
-      const done = ours.reduce((a, r) => a + r.amount, 0);
-      if (done >= p.cents) { ids.push(...ours.map(r => r.id)); continue; }
-      const r = await moneyPost(`refund:${c.id}:${p.pi}:${done}`, "/refunds", { payment_intent: p.pi, amount: p.cents - done, metadata: { contract_id: c.id } });
-      ids.push(...ours.map(x => x.id), r.id);
+    for (const s of sources) {
+      if (!isPi(s.pi)) continue;
+      const existing = ((await stripe("GET", "/refunds", { payment_intent: s.pi, limit: 50 })).data || []).filter(r => r.status !== "failed" && r.status !== "canceled");
+      s.outside = Math.min(existing.filter(r => !OURS(r)).reduce((a, r) => a + r.amount, 0), s.amount);
+      s.done = existing.filter(OURS).reduce((a, r) => a + r.amount, 0);
+      s.ids = existing.filter(OURS).map(r => r.id);
     }
+    // what each payment should have given back once this refund is complete (deterministic, so a retry lands on the same plan)
+    let left = cents; const plan = [];
+    for (const s of sources) { if (left <= 0) break; if (!isPi(s.pi)) continue; const part = Math.min(left, s.amount - s.outside); if (part <= 0) continue; plan.push({ ...s, cents: part }); left -= part; }
+    if (left > 0) throw new Error("refund exceeds what was paid");
+    const ids = [];
+    for (const p of plan) {
+      if (p.done >= p.cents) { ids.push(...p.ids); continue; }
+      const r = await moneyPost(`refund:${c.id}:${p.pi}:${p.done}`, "/refunds", { payment_intent: p.pi, amount: p.cents - p.done, metadata: { contract_id: c.id } });
+      ids.push(...p.ids, r.id);
+    }
+    return ids.join(",");
   } catch (e) {
     if (stripeCode(e) === "balance_insufficient" || /insufficient funds/i.test(e.message)) throw fail("The payment provider cannot pay this refund yet (balance still settling). Cuvori retries every hour.");
     if (stripeCode(e) === "charge_disputed" || /charged back/i.test(e.message)) throw fail(CHARGEBACK);
     if (e.network) throw fail("The payment provider did not answer. Nothing was lost — please try again in a minute.", 503);
     throw e;
   }
-  return ids.join(",");
 }
 // Take money back from the freelancer's account (a chargeback after a release). Newest transfers first.
 export async function reverseTransfers(c, cents, why) {
@@ -280,38 +316,89 @@ export async function reverseTransfers(c, cents, why) {
 
 // Finish an Order that is in 'releasing' / 'resolving' using the amounts recorded when it was claimed.
 // Whatever was already released for milestones stays where it is; this settles the remainder.
-export async function settle(c, actor, ev) {
+export async function settle(c0, actor, ev) {
+  const unlock = await lockOrder(c0.id);
+  try { return await settleLocked(c0, actor, ev); } finally { await unlock(); }
+}
+async function settleLocked(c0, actor, ev) {
+  // fresh row: the amounts were decided when the Order was claimed, and a milestone release that was already
+  // running at that moment may have moved money since. Whatever is settled here never exceeds what is held now.
+  let c = (await db.contract(c0.id)) || c0;
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
-  const editorCents = c.split_editor_cents || 0, refundCents = c.refund_cents || 0;
-  if (editorCents + refundCents > heldCents(c)) throw new Error("settlement exceeds held amount");
+  if (c.status !== c0.status) throw fail("The order changed a moment ago — reload the page.", 409);
+  const editorCents = nz(c.split_editor_cents), refundCents = nz(c.refund_cents);
+  const now = new Date().toISOString();
+  // Each money move is written into the counters and the ledger the moment it succeeds, so an interrupted
+  // settlement (transfer made, refund refused) leaves books that are right, and a later decision or chargeback
+  // works from them. A move whose id is on the row but not in the ledger (recorded by an older version) is counted now.
   let transferId = c.stripe_transfer_id, refundId = c.stripe_refund_id;
+  const rows = (await db.select("order_payments", `order_id=eq.${c.id}&status=eq.succeeded&select=kind,provider_ref,amount_cents`)) || [];
+  const sumOf = (kind) => rows.filter(r => r.kind === kind).reduce((a, r) => a + r.amount_cents, 0);
+  const inLedger = (kind, ref) => !!ref && rows.some(r => r.kind === kind && r.provider_ref === String(ref).slice(0, 200));
+  // a move is counted when its ledger line exists — or when the counter is already ahead of the ledger by at least
+  // its amount (counter written, line lost): then only the line is missing. Anything else on the row is counted now.
+  const line = async (kind, cents, ref) => db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind, amount_cents: cents, provider_ref: String(ref).slice(0, 200), note: ev }).catch(e => console.error("ledger", e.message));
+  const gapE = nz(c.released_cents) - (sumOf("release") - sumOf("reversal")), gapR = nz(c.refunded_cents) - sumOf("refund") - sumOf("chargeback");
+  let doneT = inLedger("release", transferId), doneR = inLedger("refund", refundId);
+  if (!doneT && transferId && editorCents > 0 && gapE >= editorCents) { await line("release", editorCents, transferId); doneT = true; }
+  if (!doneR && refundId && refundCents > 0 && gapR >= refundCents) { await line("refund", refundCents, refundId); doneR = true; }
+  // a whole-order transfer at the provider that the books do not show (an earlier decision that broke off before it
+  // could be written down) is the freelancer's money already: it is counted before anything else moves
+  for (const t of (await transfersOf(c)).filter(t => !t.reversed && !(t.metadata.milestone_id || "") && (t.metadata.purpose || "release") === "release" && t.metadata.attempt && t.metadata.attempt !== String(c.resolved_at || "") && !rows.some(r => r.kind === "release" && r.provider_ref === t.id))) {
+    const net = t.amount - nz(t.amount_reversed);
+    if (net <= 0) continue;
+    const upd = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { released_cents: nz(c.released_cents) + net });
+    if (!upd || !upd[0]) throw new Error("order changed during settlement");
+    c = upd[0]; await line("release", net, t.id); console.error("counted a transfer the books did not show", c.id, t.id, net);
+  }
+  let pendE = doneT ? 0 : editorCents, pendR = doneR ? 0 : refundCents;
+  const held = heldCents(c);
+  if (pendE + pendR > held) {
+    // less is held than when the decision was made: what is still to move shrinks in the same proportion
+    const e2 = pendE + pendR > 0 ? Math.min(Math.round(held * pendE / (pendE + pendR)), held) : 0, r2 = held - e2;
+    console.error("settlement adjusted to what is held", c.id, { pendE, pendR, held, e2, r2 });
+    pendE = e2; pendR = r2;
+    await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { split_editor_cents: (doneT ? editorCents : 0) + pendE, refund_cents: (doneR ? refundCents : 0) + pendR });
+  }
+  const count = async (kind, cents, ref) => {
+    const field = kind === "release" ? "released_cents" : "refunded_cents";
+    const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { [kind === "release" ? "stripe_transfer_id" : "stripe_refund_id"]: String(ref).slice(0, 200), [field]: nz(c[field]) + cents, funded_cents: nz(c.funded_cents) || centsOf(c) || 0 });
+    if (!rows || !rows[0]) throw new Error("order changed during settlement");
+    c = rows[0];
+    await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind, amount_cents: cents, provider_ref: String(ref).slice(0, 200), note: ev });
+  };
   try {
-    if (editorCents > 0 && !transferId) { transferId = await releaseToEditor(c, editorCents); await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { stripe_transfer_id: transferId }); }
-    if (refundCents > 0 && !refundId) { refundId = await refundToClient(c, refundCents); await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { stripe_refund_id: refundId }); }
+    if (pendE > 0) { if (!transferId) transferId = await releaseToEditor(c, pendE); await count("release", pendE, transferId); }
+    if (pendR > 0) { if (!refundId) refundId = await refundToClient(c, pendR); await count("refund", pendR, refundId); }
   } catch (e) {
     await db.update("contracts", `id=eq.${c.id}`, { money_error: String(e.message).slice(0, 300) }).catch(() => {});
     throw e;
   }
-  const now = new Date().toISOString();
-  const u = (await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { status: editorCents > 0 ? "completed" : "refunded",
-    completed_at: editorCents > 0 ? now : null, closed_at: now, resolved_at: now, money_error: null, auto_release_at: null,
-    released_cents: nz(c.released_cents) + editorCents, refunded_cents: nz(c.refunded_cents) + refundCents,
+  const movedE = (doneT ? editorCents : 0) + pendE, movedR = (doneR ? refundCents : 0) + pendR;
+  // the decision names the outcome; when nothing was left to move (milestones took it all), whoever has the money does
+  const paid = movedE + movedR > 0 ? movedE > 0 : nz(c.released_cents) > 0;
+  const u = (await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { status: paid ? "completed" : "refunded",
+    completed_at: paid ? now : null, closed_at: now, resolved_at: now, money_error: null, auto_release_at: null,
     funded_cents: nz(c.funded_cents) || centsOf(c) || 0 }))[0];
   if (!u) { await db.update("contracts", `id=eq.${c.id}`, { money_error: `settled at the provider (${transferId || ""} ${refundId || ""}) but the order changed meanwhile — check by hand` }).catch(() => {}); throw new Error("order changed during settlement"); }
-  if (u) {
-    if (editorCents > 0) await ledger(u, { kind: "release", amount_cents: editorCents, provider_ref: transferId, note: ev });
-    if (refundCents > 0) await ledger(u, { kind: "refund", amount_cents: refundCents, provider_ref: String(refundId).slice(0, 200), note: ev });
-    await orderEvent(u, ev === "approve" ? "released" : ev === "auto_release" ? "auto_released" : ev.startsWith("resolved") ? "resolved" : ev, { editor_cents: editorCents, refund_cents: refundCents, decision: u.resolution }, actor);
-    await contractEvent(u, ev, actor, { amount_cents: editorCents || refundCents });
-  }
+  await orderEvent(u, ev === "approve" ? "released" : ev === "auto_release" ? "auto_released" : ev.startsWith("resolved") ? "resolved" : ev, { editor_cents: movedE, refund_cents: movedR, decision: u.resolution }, actor);
+  await contractEvent(u, ev, actor, { amount_cents: movedE || movedR });
   return u;
 }
 
 // Release one milestone: transfer its amount, mark it released, add it to the Order's counters.
 // When it was the last one the Order is complete.
-export async function releaseMilestone(c, m, actor, ev) {
-  if (!m || m.order_id !== c.id) throw fail("Milestone does not belong to this order", 409);
+export async function releaseMilestone(c0, m, actor, ev) {
+  if (!m || m.order_id !== c0.id) throw fail("Milestone does not belong to this order", 409);
   if (!["submitted", "approved"].includes(m.status)) throw fail("This milestone is not waiting for approval", 409);
+  const unlock = await lockOrder(c0.id);
+  try { return await releaseMilestoneLocked(c0, m, actor, ev); } finally { await unlock(); }
+}
+async function releaseMilestoneLocked(c0, m, actor, ev) {
+  // fresh row under the lock: another milestone, a refund or a chargeback may have moved money since the caller looked
+  const c = await db.contract(c0.id);
+  if (!c) throw fail("Order not found", 404);
+  if (!["funded", "delivered"].includes(c.status)) throw fail("Nothing to release right now", 409);
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
   if (m.amount_cents > heldCents(c)) throw fail("Not enough money is held for this milestone", 409);
   const claimed = await db.claimMilestone(m.id, ["submitted", "approved"], { status: "approved", approved_at: m.approved_at || new Date().toISOString(), auto_release_at: null });
@@ -362,7 +449,16 @@ export async function applyPaidSession(s) {
   // sessions made before v18 carry no amounts in their metadata: the Order row has them
   const amount = md.amount_cents != null ? Number(md.amount_cents) : centsOf(c), fee = md.fee_cents != null ? Number(md.fee_cents) : (Number.isInteger(c.fee_cents) ? c.fee_cents : 0);
   const expected = kind === "fund" ? centsOf(c) : Math.max((centsOf(c) || 0) - nz(c.funded_cents), 0);
-  const amountOk = Number.isInteger(amount) && amount > 0 && (kind === "fund" ? amount === expected : amount <= expected);   // a top-up may be part of what is owed
+  const scope = `apply:${s.payment_intent}`;
+  let amountOk = Number.isInteger(amount) && amount > 0 && (kind === "fund" ? amount === expected : amount <= expected);   // a top-up may be part of what is owed
+  if (!amountOk && kind === "topup" && Number.isInteger(amount) && amount > 0) {
+    // "more than what is owed" is also what this very payment looks like right after another delivery counted it
+    // but before its ledger line landed (or when that delivery died in between). A claim row for this payment
+    // plus a counter that is ahead of the ledger by at least this amount says so: not a stray payment.
+    const claim = await db.one("money_keys", `scope=eq.${q(scope)}&select=created_at`);
+    const gap = nz(c.funded_cents) - (await fundRows(c)).reduce((a, f) => a + f.amount_cents, 0);
+    if (claim && gap >= amount) amountOk = true;
+  }
   if (!amountOk || s.amount_total !== amount + fee || String(s.currency).toLowerCase() !== String(c.currency || "EUR").toLowerCase() || c.payment_mode !== "escrow")
     return refundOrphan(s, `amount/currency mismatch ${s.amount_total} ${s.currency} vs ${expected}+${fee}`);
   let charge = null;
@@ -377,15 +473,47 @@ export async function applyPaidSession(s) {
       return refundOrphan(s, `order is ${now && now.status}`);                        // cancelled / already funded by another session
     }
   } else {
-    const rows = await db.update("contracts", `id=eq.${id}&status=in.(funded,delivered)&funded_cents=eq.${nz(c.funded_cents)}`, { funded_cents: nz(c.funded_cents) + amount });
-    u = rows && rows[0];
-    if (!u) {
-      const again = await db.one("order_payments", `order_id=eq.${id}&provider_ref=eq.${q(s.payment_intent)}&select=id`);
-      if (again) return "already";
-      return refundOrphan(s, `top-up no longer applies (order is ${c.status})`);
+    // A top-up counts once. The same paid session is delivered twice at the same moment as a rule (Stripe's
+    // webhook and the page's own check): the first to claim the payment records it, the other waits for that
+    // record. Nothing here treats a payment as unwanted while the other delivery may be recording it.
+    const ledgerRow = { order_id: id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind };
+    const topupRow = () => db.one("order_payments", `order_id=eq.${id}&provider_ref=eq.${q(s.payment_intent)}&select=id`);
+    if (!(await claimScope(scope))) {
+      for (let i = 0; i < 15; i++) { if (await topupRow()) return "already"; await sleep(400); }
+      // Still no record. The holder of the claim is either slow or died. A claim older than the stale limit is taken
+      // over, and the books decide what is left to do: a counter that already includes this amount without a ledger
+      // line means it died between the two writes — only the line is missing. Otherwise nothing was recorded.
+      const row = await db.one("money_keys", `scope=eq.${q(scope)}&select=created_at`);
+      if (!row || !row.created_at || Date.now() - Date.parse(row.created_at) < LOCK_STALE_MS) return "pending";   // the webhook answers 500 → Stripe sends it again later
+      const fresh = await db.contract(id);
+      if (!fresh) return "pending";
+      const counted = nz(fresh.funded_cents) - (await fundRows(fresh)).reduce((a, f) => a + f.amount_cents, 0);
+      if (counted >= amount) {
+        // only the ledger line is missing; one writer (a second claim decides), and never twice
+        if (await claimScope(`ledger:${s.payment_intent}`)) { if (!(await topupRow())) await db.insert("order_payments", ledgerRow).catch(e => console.error("ledger", e.message)); }
+        if (String(fresh.money_error || "").includes(s.payment_intent)) await db.update("contracts", `id=eq.${id}`, { money_error: null }).catch(() => {});
+        return "already";
+      }
+      await db.remove("money_keys", `scope=eq.${q(scope)}&created_at=lt.${q(new Date(Date.now() - LOCK_STALE_MS).toISOString())}`).catch(() => {});
+      if (!(await claimScope(scope))) return "pending";
     }
+    let cur = c;
+    try {
+      for (let i = 0; i < 6 && !u; i++) {
+        if (i) cur = await db.contract(id);
+        if (!cur || !["funded", "delivered"].includes(cur.status)) break;
+        if (amount > Math.max((centsOf(cur) || 0) - nz(cur.funded_cents), 0)) break;     // no longer owed (paid another way meanwhile)
+        const rows = await db.update("contracts", `id=eq.${id}&status=in.(funded,delivered)&funded_cents=eq.${nz(cur.funded_cents)}`, { funded_cents: nz(cur.funded_cents) + amount })
+          .catch(async (e) => { e.outcomeUnknown = true; await db.update("contracts", `id=eq.${id}`, { money_error: `top-up ${s.payment_intent} may not be recorded — check by hand` }).catch(() => {}); throw e; });
+        u = rows && rows[0] || null;
+      }
+    } catch (e) { if (!e.outcomeUnknown) await dropKey(scope); throw e; }                // nothing was changed: the next delivery starts over
+    if (!u) { await dropKey(scope); return refundOrphan(s, `top-up no longer applies (order is ${cur && cur.status})`); }   // the refund has its own key
+    // the ledger line is the record other deliveries wait for: written right away, and a failure is not silent
+    try { await db.insert("order_payments", ledgerRow); }
+    catch (e) { console.error("ledger", e.message); await db.update("contracts", `id=eq.${id}`, { money_error: `top-up ${s.payment_intent} counted but its ledger line failed — check by hand` }).catch(() => {}); }
   }
-  await ledger(u, { kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind });
+  if (kind === "fund") await ledger(u, { kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind });
   await orderEvent(u, kind === "fund" ? "funded" : "topped_up", { amount_cents: amount, fee_cents: fee, total_cents: amount + fee }, c.client);
   await contractEvent(u, "funded", c.client, { amount_cents: amount });
   const card = charge && charge.payment_method_details && charge.payment_method_details.card;
@@ -394,66 +522,142 @@ export async function applyPaidSession(s) {
 }
 
 // ---- chargebacks: the bank pulls the money back on the client's word; Cuvori answers with the facts ----
+const pendingReversal = (c) => String(c.money_error || "").startsWith("chargeback:");
+const pendingRepay = (c) => String(c.money_error || "").startsWith("chargeback won");
+// an error with no answer from the provider or the database: fail the webhook so Stripe sends the event again
+const retryable = (e) => !!(e && (e.network || !e.status || e.status >= 500));
 export async function onDisputeCreated(o) {
-  const c = await contractByPi(o.payment_intent);
-  if (!c) return "ignored";
-  if (c.chargeback_id === o.id) return "already";
+  const c0 = await contractByPi(o.payment_intent);
+  if (!c0) return "ignored";
+  const retry = c0.chargeback_id === o.id;                                // Stripe sends the event again when the first handling did not finish
+  if (retry && c0.chargeback_status !== "open") return "already";        // decided meanwhile: nothing left to cover
   const cents = Number.isInteger(o.amount) ? o.amount : 0;
-  const base = { chargeback_id: o.id, chargeback_status: "open", chargeback_cents: cents, auto_release_at: null };
-  await db.update("order_milestones", `order_id=eq.${c.id}`, { auto_release_at: null }).catch(() => {});
-  let u = null;
-  if (HOLDING.includes(c.status) || c.status === "releasing" || c.status === "resolving") {
-    u = (await db.update("contracts", `id=eq.${c.id}`, { ...base, status: "disputed", dispute_reason: `Card chargeback ${o.id} (${o.reason || "no reason given"})`, disputed_at: c.disputed_at || new Date().toISOString(), dispute_by: c.dispute_by || c.client }))[0];
-  } else {
-    // the money already went to the freelancer: pull it back so the dispute is covered, then follow the outcome
-    u = (await db.update("contracts", `id=eq.${c.id}`, base))[0];
-    const toReverse = Math.min(nz(c.released_cents), cents || nz(c.released_cents));
-    if (toReverse > 0) {
-      try {
-        const r = await reverseTransfers(c, toReverse, o.id);
-        if (r.reversed > 0) {
-          u = (await db.update("contracts", `id=eq.${c.id}`, { stripe_reversal_id: r.ids.slice(0, 200), released_cents: nz(c.released_cents) - r.reversed }))[0];
-          await ledger(u, { kind: "reversal", amount_cents: r.reversed, provider_ref: r.ids.slice(0, 200), note: `chargeback ${o.id}` });
-        }
-      } catch (e) { console.error("reversal", c.id, e.message); await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback: " + e.message).slice(0, 300) }).catch(() => {}); }
-    }
+  if (!retry) {
+    // the facts first, before any money moves: the Order is frozen, the history and the chat say why, the client is flagged
+    const holding = HOLDING.includes(c0.status) || c0.status === "releasing" || c0.status === "resolving";
+    const base = { chargeback_id: o.id, chargeback_status: "open", chargeback_cents: cents, auto_release_at: null };
+    await db.update("order_milestones", `order_id=eq.${c0.id}`, { auto_release_at: null }).catch(() => {});
+    const u = (await db.update("contracts", `id=eq.${c0.id}`, holding
+      ? { ...base, status: "disputed", dispute_reason: `Card chargeback ${o.id} (${o.reason || "no reason given"})`, disputed_at: c0.disputed_at || new Date().toISOString(), dispute_by: c0.dispute_by || c0.client }
+      : base))[0] || c0;
+    await orderEvent(u, "chargeback", { chargeback: o.id, amount_cents: cents, reason: o.reason || "" }, null);
+    await contractEvent(u, "dispute", c0.client, { amount_cents: cents, label: "chargeback" });
+    const flagged = await db.one("user_flags", `user_id=eq.${c0.client}&contract_id=eq.${c0.id}&kind=eq.chargeback&select=id`);
+    if (!flagged) await db.insert("user_flags", { user_id: c0.client, kind: "chargeback", reason: `Chargeback ${o.id} on "${String(c0.title).slice(0, 120)}" (order was ${c0.status})`, contract_id: c0.id }).catch(() => {});
   }
-  await orderEvent(u || c, "chargeback", { chargeback: o.id, amount_cents: cents, reason: o.reason || "" }, null);
-  await contractEvent(u || c, "dispute", c.client, { amount_cents: cents, label: "chargeback" });
-  const flagged = await db.one("user_flags", `user_id=eq.${c.client}&contract_id=eq.${c.id}&kind=eq.chargeback&select=id`);
-  if (!flagged) await db.insert("user_flags", { user_id: c.client, kind: "chargeback", reason: `Chargeback ${o.id} on "${String(c.title).slice(0, 120)}" (order was ${c.status})`, contract_id: c.id }).catch(() => {});
+  await coverChargeback(c0.id, o.id, cents);
   return "recorded";
 }
+// Money that already went to the freelancer and that the held amount cannot cover is pulled back, so the
+// dispute is covered either way; the outcome decides where it ends up (won: paid again, lost: gone).
+// Under the order lock, from a fresh row, and the books follow what Stripe says was reversed — so a retry
+// after a half-finished attempt (network gone mid-way, a lost answer) records exactly what happened.
+// Called by the webhook, its retries, and the hourly job while `money_error` says a pull-back is owed.
+export async function coverChargeback(id, disputeId, centsHint, pullBack = true) {
+  const unlock = await lockOrder(id);
+  try {
+    let c = await db.contract(id);
+    if (!c || c.chargeback_id !== disputeId) return null;
+    const cents = Number.isInteger(centsHint) && centsHint > 0 ? centsHint : nz(c.chargeback_cents);
+    // 1. the books follow Stripe first, so what follows is decided on the real state (a half-finished earlier attempt included)
+    let st = await syncReversals(c, disputeId); c = st.row;
+    // 2. what still has to come back: while holding, only the part the held amount cannot cover (the held amount is
+    //    taken from Stripe's net transfers too, so a transfer the counters have not caught up with is seen); after a
+    //    release, the disputed amount minus what this dispute already pulled back
+    let need = 0;
+    if (pullBack && c.chargeback_status === "open") {
+      const holding = HOLDING.includes(c.status) || c.status === "releasing" || c.status === "resolving";
+      const fundedNow = nz(c.funded_cents) || (["funded", "delivered", "disputed", "releasing", "resolving"].includes(c.status) ? centsOf(c) || 0 : 0);
+      const heldReal = Math.max(fundedNow - st.net - nz(c.refunded_cents), 0);
+      const already = ((await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&note=eq.${q("chargeback " + disputeId)}&select=amount_cents`)) || []).reduce((a, r) => a + r.amount_cents, 0);
+      need = Math.min(st.net, holding ? Math.max(cents - heldReal, 0) : Math.max((cents || st.net) - already, 0));
+    }
+    let err = null;
+    if (need > 0) {
+      try { await reverseTransfers(c, need, disputeId); } catch (e) { err = e; }
+      st = await syncReversals(c, disputeId); c = st.row;                   // 3. record what happened, whatever the answer was
+    }
+    if (err) {
+      console.error("reversal", c.id, err.message);
+      await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback: " + err.message).slice(0, 300) }).catch(() => {});
+      if (retryable(err)) throw err;
+    } else if (pendingReversal(c)) await db.update("contracts", `id=eq.${c.id}`, { money_error: null }).catch(() => {});
+    return c;
+  } finally { await unlock(); }
+}
+// The books follow Stripe: released_cents becomes what the freelancer has net of every reversal on this Order's
+// transfers, and a ledger line records whatever was reversed since the last one. Both writes land on the same
+// values however often this runs, so a failure here (thrown: the webhook fails, Stripe sends the event again)
+// heals itself on the next run. Called under the order lock.
+async function syncReversals(c, disputeId) {
+  const ts = await transfersOf(c);
+  const atStripe = ts.reduce((a, t) => a + nz(t.amount_reversed), 0);
+  const net = ts.reduce((a, t) => a + t.amount - nz(t.amount_reversed), 0);
+  const recorded = ((await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&select=amount_cents`)) || []).reduce((a, r) => a + r.amount_cents, 0);
+  const delta = atStripe - recorded;
+  let row = c;
+  if (delta > 0) {
+    const ids = ts.filter(t => nz(t.amount_reversed) > 0).map(t => t.id).join(",").slice(0, 200);
+    row = (await db.update("contracts", `id=eq.${c.id}`, { stripe_reversal_id: ids, released_cents: net }))[0] || c;
+    await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind: "reversal", amount_cents: delta, provider_ref: ids, note: `chargeback ${disputeId}` });
+  }
+  return { row, net, atStripe };
+}
 export async function onDisputeClosed(o) {
-  const c = await contractByPi(o.payment_intent);
-  if (!c || c.chargeback_id !== o.id) return "ignored";
+  const c0 = await contractByPi(o.payment_intent);
+  if (!c0 || c0.chargeback_id !== o.id) return "ignored";
   const won = o.status === "won", lost = o.status === "lost";
   if (!won && !lost) return "ignored";
-  if (c.chargeback_status !== "open") return "already";
+  // the books follow Stripe before the outcome is applied (a pull-back that was still owed is made now when the bank sided with the client)
+  await coverChargeback(c0.id, o.id, 0, lost).catch(e => console.error("reversal sync", c0.id, e.message));
+  const c = (await db.contract(c0.id)) || c0;
+  if (c.chargeback_status !== "open") {
+    if (won && c.chargeback_status === "won" && pendingRepay(c)) { await repayWon(c); return "won"; }   // the retry finishes the re-payment
+    return "already";
+  }
   const now = new Date().toISOString();
   if (won) {
     const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_status=eq.open`, { chargeback_status: "won", money_error: null }))[0];
     if (!u) return "already";
-    if (u.status === "disputed") await db.update("contracts", `id=eq.${c.id}`, { dispute_reason: `${u.dispute_reason || ""}\nThe bank sided with Cuvori. Decide the dispute as usual.`.slice(0, 2000) });
-    // money that was pulled back from the freelancer goes to them again
-    const back = (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&select=amount_cents`) || []).reduce((a, r) => a + r.amount_cents, 0) - (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.release&note=eq.chargeback_won&select=amount_cents`) || []).reduce((a, r) => a + r.amount_cents, 0);
-    if (back > 0 && !HOLDING.includes(u.status)) {
-      try {
-        const t = await releaseToEditor(u, back, null, `retransfer_${o.id}`);
-        const v = (await db.update("contracts", `id=eq.${c.id}`, { released_cents: nz(u.released_cents) + back, money_error: null }))[0];
-        await ledger(v, { kind: "release", amount_cents: back, provider_ref: t, note: "chargeback_won" });
-      } catch (e) { console.error("re-pay after won chargeback", c.id, e.message); await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback won, re-payment failed: " + e.message).slice(0, 300) }).catch(() => {}); }
-    }
+    if (u.status === "disputed") await db.update("contracts", `id=eq.${c.id}`, { dispute_reason: `${u.dispute_reason || ""}\nThe bank sided with Cuvori. Decide the dispute as usual${u.stripe_reversal_id ? "; the money pulled back from the freelancer is part of the held amount" : ""}.`.slice(0, 2000) });
     await orderEvent(u, "chargeback_won", { chargeback: o.id }, null);
     await contractEvent(u, "chargeback_won", c.client);
+    await repayWon(u);
     return "won";
   }
   // lost: the bank gave the client the money. What Cuvori held (or pulled back) is gone; nothing else moves.
-  const gone = HOLDING.includes(c.status) ? heldCents(c) : (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&select=amount_cents`) || []).reduce((a, r) => a + r.amount_cents, 0);
-  const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_status=eq.open`, { chargeback_status: "lost", status: "refunded", resolution: "chargeback", closed_at: now, resolved_at: now, auto_release_at: null, refunded_cents: nz(c.refunded_cents) + gone, money_error: gone === 0 && nz(c.released_cents) > 0 ? "chargeback lost; the transfer could not be pulled back — settle by hand" : null }))[0];
+  // (a pull-back that reduced released_cents is inside heldCents now, so it counts as gone too)
+  const gone = HOLDING.includes(c.status) ? heldCents(c) : (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&note=eq.${q("chargeback " + o.id)}&select=amount_cents`) || []).reduce((a, r) => a + r.amount_cents, 0);
+  const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_status=eq.open`, { chargeback_status: "lost", status: "refunded", resolution: "chargeback", closed_at: now, resolved_at: now, auto_release_at: null, refunded_cents: nz(c.refunded_cents) + gone, money_error: pendingReversal(c) || (gone === 0 && nz(c.released_cents) > 0) ? "chargeback lost; the pull-back from the freelancer did not finish — check by hand" : null }))[0];
   if (!u) return "already";
   if (gone > 0) await ledger(u, { kind: "chargeback", amount_cents: gone, provider_ref: o.id, note: "chargeback_lost" });
   await orderEvent(u, "chargeback_lost", { chargeback: o.id, amount_cents: gone }, null);
   await contractEvent(u, "chargeback_lost", c.client, { amount_cents: gone });
   return "lost";
+}
+// The bank sided with Cuvori: money that was pulled back from the freelancer goes to them again — unless the
+// Order is still holding, where it is part of the held amount and the dispute decision moves it. Safe to
+// repeat: the transfer is looked up before it is made, and the ledger says what was already paid again.
+// Called from the webhook, from its retries, and from the hourly job while `money_error` says it is owed.
+export async function repayWon(c0) {
+  const unlock = await lockOrder(c0.id);
+  try { return await repayWonLocked(c0); } finally { await unlock(); }
+}
+async function repayWonLocked(c0) {
+  const c = (await db.contract(c0.id)) || c0;
+  if (c.chargeback_status !== "won") return 0;
+  const rows = (await db.select("order_payments", `order_id=eq.${c.id}&kind=in.(reversal,release)&select=kind,note,amount_cents`)) || [];
+  const back = rows.filter(r => r.kind === "reversal").reduce((a, r) => a + r.amount_cents, 0) - rows.filter(r => r.kind === "release" && r.note === "chargeback_won").reduce((a, r) => a + r.amount_cents, 0);
+  if (back <= 0 || HOLDING.includes(c.status)) { if (pendingRepay(c)) await db.update("contracts", `id=eq.${c.id}`, { money_error: null }).catch(() => {}); return 0; }
+  try {
+    const t = await releaseToEditor(c, back, null, `retransfer_${c.chargeback_id}`);
+    const v = (await db.update("contracts", `id=eq.${c.id}`, { released_cents: nz(c.released_cents) + back, money_error: null }))[0];
+    await ledger(v || c, { kind: "release", amount_cents: back, provider_ref: t, note: "chargeback_won" });
+    return back;
+  } catch (e) {
+    console.error("re-pay after won chargeback", c.id, e.message);
+    await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback won, re-payment failed: " + e.message).slice(0, 300) }).catch(() => {});
+    if (retryable(e)) throw e;                                             // no answer: the webhook fails and Stripe sends the event again
+    return 0;                                                              // a plain no (account not ready, money settling): the hourly job tries again
+  }
 }
