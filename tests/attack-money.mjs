@@ -397,7 +397,9 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(r.status !== 200 || c.chargeback_status !== "open" || !c.money_error || c.released_cents !== 10000, `B26a reversal refused -> webhook ${r.status}, chargeback=${c.chargeback_status}, money_error=${!!c.money_error}, released_cents stays ${c.released_cents}`);
   STRIPE.disputes[ch.id].status = "lost";
   const w = await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.closed", ch, { status: "lost" })));
-  vuln(w.status !== 200 || c.chargeback_status !== "lost" || !/by hand/.test(c.money_error || ""), `B26b then lost -> ${w.status}, chargeback=${c.chargeback_status}, status=${c.status}, admin note=${c.money_error}`);
+  // either the pull-back went through in the meantime (the account had money again) and the books say so, or a person is told
+  const recovered = c.released_cents === 0 && moneyOut(c).transferred === 0 && c.refunded_cents === 10000;
+  vuln(w.status !== 200 || c.chargeback_status !== "lost" || !(recovered || /by hand/.test(c.money_error || "")), `B26b then lost -> ${w.status}, chargeback=${c.chargeback_status}, status=${c.status}, pulled back after all=${recovered}, admin note=${c.money_error}`);
   reset();
 }
 // ---------- B27: the client's return and the webhook land at the same moment

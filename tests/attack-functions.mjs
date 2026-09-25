@@ -24,8 +24,8 @@ const hooks = { stripe: null, db: null };
 const urls = [];
 const tick = () => new Promise(r => setImmediate(r));
 
-function parseFilter(q) { const p = new URLSearchParams(q); const f = []; for (const [k, v] of p) { if (["select", "limit", "order"].includes(k)) continue; const m = v.match(/^(eq|neq|lte|in)\.(.*)$/); if (m) f.push({ k, op: m[1], v: m[1] === "in" ? m[2].replace(/^\(|\)$/g, "").split(",").map(decodeURIComponent) : m[2] }); } return f; }
-const match = (row, f) => f.every(x => x.op === "eq" ? String(row[x.k]) === x.v : x.op === "neq" ? String(row[x.k]) !== x.v : x.op === "in" ? x.v.includes(String(row[x.k])) : x.op === "lte" ? (row[x.k] != null && row[x.k] <= x.v) : true);
+function parseFilter(q) { const p = new URLSearchParams(q); const f = []; for (const [k, v] of p) { if (["select", "limit", "order"].includes(k)) continue; const m = v.match(/^(eq|neq|lte|gte|lt|gt|in|is|like)\.(.*)$/); if (m) f.push({ k, op: m[1], v: m[1] === "in" ? m[2].replace(/^\(|\)$/g, "").split(",").map(decodeURIComponent) : m[2] }); } return f; }
+const match = (row, f) => f.every(x => x.op === "eq" ? String(row[x.k]) === x.v : x.op === "neq" ? String(row[x.k]) !== x.v : x.op === "in" ? x.v.includes(String(row[x.k])) : x.op === "lte" ? (row[x.k] != null && row[x.k] <= x.v) : x.op === "lt" ? (row[x.k] != null && row[x.k] < x.v) : x.op === "gt" ? (row[x.k] != null && row[x.k] > x.v) : x.op === "like" ? new RegExp("^" + decodeURIComponent(x.v).replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$").test(String(row[x.k] ?? "")) : true);
 const res = (status, data) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
 function stripeHandle(path, method, p) {
@@ -35,8 +35,8 @@ function stripeHandle(path, method, p) {
   if (path === "/refunds" && method === "GET") return [200, { data: STRIPE.refunds.filter(r => r.payment_intent === p.get("payment_intent")) }];
   if (/^\/checkout\/sessions\/[^/]+\/expire$/.test(path)) return [200, {}];
   if (path === "/checkout/sessions") { const id = "cs_" + Math.random().toString(36).slice(2, 8); STRIPE.sessions[id] = { id, url: "https://checkout.stripe.com/" + id, client_reference_id: p.get("client_reference_id"), amounts: [p.get("line_items[0][price_data][unit_amount]"), p.get("line_items[1][price_data][unit_amount]")], params: Object.fromEntries(p) }; return [200, STRIPE.sessions[id]]; }
-  if (path.startsWith("/payment_intents/")) return [200, { id: path.split("/")[2], latest_charge: { id: "ch_" + path.split("/")[2].replace(/[^A-Za-z0-9]/g, "") } }];
-  if (path === "/transfers") { const t = { id: "tr_" + Math.random().toString(36).slice(2, 8), amount: +p.get("amount"), amount_reversed: 0, reversed: false, destination: p.get("destination"), contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]"), milestone_id: p.get("metadata[milestone_id]") || "", purpose: p.get("metadata[purpose]") || "release" }, transfer_group: p.get("transfer_group"), source_transaction: p.get("source_transaction") }; STRIPE.transfers.push(t); return [200, t]; }
+  if (path.startsWith("/payment_intents/")) return [200, { id: path.split("/")[2], latest_charge: { id: "ch_" + path.split("/")[2] } }];
+  if (path === "/transfers") { const t = { id: "tr_" + Math.random().toString(36).slice(2, 8), amount: +p.get("amount"), destination: p.get("destination"), contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]") }, transfer_group: p.get("transfer_group"), source_transaction: p.get("source_transaction") }; STRIPE.transfers.push(t); return [200, t]; }
   if (path === "/refunds") { const r = { id: "re_" + Math.random().toString(36).slice(2, 8), amount: +p.get("amount"), contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]") }, payment_intent: p.get("payment_intent"), status: "succeeded" }; STRIPE.refunds.push(r); return [200, r]; }
   return [404, { error: { message: "unknown " + path } }];
 }
@@ -72,7 +72,7 @@ globalThis.fetch = async (url, init = {}) => {
     if (hooks.db) { const h = await hooks.db(method, table, u.search, body); if (h) return h; }
     if (method === "GET") return res(200, rows.filter(r => match(r, f)));
     if (method === "PATCH") { const patch = JSON.parse(body); const o = rows.filter(r => match(r, f)); o.forEach(r => Object.assign(r, patch)); return res(200, o); }
-    if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { message: "duplicate key" }); rows.push(row); return res(201, [row]); }
+    if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); rows.push(row); return res(201, [row]); }
     if (method === "DELETE") { const keep = rows.filter(r => !match(r, f)); rows.length = 0; rows.push(...keep); return res(200, []); }
   }
   throw new Error("unexpected fetch " + url);
