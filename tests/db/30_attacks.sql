@@ -670,3 +670,53 @@ select t.try('admin','sees chargebacks and money errors first in the Orders list
 select t.try('client','reads the admin Orders list', t.u('101'), $$select count(*) from public.admin_list_contracts()$$, $$select $1::int > 0$$);
 update public.contracts set chargeback_status = null, chargeback_id = null, chargeback_cents = null where id = '30000000-0000-0000-0000-000000000003';
 select t.try('client','the Order bundle carries the chargeback state for its own people (normal)', t.u('101'), $$select public.order_bundle('30000000-0000-0000-0000-000000000003')::text$$, $$select ($1::jsonb->'order') ? 'chargeback_status'$$, 'allow');
+
+-- ================= reviews that belong to an Order (v22) =================
+-- Two completed Orders to review, and one review already waiting on each so the blind can be tested.
+insert into public.contracts (id, conversation_id, editor, client, proposed_by, title, price, status, payment_mode, amount_cents, fee_cents, completed_at, closed_at) values
+ ('30000000-0000-0000-0000-000000000007', '10000000-0000-0000-0000-000000000001', t.u('201'), t.u('101'), t.u('201'), 'Finished film', 200, 'completed', 'direct', 20000, 0, now() - interval '1 day', now() - interval '1 day'),
+ ('30000000-0000-0000-0000-000000000008', '10000000-0000-0000-0000-000000000007', t.u('205'), t.u('104'), t.u('205'), 'Old finished job', 150, 'completed', 'direct', 15000, 0, now() - interval '60 days', now() - interval '60 days');
+-- Eva (201) has reviewed her client on the fresh Order: still blind, the client has not answered.
+insert into public.order_reviews (id, order_id, reviewer, reviewee, reviewer_role, rating, comment, reveal_due) values
+ ('40000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', t.u('201'), t.u('101'), 'freelancer', 5, 'Clear brief, paid on time', now() + interval '13 days');
+-- Elan (205) reviewed his client 60 days ago and the window has long run out: it stands alone.
+insert into public.order_reviews (id, order_id, reviewer, reviewee, reviewer_role, rating, comment, reveal_due) values
+ ('40000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000008', t.u('205'), t.u('104'), 'freelancer', 4, 'Good job overall', now() - interval '46 days');
+
+-- ---------------- VISITOR ----------------
+select t.try('visitor','reads the review table straight out of the database', null, $$select count(*)::text from public.order_reviews$$, $$select $1 is not null$$);
+select t.try('visitor','writes a review with no Order behind it', null, $$with x as (insert into public.order_reviews (order_id, reviewer, reviewee, reviewer_role, rating, reveal_due) values ('30000000-0000-0000-0000-000000000007', '00000000-0000-0000-0000-000000000203', '00000000-0000-0000-0000-000000000101', 'client', 5, now()) returning 1) select count(*)::text from x$$, $$select exists (select 1 from public.order_reviews where reviewer = t.u('203'))$$);
+select t.try('visitor','reads the public rating of a freelancer (normal)', null, $$select (public.profile_reviews('00000000-0000-0000-0000-000000000201')->>'count')$$, $$select $1::int >= 0$$, 'allow');
+select t.try('visitor','sees a review that is still waiting for the other side', null, $$select (public.profile_reviews('00000000-0000-0000-0000-000000000101')->>'count')$$, $$select $1::int > 0$$);
+
+-- ---------------- CLIENT (Cleo, 101) ----------------
+select t.try('client','reviews an Order that is only funded, not finished', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000003', 5, '', null)$$, $$select $1 = 'ok'$$);
+select t.try('client','gives two stars without saying why', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 2, '', null)$$, $$select $1 = 'ok'$$);
+select t.try('client','gives two stars with a reason but no explanation', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 2, 'bad', 'poor_quality')$$, $$select $1 = 'ok'$$);
+select t.try('client','gives two stars with a reason the other side is meant to use', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 2, 'It was late and unfinished', 'payment_issue')$$, $$select $1 = 'ok'$$);
+select t.try('client','gives five stars and writes nothing (normal)', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 5, '', null)$$, $$select $1 = 'ok' and exists (select 1 from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007' and reviewer = t.u('101') and rating = 5)$$, 'allow');
+select t.try('client','gives two stars with a reason and an explanation (normal)', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 2, 'Delivered four days late and the sound was unusable', 'missed_deadline')$$, $$select $1 = 'ok' and exists (select 1 from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007' and reviewer = t.u('101') and low_reason = 'missed_deadline')$$, 'allow');
+select t.try('client','answering lifts the blind on both reviews at once (normal)', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 5, '', null)$$, $$select (select count(*) from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007' and is_revealed) = 2$$, 'allow');
+select t.try('client','rewrites the review after both sides are out in the open', t.u('101'), $$select b.r from (select public.order_review_submit('30000000-0000-0000-0000-000000000007', 5, '', null) a) x cross join lateral (select public.order_review_submit('30000000-0000-0000-0000-000000000007', 1, 'Changed my mind after reading theirs', 'other') r) b$$, $$select exists (select 1 from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007' and reviewer = t.u('101') and rating = 1)$$);
+select t.try('client','reviews an Order they have nothing to do with', t.u('101'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000008', 1, 'Terrible work all round', 'poor_quality')$$, $$select $1 = 'ok'$$);
+select t.try('client','hides a review they did not like', t.u('101'), $$select public.admin_moderate_review('40000000-0000-0000-0000-000000000001', 'hidden', 'I disagree')$$, $$select (select moderation_status from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007') = 'hidden'$$);
+select t.try('client','reads the other side''s review before answering', t.u('101'), $$select (public.order_review_state('30000000-0000-0000-0000-000000000007')->>'theirs')$$, $$select $1 is not null$$);
+select t.try('client','is told a review is waiting without being shown it (normal)', t.u('101'), $$select (public.order_review_state('30000000-0000-0000-0000-000000000007')->>'theirs_waiting')$$, $$select $1 = 'true'$$, 'allow');
+select t.try('client','sets someone else as the author of their review', t.u('101'), $$with x as (update public.order_reviews set reviewer = t.u('102') where order_id = '30000000-0000-0000-0000-000000000007' returning 1) select count(*)::text from x$$, $$select exists (select 1 from public.order_reviews where reviewer = t.u('102'))$$);
+
+-- ---------------- CLIENT (Cara, 104) — the Order whose window has closed ----------------
+select t.try('client','reviews an Order after the window has closed', t.u('104'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000008', 5, '', null)$$, $$select $1 = 'ok'$$);
+select t.try('client','a lone review becomes public once the window closes (normal)', t.u('104'), $$select (public.profile_reviews('00000000-0000-0000-0000-000000000104')->>'count')$$, $$select $1::int = 1$$, 'allow');
+
+-- ---------------- EDITOR (Eva, 201) ----------------
+select t.try('editor','reviews the same Order a second time as a fresh review', t.u('201'), $$with x as (insert into public.order_reviews (order_id, reviewer, reviewee, reviewer_role, rating, reveal_due) values ('30000000-0000-0000-0000-000000000007', t.u('201'), t.u('101'), 'freelancer', 1, now()) returning 1) select count(*)::text from x$$, $$select (select count(*) from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007' and reviewer = t.u('201')) > 1$$);
+select t.try('editor','changes a blind review before the other side answers (normal)', t.u('201'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 4, 'Good client, small delay on materials', null)$$, $$select $1 = 'ok' and exists (select 1 from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000007' and reviewer = t.u('201') and rating = 4)$$, 'allow');
+select t.try('editor','reviews themselves', t.u('201'), $$with x as (insert into public.order_reviews (order_id, reviewer, reviewee, reviewer_role, rating, reveal_due) values ('30000000-0000-0000-0000-000000000007', t.u('201'), t.u('201'), 'client', 5, now()) returning 1) select count(*)::text from x$$, $$select exists (select 1 from public.order_reviews where reviewer = reviewee)$$);
+
+-- ---------------- BANNED ----------------
+select t.try('banned','reviews an Order', t.u('301'), $$select public.order_review_submit('30000000-0000-0000-0000-000000000007', 5, '', null)$$, $$select $1 = 'ok'$$);
+
+-- ---------------- ADMIN (401) ----------------
+select t.try('admin','hides a review, which takes it out of the public count (normal)', t.u('401'), $$select public.admin_moderate_review('40000000-0000-0000-0000-000000000002', 'hidden', 'personal information')$$, $$select $1 = 'ok' and (public.profile_reviews('00000000-0000-0000-0000-000000000104')->>'count')::int = 0$$, 'allow');
+select t.try('admin','hiding a review keeps the words the person wrote (normal)', t.u('401'), $$select public.admin_moderate_review('40000000-0000-0000-0000-000000000002', 'hidden', 'personal information')$$, $$select (select comment from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000008') = 'Good job overall'$$, 'allow');
+select t.try('admin','reads the moderation queue (normal)', t.u('401'), $$select count(*)::text from public.admin_list_order_reviews(null)$$, $$select $1::int >= 2$$, 'allow');
