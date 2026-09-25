@@ -12,6 +12,8 @@ hashes = []
 for m in re.finditer(r"<script>(.*?)</script>", s, re.S):
     hashes.append("'sha256-" + base64.b64encode(hashlib.sha256(m.group(1).encode("utf-8")).digest()).decode() + "'")
 SB = "tnxujwlfatcvxzevllfr.supabase.co"
+# the payment functions run on Netlify, on another host than the page: the browser must be told it may call them
+FN = "https://main--cuvori.netlify.app https://cuvori.netlify.app"
 policy = "; ".join([
     "default-src 'self'",
     "script-src " + " ".join(hashes) + " https://cdn.jsdelivr.net",
@@ -19,7 +21,7 @@ policy = "; ".join([
     "img-src 'self' https: data: blob:",
     "media-src 'self' https: data: blob:",
     "font-src 'self' data:",
-    f"connect-src 'self' https://{SB} wss://{SB}",
+    f"connect-src 'self' {FN} https://{SB} wss://{SB}",
     "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
