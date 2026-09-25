@@ -291,21 +291,10 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.goto(url+'#account'); await p.waitForTimeout(600);
   ok(await p.locator('.reco-card').count()===1,'editor gets 9-day reminder based on real messages');
   ok((await p.textContent('.reco-card')).includes('Jonas'),'reminder names the real client');
-  // ---------- reviews: client reviews editor ----------
+  // back to the client for the checks that follow
   await p.goto(url+'#account'); await p.waitForTimeout(300); await p.click('#signOutBtn'); await p.waitForTimeout(400);
-  await p.click('#signInBtn'); await p.waitForTimeout(300); await p.fill('#siEmail','jonas@test.com'); await p.fill('#siPass','password123'); await p.click('[data-auth-signin]'); await p.waitForTimeout(1000);
+  await p.click('#signInBtn'); await p.waitForTimeout(300); await p.fill('#siEmail','jonas@test.com'); await p.fill('#siPass','password123'); await p.click('[data-auth-signin]'); await p.waitForTimeout(1200);
   await p.goto(url+'#home'); await p.waitForTimeout(700);
-  await p.click('.real-card .view-profile'); await p.waitForTimeout(600);
-  await p.click('.ep-tab[data-tab="reviews"]'); await p.waitForTimeout(200);
-  ok(await p.locator('[data-review]').count()===1,'client sees Leave a review button');
-  await p.click('[data-review]'); await p.waitForTimeout(500);
-  ok(await p.locator('#rvSave').count()===1,'review modal opens (has a conversation)');
-  await p.click('.star-pick[data-star="4"]'); await p.fill('#rvText','Great colour work, fast.'); await p.click('#rvSave'); await p.waitForTimeout(900);
-  ok(await p.evaluate(()=>window.__mockdb.reviews.length)===1,'review saved to DB');
-  ok((await p.textContent('#page-profile')).includes('Great colour work'),'review shown on profile');
-  ok((await p.textContent('#page-profile')).includes('4.0'),'profile rating 4.0');
-  await p.goto(url+'#home'); await p.waitForTimeout(600);
-  ok((await p.textContent('.real-card .status')).includes('4.0'),'card shows rating');
   ok(await p.locator('#adminBtn').isHidden(),'client has no admin button');
   // ---------- Orders: the Order is the contract (direct payment, no provider yet) ----------
   const signin=async(e)=>{ await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#account'); await p.waitForTimeout(300); if(await p.locator('#signOutBtn').isVisible()){ await p.click('#signOutBtn'); await p.waitForTimeout(400);} await p.click('#signInBtn'); await p.waitForTimeout(200); await p.fill('#siEmail',e); await p.fill('#siPass','password123'); await p.click('[data-auth-signin]'); await p.waitForTimeout(1200); };
@@ -400,9 +389,31 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok((await modal()).includes('drive.test/final-v2') && await p.locator('[data-caction="complete"]').count()===1 && (await p.textContent('[data-caction="complete"]')).includes('Approve work'),'the client sees the new delivery and an Approve work button');
   await p.click('[data-caction="complete"]'); await p.waitForTimeout(900);
   ok(await db(()=>{ const c=window.__mockdb.contracts[0]; return c.status==='completed' && c.released_cents===32000 && window.__mockdb.order_payments.filter(x=>x.order_id===c.id).map(x=>x.kind).join()==='fund,release'; }),'approved: the Order is complete, the ledger shows fund then release');
-  ok((await modal()).includes('Completed') && (await modal()).includes('History') && await p.locator('[data-caction]:not([data-caction="pdf"])').count()===0,'a completed Order shows its history and only the printable copy');
+  ok((await modal()).includes('Completed') && (await modal()).includes('History') && await p.locator('[data-caction]:not([data-caction="pdf"]):not([data-caction="review"])').count()===0,'a completed Order shows its history, the printable copy and the review button');
   await p.evaluate(()=>document.querySelector('details.ct-details:last-of-type').open=true);
   ok((await modal()).includes('Order created') && (await modal()).includes('Both accepted') && (await modal()).includes('Changes requested') && (await modal()).includes('Order completed'),'the history reads like a story: created, accepted, changes, completed');
+  // ---------- reviews: only after a finished Order, and blind until both sides answer ----------
+  await p.evaluate(()=>{ const m=document.querySelector('#modalRoot'); if(m) m.innerHTML=''; });
+  await p.goto(url+'#account'); await p.waitForTimeout(300); await p.click('#signOutBtn'); await p.waitForTimeout(400);
+  await p.click('#signInBtn'); await p.waitForTimeout(300); await p.fill('#siEmail','jonas@test.com'); await p.fill('#siPass','password123'); await p.click('[data-auth-signin]'); await p.waitForTimeout(1200);
+  await p.goto(url+'#home'); await p.waitForTimeout(700);
+  await p.click('.real-card .view-profile'); await p.waitForTimeout(600);
+  await p.click('.ep-tab[data-tab="reviews"]'); await p.waitForTimeout(200);
+  ok(await p.locator('[data-review]').count()===1,'a finished Order lets the client review the freelancer');
+  await p.click('[data-review]'); await p.waitForTimeout(600);
+  ok(await p.locator('#rvSave').count()===1,'the review form opens from the profile');
+  await p.click('.star-pick[data-star="4"]'); await p.fill('#rvText','Great colour work, fast.'); await p.click('#rvSave'); await p.waitForTimeout(900);
+  ok(await p.evaluate(()=>window.__mockdb.order_reviews.length)===1,'the review is saved against that Order');
+  ok(await p.evaluate(()=>window.__mockdb.order_reviews[0].is_revealed===false),'it stays blind until the freelancer answers');
+  ok(!(await p.textContent('#page-profile')).includes('Great colour work'),'nothing of it is public yet');
+  // the freelancer answers: both reviews open at the same moment
+  await signin('maya@test.com'); await p.evaluate(()=>{ const m=document.querySelector('#modalRoot'); if(m) m.innerHTML=''; });
+  await p.evaluate(async ()=>{ await window.__sb.rpc('order_review_submit',{ p_order:window.__mockdb.contracts[0].id, p_rating:5, p_comment:'Clear brief.', p_reason:null }); });
+  await p.goto(url+'#home'); await p.waitForTimeout(300); await p.goto(url+'#account'); await p.waitForTimeout(1000);
+  ok(await p.evaluate(()=>window.__mockdb.order_reviews.every(r=>r.is_revealed)),'both sides answered, so both reviews are public');
+  const accTxt0=(await p.textContent('#accountReviews')).replace(/\s+/g,' ').slice(0,90);
+  ok(accTxt0.includes('Jonas'),'the freelancer account shows the review received for that Order');
+  await p.goto(url+'#home'); await p.waitForTimeout(600);
   await signin('maya@test.com');
   // finishing a job asks the editor whether they are free again, and will not be waved away
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
@@ -595,7 +606,7 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.goto(url+'#account'); await p.waitForTimeout(300); await p.click('#signOutBtn'); await p.waitForTimeout(400);
   await p.click('#signInBtn'); await p.waitForTimeout(300); await p.fill('#siEmail','maya@test.com'); await p.fill('#siPass','password123'); await p.click('[data-auth-signin]'); await p.waitForTimeout(1200);
   await p.goto(url+'#account'); await p.waitForTimeout(500);
-  ok((await p.textContent('#accountReviews')).includes('Jonas'),'editor account shows received review');
+  ok(await p.evaluate(()=>window.__mockdb.order_reviews.length===0),'deleting the account took the reviews written by and about that person with it');
   ok(await p.locator('#adminBtn').isVisible(),'admin sees Admin panel button');
   await p.click('#adminBtn'); await p.waitForTimeout(700);
   ok(await p.locator('#page-admin').evaluate(e=>e.classList.contains('active')),'admin page opens');
@@ -616,9 +627,19 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   const code=(await p.textContent('#codeBox')).trim(); ok(/^CUV-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code),'new invite code shown once: '+code);
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.waitForTimeout(600);
   ok((await p.textContent('#adminBody')).includes('for Tom'),'invite listed with note');
-  // reviews tab
-  await p.click('.admin-tab[data-atab="reviews"]'); await p.waitForTimeout(500);
-  ok((await p.textContent('#adminBody')).includes('Great colour work'),'admin sees reviews');
+  // reviews tab: an admin can hide a review, and the words the person wrote survive it
+  await p.evaluate(()=>{ const db=window.__mockdb; const now=new Date().toISOString();
+    const me=db.profiles.find(x=>x.email==='maya@test.com');
+    db.order_reviews.push({ id:'rv-admin', order_id:db.contracts[0].id, reviewer:me.id, reviewee:'rv-subject', reviewer_role:'freelancer',
+      rating:2, comment:'Great colour work, fast.', low_reason:'poor_communication', submitted_at:now,
+      reveal_due:new Date(Date.now()-1000).toISOString(), is_revealed:true, revealed_at:now, moderation_status:'visible', edits:0 });
+  });
+  await p.click('.admin-tab[data-atab="reviews"]'); await p.waitForTimeout(600);
+  ok((await p.textContent('#adminBody')).includes('Great colour work'),'admin sees the reviews written on Orders');
+  await p.click('[data-rhide="rv-admin"]'); await p.waitForTimeout(400);
+  await p.fill('#onNote','Names a private address'); await p.click('#onGo'); await p.waitForTimeout(700);
+  ok(await p.evaluate(()=>{ const r=window.__mockdb.order_reviews.find(x=>x.id==='rv-admin'); return r.moderation_status==='hidden' && r.comment==='Great colour work, fast.' && r.moderation_reason==='Names a private address'; }),'hiding a review keeps its text and records why');
+  ok(await p.evaluate(async ()=>((await window.__sb.rpc('profile_reviews',{p_user:'rv-subject'})).data.count)===0),'a hidden review no longer counts towards the public rating');
   // ---------- admin: professions and filters as data ----------
   await p.click('.admin-tab[data-atab="professions"]'); await p.waitForTimeout(600);
   ok(await p.locator('[data-pslug="game-developer"]').count()===1 && (await p.textContent('[data-pslug="game-developer"]')).includes('closed'),'admin sees professions that are not open yet');

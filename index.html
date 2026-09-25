@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-ciCVK1mqCXnSCI/uC4WDd6nhH7FpcZ6uJ6fuJ8joCTc=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-eDxBQED9nEprtu0HdHKSYy28H+b5B5bLYtnSwm5M1Rk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -641,6 +641,9 @@
     .lang-grid button:hover{border-color:#c9d2de}
     .lang-grid button.active{border-color:var(--accent);background:var(--accent-soft)}
     .account-layout .settings-nav{align-self:start}
+    #jobSearchBar{position:relative}
+    #jobSearchBar input{padding-right:34px}
+    #jobSearchBar .pp-clear{right:6px}
     .help-list{display:grid;gap:8px}
     .help-item{display:grid;gap:3px;text-align:left;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px;color:var(--text)}
     .help-item:hover{border-color:#c9d2de;background:#fff}
@@ -842,6 +845,10 @@
     .consent input{width:18px;height:18px;margin:1px 0 0;flex:0 0 auto}
     .consent-links{margin:0 0 2px;display:flex;gap:10px}
     @media(max-width:700px){ .legal-doc{padding:16px 15px} .site-footer{flex-direction:column;align-items:flex-start} }
+    .rv-box{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px}
+    .rv-box strong{display:block;margin-bottom:6px}
+    .rv-line{padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+    .rv-line:first-of-type{border-top:0}
     .star-row{display:flex;gap:4px}.star-pick{background:transparent;border:0;font-size:30px;line-height:1;color:#d6d9df;cursor:pointer;padding:0 2px}.star-pick.on{color:var(--warn)}
     .danger-text{color:var(--danger)!important}.ok-text{color:var(--success)}
     .primary.danger-btn{background:var(--danger);border-color:var(--danger)}
@@ -1066,7 +1073,7 @@
       <div class="jobs-layout">
         <aside class="filter-col">
           <div class="panel filter-panel">
-            <div class="searchbar compact"><span class="search-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span><input id="jobSearch" data-i18n-placeholder="jobSearchPlaceholder" placeholder="Search for a job" /><button class="primary hidden" id="jobSearchBtn" data-i18n="search">Search</button></div>
+            <div class="searchbar compact pp" id="jobSearchBar"><span class="search-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span><input id="jobSearch" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="jobKindList" aria-autocomplete="list" data-i18n-placeholder="jobSearchPlaceholder" placeholder="Search jobs: video editing, animation, design…" /><button type="button" class="pp-clear hidden" id="jobKindClear" aria-label="Clear">×</button><button class="primary hidden" id="jobSearchBtn" data-i18n="search">Search</button><div class="pp-pop hidden" id="jobKindList" role="listbox"></div></div>
             <button class="secondary jobs-mobile-filters" id="toggleJobFilters" data-i18n="p_filters">Filters</button>
             <div class="filter-group"><div class="filter-title" data-i18n="p_whereFilter">Where</div>
               <label class="check"><input type="checkbox" class="job-filter" data-key="where" value="remote"> <span data-i18n="p_remote">Remote</span></label>
@@ -1729,7 +1736,7 @@
       footer:"Creative work first. No marketplace commission.", catCommercial:"Commercial", 
       catDocumentary:"Documentary", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Podcasts", 
       catMusic:"Music videos", catOther:"Other", jobsSubtitle:"Find projects posted by creators and small brands.", 
-      jobSearchPlaceholder:"Search for a job", job1Title:"YouTube documentary editor", job1Meta:"Creator · Remote", 
+      jobSearchPlaceholder:"Search jobs: video editing, animation, design…", job1Title:"YouTube documentary editor", job1Meta:"Creator · Remote", 
       job1Desc:"Edit a 15–20 minute story-led documentary from supplied footage and voiceover.", 
       pillEditing:"Editing", pillEnglish:"English", job2Title:"Shorts / Reels / TikTok editor", 
       job2Meta:"Small brand · Remote", perHour:"hour", 
@@ -1840,7 +1847,7 @@
       footer:"Kreative Arbeit zuerst. Keine Marktplatzprovision.", catCommercial:"Werbung", 
       catDocumentary:"Dokumentation", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Podcasts", 
       catMusic:"Musikvideos", catOther:"Sonstiges", jobsSubtitle:"Finde Projekte von Creators und kleinen Marken.", 
-      jobSearchPlaceholder:"Nach einem Job suchen", job1Title:"YouTube-Dokumentation schneiden", 
+      jobSearchPlaceholder:"Jobs suchen: Videoschnitt, Animation, Design…", job1Title:"YouTube-Dokumentation schneiden", 
       job1Meta:"Creator · Remote", 
       job1Desc:"Schneide eine 15–20 Minuten lange, erzählerische Dokumentation aus geliefertem Material und Voiceover.", 
       pillEditing:"Schnitt", pillEnglish:"Englisch", job2Title:"Shorts- / Reels- / TikTok-Editor", 
@@ -1960,7 +1967,7 @@
       footer:"Сначала творческая работа. Без комиссии маркетплейса.", catCommercial:"Реклама", 
       catDocumentary:"Документалистика", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Подкасты", 
       catMusic:"Музыкальные клипы", catOther:"Другое", 
-      jobsSubtitle:"Находите проекты от авторов и небольших брендов.", jobSearchPlaceholder:"Поиск по вакансиям", 
+      jobsSubtitle:"Находите проекты от авторов и небольших брендов.", jobSearchPlaceholder:"Поиск заказов: видеомонтаж, анимация, дизайн…", 
       job1Title:"Монтаж документального YouTube-видео", job1Meta:"Автор · Удалённо", 
       job1Desc:"Смонтировать 15–20-минутный документальный фильм с сюжетом из предоставленных материалов и озвучки.", 
       pillEditing:"Монтаж", pillEnglish:"Английский", job2Title:"Монтажёр Shorts / Reels / TikTok", 
@@ -2082,7 +2089,7 @@
       catDocumentary:"Dokumentika", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Podkastai", 
       catMusic:"Muzikiniai vaizdo klipai", catOther:"Kita", 
       jobsSubtitle:"Raskite projektus, kuriuos paskelbė kūrėjai ir smulkūs prekės ženklai.", 
-      jobSearchPlaceholder:"Ieškoti darbo", job1Title:"YouTube dokumentikos montuotojas", 
+      jobSearchPlaceholder:"Ieškoti darbų: montažas, animacija, dizainas…", job1Title:"YouTube dokumentikos montuotojas", 
       job1Meta:"Kūrėjas · Nuotoliniu būdu", 
       job1Desc:"Sumontuoti 15–20 minučių pasakojimo tipo dokumentiką iš pateiktos medžiagos ir įgarsinimo.", 
       pillEditing:"Montažas", pillEnglish:"Anglų", job2Title:"Shorts / Reels / TikTok montuotojas", 
@@ -2206,7 +2213,7 @@
       catDocumentary:"Documental", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Podcasts", 
       catMusic:"Videoclips musicales", catOther:"Otro", 
       jobsSubtitle:"Encuentra proyectos publicados por creadores y pequeñas marcas.", 
-      jobSearchPlaceholder:"Buscar un trabajo", job1Title:"Editor de documental para YouTube", 
+      jobSearchPlaceholder:"Buscar trabajos: edición de vídeo, animación, diseño…", job1Title:"Editor de documental para YouTube", 
       job1Meta:"Creador · Remoto", 
       job1Desc:"Editar un documental narrativo de 15–20 minutos a partir de material y voz en off proporcionados.", 
       pillEditing:"Edición", pillEnglish:"Inglés", job2Title:"Editor de Shorts / Reels / TikTok", 
@@ -2330,7 +2337,7 @@
       footer:"Najpierw praca kreatywna. Bez prowizji marketplace.", catCommercial:"Reklama", 
       catDocumentary:"Dokument", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Podcasty", catMusic:"Teledyski", 
       catOther:"Inne", jobsSubtitle:"Znajdź projekty publikowane przez twórców i małe marki.", 
-      jobSearchPlaceholder:"Szukaj zlecenia", job1Title:"Montaż dokumentu na YouTube", job1Meta:"Twórca · Zdalnie", 
+      jobSearchPlaceholder:"Szukaj zleceń: montaż wideo, animacja, projektowanie…", job1Title:"Montaż dokumentu na YouTube", job1Meta:"Twórca · Zdalnie", 
       job1Desc:"Zmontuj 15–20-minutowy dokument fabularny z dostarczonego materiału i lektora.", 
       pillEditing:"Montaż", pillEnglish:"Angielski", job2Title:"Montażysta Shorts / Reels / TikTok", 
       job2Meta:"Mała marka · Zdalnie", perHour:"godzina", 
@@ -2448,7 +2455,7 @@
       footer:"Спочатку творча робота. Без комісії маркетплейсу.", catCommercial:"Реклама", 
       catDocumentary:"Документалістика", catShorts:"Shorts / Reels / TikTok", catPodcasts:"Подкасти", 
       catMusic:"Музичні кліпи", catOther:"Інше", jobsSubtitle:"Знаходьте проєкти від авторів та невеликих брендів.", 
-      jobSearchPlaceholder:"Пошук роботи", job1Title:"Монтаж документального відео для YouTube", 
+      jobSearchPlaceholder:"Пошук замовлень: відеомонтаж, анімація, дизайн…", job1Title:"Монтаж документального відео для YouTube", 
       job1Meta:"Автор · Віддалено", 
       job1Desc:"Змонтувати 15–20-хвилинний документальний фільм із сюжетом на основі наданих матеріалів і закадрового голосу.", 
       pillEditing:"Монтаж", pillEnglish:"Англійська", job2Title:"Монтажер Shorts / Reels / TikTok", 
@@ -3117,7 +3124,7 @@
   }
   function snoozeReco(name){ state.snooze[name]=Date.now()+DAY; saveReco(); refreshReco(); toast(t("recoSnoozed")); }
   function updateNotifBadge(){
-    const unread=state.notifications.filter(n=>n.unread).length + dueReminders().length + (state.unreadMsgs||0) + (state.openReports||0);
+    const unread=state.notifications.filter(n=>n.unread).length + dueReminders().length + (state.unreadMsgs||0) + (state.openReports||0) + (state.pendingReviews||0);
     const mb=$("#messageBadge"); if(REAL && mb){ mb.textContent=state.unreadMsgs||0; mb.classList.toggle("hidden",!(state.unreadMsgs>0)); $("#messagesBtn").classList.toggle("attention",state.unreadMsgs>0); }
     $("#notifBadge").textContent=unread; $("#notifBadge").classList.toggle("hidden",unread===0);
     $("#notificationsBtn").classList.toggle("attention",unread>0);
@@ -3356,6 +3363,10 @@
     closeMobileMenu();
     if(!(typeof AUTH_CB!=="undefined" && AUTH_CB.pending)) history.replaceState(null,"", (page==="home" && state.ps && state.ps.profession) ? "#professionals/"+state.ps.profession : "#"+(page==="contracts"?"orders":page));
     if(page==="contracts" && typeof refreshContractsPage==="function") refreshContractsPage();
+    if(page==="account" && REAL && typeof myId==="function" && myId() && typeof loadProfileReviews==="function"){   // reviews can open while you are elsewhere on the site
+      if(!PROFILES[ownKey()]) PROFILES[ownKey()]={ id:myId(), real:true, name:displayName(), reviews:[], reviewCount:0, rating:"–" };   // a client has no editor profile to hang them on
+      loadReviewsFor([myId()]).then(()=>loadProfileReviews(myId())).then(()=>{ if(typeof renderMyReviewsPanel==="function") renderMyReviewsPanel(); });
+    }
     if(page==="home" && REAL && typeof runProfileSearch==="function" && state.homeSeen){ loadProfessionConfig().then(()=>{ renderFilterBar(); runProfileSearch(); }); }   // fresh counts and results on each visit; the first paint is done by loadEditors
     if(page==="home") state.homeSeen=true;
     if(page==="jobs" && REAL && state.jobsSeen && typeof loadJobs==="function") loadJobs();   // a fresh feed on every visit: states and expiry change while you are away
@@ -3702,6 +3713,7 @@
     if(REAL && p.real && !p.servicesComplete){   // a search result carries one service; the profile shows them all
       p.servicesComplete=true;
       sb.from("services").select("*").eq("profile_id",p.id).order("sort_order").then(({data})=>{ if(data&&data.length){ p.services=data; if(state.currentProfile===name && $("#page-profile").classList.contains("active")) openProfile(name); } });
+      if(!p.reviewsLoaded){ p.reviewsLoaded=true; loadProfileReviews(p.id).then(()=>{ if(state.currentProfile===name && $("#page-profile").classList.contains("active")) openProfile(name); }); }
     }
     state.currentProfile = name;
     const root = $("#page-profile");
@@ -4055,7 +4067,11 @@
     else if(!/^https:\/\//i.test(u)){ if(/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[a-z0-9.-]+:\d/i.test(u)) return null; u="https://"+u; }
     return safeUrl(u)||null; }
   // database / RPC error → a sentence the user understands
+  const RV_ERRS={ review_not_completed:"rv2_notDone", review_window_closed:"rv2_closed", review_locked:"rv2_locked",
+    reason_required:"rv2_needReason", comment_required:"rv2_needWhy", bad_reason:"rv2_needReason",
+    review_edit_limit:"rv2_locked", not_your_order:"c_notAllowed" };
   function errText(error, data){
+    if(typeof data==="string" && RV_ERRS[data]) return t(RV_ERRS[data]);
     const code=String((data && data!=="ok") ? data : ((error && (error.message||error.hint||error.details)) || ""));
     const map={ rate_limited:"err_rateLimited", too_many_attempts:"err_tooManyAttempts", message_too_long:"err_tooLong", description_too_long:"err_tooLong",
       note_too_long:"err_tooLong", too_many_comments:"err_tooLong", bad_link:"err_badLink", not_available:"err_notAvailable", banned:"err_banned",
@@ -4072,13 +4088,15 @@
   async function showNotificationsReal(){
     const rem=dueReminders().map(recoNotifHtml).join("");
     const msgs=await realNotifications();
+    const rvItems=(state.reviewInvites||[]).map(i=>`<div class="job" style="margin-bottom:9px;cursor:pointer" data-notif-review="${escapeHtml(i.order_id)}"><div class="job-content"><strong>${escapeHtml(fill(t("rv2_title"),{name:i.other_name||""}))}</strong><div class="muted" style="font-size:12px;margin-top:5px">${escapeHtml(fill(t("rv2_closes"),{d:fmtDate(i.closes_at)}))}</div></div></div>`).join("");
     const rep=(state.openReports>0)
       ? `<div class="job" style="margin-bottom:9px;cursor:pointer" data-notif-reports="1"><div class="job-content"><strong>${escapeHtml(fill(t("ra_waiting"),{n:state.openReports}))}</strong><div class="muted small">${escapeHtml(t("ra_waitingHint"))}</div></div></div>`
       : "";
-    const items=rep+rem+msgs.map(m=>`<div class="job" style="margin-bottom:9px;cursor:pointer" data-notif-target="${m.key}" ${m.cid?`data-notif-order="${m.cid}"`:""}><div class="job-content"><strong>${m.label?escapeHtml(m.label):fill(t("d_newMessageFrom"),{name:escapeHtml(m.name)})}</strong><div class="muted" style="font-size:12px;margin-top:5px">${t("clickToOpen")}</div></div></div>`).join("");
+    const items=rvItems+rep+rem+msgs.map(m=>`<div class="job" style="margin-bottom:9px;cursor:pointer" data-notif-target="${m.key}" ${m.cid?`data-notif-order="${m.cid}"`:""}><div class="job-content"><strong>${m.label?escapeHtml(m.label):fill(t("d_newMessageFrom"),{name:escapeHtml(m.name)})}</strong><div class="muted" style="font-size:12px;margin-top:5px">${t("clickToOpen")}</div></div></div>`).join("");
     openModal(t("notificationsTitle"),items||`<p class="muted">${t("noNotifications")}</p>`,root=>{
       $$("[data-notif-target]",root).forEach(x=>x.addEventListener("click",()=>{ closeModal(); if(x.dataset.notifOrder) openOrder(x.dataset.notifOrder); else openChat(x.dataset.notifTarget); }));
       $$("[data-notif-reports]",root).forEach(x=>x.addEventListener("click",()=>{ closeModal(); openAdmin("reports"); }));
+      $$("[data-notif-review]",root).forEach(x=>x.addEventListener("click",()=>{ closeModal(); openOrder(x.dataset.notifReview); }));
       bindRecoButtons(root);
       const seen=JSON.parse(localStorage.getItem("cuvoriSeenConvs")||"{}"); Object.values(state.convs).forEach(c=>seen[c.id]=new Date().toISOString()); localStorage.setItem("cuvoriSeenConvs",JSON.stringify(seen));
       state.unreadMsgs=0; updateNotifBadge();
@@ -4813,7 +4831,7 @@
   const T_JT = {
     en:{ jt_today:"Posted today", jt_yesterday:"Posted yesterday", jt_days:"Posted {n} days ago", jt_weeks:"Posted {n} weeks ago", jt_on:"Posted on {d}", jt_expires:"Expires {d}",
       jt_verified:"Identity verified", jt_newClient:"New client", jt_hireOne:"1 hire", jt_hires:"{n} hires", jt_noHires:"No hires yet", jt_hireRate:"{p}% hire rate", jt_secured:"Payment secured", jt_memberSince:"Member since {d}", jt_jobsPosted:"{n} jobs posted", jt_jobPosted:"1 job posted",
-      jt_sort:"Sort by", jt_sortNewest:"Newest first", jt_sortBudget:"Highest budget", jt_sortDeadline:"Deadline soonest",
+      jk_kind:"Type of work", jk_all:"All jobs", jt_sort:"Sort by", jt_sortNewest:"Newest first", jt_sortBudget:"Highest budget", jt_sortDeadline:"Deadline soonest",
       jt_trustFilter:"Trust", jt_fVerified:"Identity verified only", jt_fSecured:"Payment secured only", jt_fWithin:"Posted within", jt_wAny:"Any time", jt_w1:"24 hours", jt_w7:"7 days", jt_w30:"30 days",
       jt_aboutClient:"About this client", jt_report:"Report job", jt_reportTitle:"Report this job", jt_reportWhy:"What is wrong with it?", jt_r_scam:"Scam or fraud", jt_r_fake:"Fake or misleading", jt_r_spam:"Spam", jt_r_duplicate:"Posted several times", jt_r_payment:"Payment problem", jt_r_inappropriate:"Inappropriate content", jt_r_other:"Something else",
       jt_reportNote:"Anything else? (optional)", jt_reportSend:"Send report", jt_reportThanks:"Thanks — we will take a look.", jt_reportHint:"Reports are read by a person. Nobody is banned automatically.",
@@ -4825,7 +4843,7 @@
       jt_postedReview:"Your job was saved. Cuvori will check it before it goes live.", jt_deadline:"Deadline" },
     de:{ jt_today:"Heute eingestellt", jt_yesterday:"Gestern eingestellt", jt_days:"Vor {n} Tagen eingestellt", jt_weeks:"Vor {n} Wochen eingestellt", jt_on:"Eingestellt am {d}", jt_expires:"Läuft ab: {d}",
       jt_verified:"Identität geprüft", jt_newClient:"Neuer Kunde", jt_hireOne:"1 Auftrag vergeben", jt_hires:"{n} Aufträge vergeben", jt_noHires:"Noch nichts vergeben", jt_hireRate:"{p} % Vergabequote", jt_secured:"Zahlung gesichert", jt_memberSince:"Mitglied seit {d}", jt_jobsPosted:"{n} Jobs eingestellt", jt_jobPosted:"1 Job eingestellt",
-      jt_sort:"Sortieren", jt_sortNewest:"Neueste zuerst", jt_sortBudget:"Höchstes Budget", jt_sortDeadline:"Frist am nächsten",
+      jk_kind:"Art der Arbeit", jk_all:"Alle Jobs", jt_sort:"Sortieren", jt_sortNewest:"Neueste zuerst", jt_sortBudget:"Höchstes Budget", jt_sortDeadline:"Frist am nächsten",
       jt_trustFilter:"Vertrauen", jt_fVerified:"Nur geprüfte Identität", jt_fSecured:"Nur gesicherte Zahlung", jt_fWithin:"Eingestellt innerhalb", jt_wAny:"Egal wann", jt_w1:"24 Stunden", jt_w7:"7 Tagen", jt_w30:"30 Tagen",
       jt_aboutClient:"Über diesen Kunden", jt_report:"Job melden", jt_reportTitle:"Diesen Job melden", jt_reportWhy:"Was stimmt nicht?", jt_r_scam:"Betrug", jt_r_fake:"Falsch oder irreführend", jt_r_spam:"Spam", jt_r_duplicate:"Mehrfach eingestellt", jt_r_payment:"Problem mit der Zahlung", jt_r_inappropriate:"Unangemessener Inhalt", jt_r_other:"Etwas anderes",
       jt_reportNote:"Noch etwas? (optional)", jt_reportSend:"Meldung senden", jt_reportThanks:"Danke — wir schauen uns das an.", jt_reportHint:"Meldungen liest ein Mensch. Niemand wird automatisch gesperrt.",
@@ -4837,7 +4855,7 @@
       jt_postedReview:"Dein Job ist gespeichert. Cuvori prüft ihn, bevor er sichtbar wird.", jt_deadline:"Frist" },
     ru:{ jt_today:"Опубликовано сегодня", jt_yesterday:"Опубликовано вчера", jt_days:"Опубликовано {n} дн. назад", jt_weeks:"Опубликовано {n} нед. назад", jt_on:"Опубликовано {d}", jt_expires:"Истекает {d}",
       jt_verified:"Личность подтверждена", jt_newClient:"Новый клиент", jt_hireOne:"1 наём", jt_hires:"{n} наймов", jt_noHires:"Наймов пока нет", jt_hireRate:"{p}% наймов", jt_secured:"Оплата защищена", jt_memberSince:"На сайте с {d}", jt_jobsPosted:"{n} заданий размещено", jt_jobPosted:"1 задание размещено",
-      jt_sort:"Сортировка", jt_sortNewest:"Сначала новые", jt_sortBudget:"Больший бюджет", jt_sortDeadline:"Ближайший срок",
+      jk_kind:"Вид работы", jk_all:"Все заказы", jt_sort:"Сортировка", jt_sortNewest:"Сначала новые", jt_sortBudget:"Больший бюджет", jt_sortDeadline:"Ближайший срок",
       jt_trustFilter:"Доверие", jt_fVerified:"Только с подтверждённой личностью", jt_fSecured:"Только с защищённой оплатой", jt_fWithin:"Опубликовано за", jt_wAny:"Любое время", jt_w1:"24 часа", jt_w7:"7 дней", jt_w30:"30 дней",
       jt_aboutClient:"О клиенте", jt_report:"Пожаловаться", jt_reportTitle:"Пожаловаться на задание", jt_reportWhy:"Что не так?", jt_r_scam:"Мошенничество", jt_r_fake:"Ложное или вводящее в заблуждение", jt_r_spam:"Спам", jt_r_duplicate:"Размещено несколько раз", jt_r_payment:"Проблема с оплатой", jt_r_inappropriate:"Неприемлемое содержание", jt_r_other:"Другое",
       jt_reportNote:"Что-то ещё? (необязательно)", jt_reportSend:"Отправить", jt_reportThanks:"Спасибо — мы посмотрим.", jt_reportHint:"Жалобы читает человек. Никого не блокируют автоматически.",
@@ -4849,7 +4867,7 @@
       jt_postedReview:"Задание сохранено. Cuvori проверит его перед публикацией.", jt_deadline:"Срок" },
     lt:{ jt_today:"Paskelbta šiandien", jt_yesterday:"Paskelbta vakar", jt_days:"Paskelbta prieš {n} d.", jt_weeks:"Paskelbta prieš {n} sav.", jt_on:"Paskelbta {d}", jt_expires:"Galioja iki {d}",
       jt_verified:"Tapatybė patvirtinta", jt_newClient:"Naujas klientas", jt_hireOne:"1 samdymas", jt_hires:"{n} samdymai", jt_noHires:"Dar nesamdė", jt_hireRate:"{p} % samdymų", jt_secured:"Mokėjimas apsaugotas", jt_memberSince:"Narys nuo {d}", jt_jobsPosted:"{n} skelbimai", jt_jobPosted:"1 skelbimas",
-      jt_sort:"Rikiuoti", jt_sortNewest:"Naujausi pirmi", jt_sortBudget:"Didžiausias biudžetas", jt_sortDeadline:"Artimiausias terminas",
+      jk_kind:"Darbo rūšis", jk_all:"Visi darbai", jt_sort:"Rikiuoti", jt_sortNewest:"Naujausi pirmi", jt_sortBudget:"Didžiausias biudžetas", jt_sortDeadline:"Artimiausias terminas",
       jt_trustFilter:"Pasitikėjimas", jt_fVerified:"Tik patvirtinta tapatybė", jt_fSecured:"Tik apsaugotas mokėjimas", jt_fWithin:"Paskelbta per", jt_wAny:"Bet kada", jt_w1:"24 val.", jt_w7:"7 d.", jt_w30:"30 d.",
       jt_aboutClient:"Apie klientą", jt_report:"Pranešti", jt_reportTitle:"Pranešti apie šį skelbimą", jt_reportWhy:"Kas negerai?", jt_r_scam:"Sukčiavimas", jt_r_fake:"Netikras ar klaidinantis", jt_r_spam:"Šlamštas", jt_r_duplicate:"Paskelbta kelis kartus", jt_r_payment:"Mokėjimo problema", jt_r_inappropriate:"Netinkamas turinys", jt_r_other:"Kita",
       jt_reportNote:"Dar kas nors? (nebūtina)", jt_reportSend:"Siųsti pranešimą", jt_reportThanks:"Ačiū — peržiūrėsime.", jt_reportHint:"Pranešimus skaito žmogus. Niekas neblokuojamas automatiškai.",
@@ -4861,7 +4879,7 @@
       jt_postedReview:"Skelbimas išsaugotas. Cuvori jį patikrins prieš rodydamas.", jt_deadline:"Terminas" },
     es:{ jt_today:"Publicado hoy", jt_yesterday:"Publicado ayer", jt_days:"Publicado hace {n} días", jt_weeks:"Publicado hace {n} semanas", jt_on:"Publicado el {d}", jt_expires:"Caduca el {d}",
       jt_verified:"Identidad verificada", jt_newClient:"Cliente nuevo", jt_hireOne:"1 contratación", jt_hires:"{n} contrataciones", jt_noHires:"Sin contrataciones aún", jt_hireRate:"{p} % de contratación", jt_secured:"Pago asegurado", jt_memberSince:"Miembro desde {d}", jt_jobsPosted:"{n} trabajos publicados", jt_jobPosted:"1 trabajo publicado",
-      jt_sort:"Ordenar", jt_sortNewest:"Más recientes", jt_sortBudget:"Mayor presupuesto", jt_sortDeadline:"Fecha límite más próxima",
+      jk_kind:"Tipo de trabajo", jk_all:"Todos los trabajos", jt_sort:"Ordenar", jt_sortNewest:"Más recientes", jt_sortBudget:"Mayor presupuesto", jt_sortDeadline:"Fecha límite más próxima",
       jt_trustFilter:"Confianza", jt_fVerified:"Solo identidad verificada", jt_fSecured:"Solo pago asegurado", jt_fWithin:"Publicado en", jt_wAny:"Cualquier fecha", jt_w1:"24 horas", jt_w7:"7 días", jt_w30:"30 días",
       jt_aboutClient:"Sobre este cliente", jt_report:"Denunciar", jt_reportTitle:"Denunciar este trabajo", jt_reportWhy:"¿Qué está mal?", jt_r_scam:"Estafa o fraude", jt_r_fake:"Falso o engañoso", jt_r_spam:"Spam", jt_r_duplicate:"Publicado varias veces", jt_r_payment:"Problema de pago", jt_r_inappropriate:"Contenido inapropiado", jt_r_other:"Otra cosa",
       jt_reportNote:"¿Algo más? (opcional)", jt_reportSend:"Enviar denuncia", jt_reportThanks:"Gracias — lo revisaremos.", jt_reportHint:"Las denuncias las lee una persona. Nadie es bloqueado automáticamente.",
@@ -4873,7 +4891,7 @@
       jt_postedReview:"Tu trabajo se ha guardado. Cuvori lo revisará antes de publicarlo.", jt_deadline:"Fecha límite" },
     pl:{ jt_today:"Dodano dzisiaj", jt_yesterday:"Dodano wczoraj", jt_days:"Dodano {n} dni temu", jt_weeks:"Dodano {n} tyg. temu", jt_on:"Dodano {d}", jt_expires:"Wygasa {d}",
       jt_verified:"Tożsamość zweryfikowana", jt_newClient:"Nowy klient", jt_hireOne:"1 zlecenie", jt_hires:"{n} zleceń", jt_noHires:"Brak zleceń", jt_hireRate:"{p}% zleceń", jt_secured:"Płatność zabezpieczona", jt_memberSince:"Od {d}", jt_jobsPosted:"{n} ogłoszeń", jt_jobPosted:"1 ogłoszenie",
-      jt_sort:"Sortuj", jt_sortNewest:"Najnowsze", jt_sortBudget:"Najwyższy budżet", jt_sortDeadline:"Najbliższy termin",
+      jk_kind:"Rodzaj pracy", jk_all:"Wszystkie zlecenia", jt_sort:"Sortuj", jt_sortNewest:"Najnowsze", jt_sortBudget:"Najwyższy budżet", jt_sortDeadline:"Najbliższy termin",
       jt_trustFilter:"Zaufanie", jt_fVerified:"Tylko zweryfikowana tożsamość", jt_fSecured:"Tylko zabezpieczona płatność", jt_fWithin:"Dodano w ciągu", jt_wAny:"Kiedykolwiek", jt_w1:"24 godzin", jt_w7:"7 dni", jt_w30:"30 dni",
       jt_aboutClient:"O tym kliencie", jt_report:"Zgłoś", jt_reportTitle:"Zgłoś to ogłoszenie", jt_reportWhy:"Co jest nie tak?", jt_r_scam:"Oszustwo", jt_r_fake:"Fałszywe lub mylące", jt_r_spam:"Spam", jt_r_duplicate:"Dodane kilka razy", jt_r_payment:"Problem z płatnością", jt_r_inappropriate:"Nieodpowiednia treść", jt_r_other:"Coś innego",
       jt_reportNote:"Coś jeszcze? (opcjonalnie)", jt_reportSend:"Wyślij zgłoszenie", jt_reportThanks:"Dzięki — przyjrzymy się.", jt_reportHint:"Zgłoszenia czyta człowiek. Nikt nie jest blokowany automatycznie.",
@@ -4885,7 +4903,7 @@
       jt_postedReview:"Ogłoszenie zapisane. Cuvori sprawdzi je przed publikacją.", jt_deadline:"Termin" },
     uk:{ jt_today:"Опубліковано сьогодні", jt_yesterday:"Опубліковано вчора", jt_days:"Опубліковано {n} дн. тому", jt_weeks:"Опубліковано {n} тиж. тому", jt_on:"Опубліковано {d}", jt_expires:"Діє до {d}",
       jt_verified:"Особу підтверджено", jt_newClient:"Новий клієнт", jt_hireOne:"1 найм", jt_hires:"{n} наймів", jt_noHires:"Наймів ще немає", jt_hireRate:"{p}% наймів", jt_secured:"Оплату захищено", jt_memberSince:"На сайті з {d}", jt_jobsPosted:"{n} завдань розміщено", jt_jobPosted:"1 завдання розміщено",
-      jt_sort:"Сортування", jt_sortNewest:"Спочатку нові", jt_sortBudget:"Більший бюджет", jt_sortDeadline:"Найближчий строк",
+      jk_kind:"Вид роботи", jk_all:"Усі замовлення", jt_sort:"Сортування", jt_sortNewest:"Спочатку нові", jt_sortBudget:"Більший бюджет", jt_sortDeadline:"Найближчий строк",
       jt_trustFilter:"Довіра", jt_fVerified:"Лише з підтвердженою особою", jt_fSecured:"Лише із захищеною оплатою", jt_fWithin:"Опубліковано за", jt_wAny:"Будь-коли", jt_w1:"24 години", jt_w7:"7 днів", jt_w30:"30 днів",
       jt_aboutClient:"Про клієнта", jt_report:"Поскаржитися", jt_reportTitle:"Поскаржитися на завдання", jt_reportWhy:"Що не так?", jt_r_scam:"Шахрайство", jt_r_fake:"Неправдиве або оманливе", jt_r_spam:"Спам", jt_r_duplicate:"Розміщено кілька разів", jt_r_payment:"Проблема з оплатою", jt_r_inappropriate:"Неприйнятний вміст", jt_r_other:"Інше",
       jt_reportNote:"Щось іще? (необов'язково)", jt_reportSend:"Надіслати", jt_reportThanks:"Дякуємо — ми подивимося.", jt_reportHint:"Скарги читає людина. Нікого не блокують автоматично.",
@@ -4962,6 +4980,117 @@
       pj_chooseRole:"Спершу виберіть, хто вам потрібен.", pj_more:"ще {n}", pj_allProfs:"Усі професії ({n})", pj_someProfs:"Знайдено: {n}", pj_change:"Змінити" }
   };
   for(const code in T_PJ){ if(T[code]) Object.assign(T[code], T_PJ[code]); }
+
+  // ---------- Reviews that belong to an Order (7 languages) ----------
+  const T_REV = {
+    en:{ rv2_cardLine:"This Order is finished — how was it?", rv2_leave:"Leave a review", rv2_edit:"Edit your review", rv2_title:"How was it working with {name}?",
+      rv2_blind:"Your review is shown once both sides have reviewed each other, or when the review period ends.",
+      rv2_rating:"Your rating", rv2_why:"What happened?", rv2_reason:"Main reason", rv2_reasonPick:"Choose a reason",
+      rv2_comment:"Add a comment (optional)", rv2_ph:"What was it like to work together?", rv2_phLow:"Please explain what went wrong",
+      rv2_submit:"Submit review", rv2_update:"Update review", rv2_thanks:"Thank you — your review has been recorded.",
+      rv2_waiting:"Waiting for the other side. Your review stays hidden until then.", rv2_done:"Both reviews are public now.",
+      rv2_theirs:"Their review", rv2_yours:"Your review", rv2_closes:"Review period ends {d}", rv2_verified:"Verified Cuvori Order",
+      rv2_none:"No reviews yet", rv2_needReason:"Please choose a reason.", rv2_needWhy:"Please say what happened (at least 10 characters).",
+      rv2_locked:"Both reviews are public, so they can no longer be changed.", rv2_closed:"The review period for this Order has ended.",
+      rv2_notDone:"You can review once the Order is completed.", rv2_report:"Report this review", rv2_editsLeft:"You can still change this {n} more time(s) before it goes public.",
+      rv2_scopeNote:"Use this only when something agreed in the Order was not delivered — not when extra work outside the Order was declined.",
+      rvr_poor_quality:"Poor quality", rvr_missed_deadline:"Missed deadline", rvr_poor_communication:"Poor communication",
+      rvr_scope_not_followed:"Did not follow agreed scope", rvr_unprofessional:"Unprofessional behaviour", rvr_other:"Other",
+      rvr_scope_changes:"Repeatedly changed agreed scope", rvr_payment_issue:"Payment or dispute issue",
+      rvr_unreasonable_demands:"Unreasonable demands", rvr_missing_materials:"Did not provide required materials", rvr_abusive:"Abusive or inappropriate behaviour" },
+    de:{ rv2_cardLine:"Dieser Auftrag ist abgeschlossen — wie war es?", rv2_leave:"Bewertung abgeben", rv2_edit:"Bewertung bearbeiten", rv2_title:"Wie war die Zusammenarbeit mit {name}?",
+      rv2_blind:"Ihre Bewertung wird sichtbar, sobald beide Seiten sich bewertet haben oder der Bewertungszeitraum endet.",
+      rv2_rating:"Ihre Bewertung", rv2_why:"Was ist passiert?", rv2_reason:"Hauptgrund", rv2_reasonPick:"Grund wählen",
+      rv2_comment:"Kommentar hinzufügen (optional)", rv2_ph:"Wie war die Zusammenarbeit?", rv2_phLow:"Bitte erklären Sie, was schiefgelaufen ist",
+      rv2_submit:"Bewertung senden", rv2_update:"Bewertung aktualisieren", rv2_thanks:"Danke — Ihre Bewertung wurde gespeichert.",
+      rv2_waiting:"Wir warten auf die andere Seite. Bis dahin bleibt Ihre Bewertung verborgen.", rv2_done:"Beide Bewertungen sind jetzt öffentlich.",
+      rv2_theirs:"Bewertung der anderen Seite", rv2_yours:"Ihre Bewertung", rv2_closes:"Bewertungszeitraum endet am {d}", rv2_verified:"Bestätigter Cuvori-Auftrag",
+      rv2_none:"Noch keine Bewertungen", rv2_needReason:"Bitte wählen Sie einen Grund.", rv2_needWhy:"Bitte beschreiben Sie, was passiert ist (mindestens 10 Zeichen).",
+      rv2_locked:"Beide Bewertungen sind öffentlich und können nicht mehr geändert werden.", rv2_closed:"Der Bewertungszeitraum für diesen Auftrag ist abgelaufen.",
+      rv2_notDone:"Bewerten können Sie, sobald der Auftrag abgeschlossen ist.", rv2_report:"Bewertung melden", rv2_editsLeft:"Sie können das noch {n}-mal ändern, bevor es öffentlich wird.",
+      rv2_scopeNote:"Nur wenn etwas im Auftrag Vereinbartes nicht geliefert wurde — nicht, wenn zusätzliche Arbeit außerhalb des Auftrags abgelehnt wurde.",
+      rvr_poor_quality:"Schlechte Qualität", rvr_missed_deadline:"Termin nicht eingehalten", rvr_poor_communication:"Schlechte Kommunikation",
+      rvr_scope_not_followed:"Vereinbarter Umfang nicht eingehalten", rvr_unprofessional:"Unprofessionelles Verhalten", rvr_other:"Sonstiges",
+      rvr_scope_changes:"Vereinbarter Umfang wiederholt geändert", rvr_payment_issue:"Zahlungs- oder Streitproblem",
+      rvr_unreasonable_demands:"Unangemessene Forderungen", rvr_missing_materials:"Nötige Materialien nicht bereitgestellt", rvr_abusive:"Beleidigendes oder unangemessenes Verhalten" },
+    ru:{ rv2_cardLine:"Заказ завершён — как всё прошло?", rv2_leave:"Оставить отзыв", rv2_edit:"Изменить отзыв", rv2_title:"Как прошла работа с {name}?",
+      rv2_blind:"Ваш отзыв появится, когда обе стороны оставят отзывы или когда закончится срок.",
+      rv2_rating:"Ваша оценка", rv2_why:"Что произошло?", rv2_reason:"Основная причина", rv2_reasonPick:"Выберите причину",
+      rv2_comment:"Комментарий (по желанию)", rv2_ph:"Как вам работалось вместе?", rv2_phLow:"Опишите, что пошло не так",
+      rv2_submit:"Отправить отзыв", rv2_update:"Обновить отзыв", rv2_thanks:"Спасибо — отзыв сохранён.",
+      rv2_waiting:"Ждём вторую сторону. До этого ваш отзыв скрыт.", rv2_done:"Оба отзыва теперь видны.",
+      rv2_theirs:"Отзыв второй стороны", rv2_yours:"Ваш отзыв", rv2_closes:"Срок отзыва заканчивается {d}", rv2_verified:"Подтверждённый заказ Cuvori",
+      rv2_none:"Отзывов пока нет", rv2_needReason:"Выберите причину.", rv2_needWhy:"Опишите, что произошло (не менее 10 символов).",
+      rv2_locked:"Оба отзыва уже видны, изменить их нельзя.", rv2_closed:"Срок отзыва по этому заказу истёк.",
+      rv2_notDone:"Отзыв можно оставить после завершения заказа.", rv2_report:"Пожаловаться на отзыв", rv2_editsLeft:"Можно изменить ещё {n} раз(а), пока отзыв скрыт.",
+      rv2_scopeNote:"Только если не сделано то, что было в заказе, — не за отказ от дополнительной работы вне заказа.",
+      rvr_poor_quality:"Низкое качество", rvr_missed_deadline:"Сорван срок", rvr_poor_communication:"Плохое общение",
+      rvr_scope_not_followed:"Не выполнен согласованный объём", rvr_unprofessional:"Непрофессиональное поведение", rvr_other:"Другое",
+      rvr_scope_changes:"Постоянно менял(а) согласованный объём", rvr_payment_issue:"Проблема с оплатой или спор",
+      rvr_unreasonable_demands:"Необоснованные требования", rvr_missing_materials:"Не предоставил(а) нужные материалы", rvr_abusive:"Оскорбительное поведение" },
+    lt:{ rv2_cardLine:"Užsakymas baigtas — kaip sekėsi?", rv2_leave:"Palikti atsiliepimą", rv2_edit:"Keisti atsiliepimą", rv2_title:"Kaip sekėsi dirbti su {name}?",
+      rv2_blind:"Jūsų atsiliepimas bus matomas, kai abi pusės parašys atsiliepimus arba pasibaigs terminas.",
+      rv2_rating:"Jūsų įvertinimas", rv2_why:"Kas nutiko?", rv2_reason:"Pagrindinė priežastis", rv2_reasonPick:"Pasirinkite priežastį",
+      rv2_comment:"Komentaras (nebūtina)", rv2_ph:"Kaip sekėsi dirbti kartu?", rv2_phLow:"Parašykite, kas nepavyko",
+      rv2_submit:"Siųsti atsiliepimą", rv2_update:"Atnaujinti atsiliepimą", rv2_thanks:"Ačiū — atsiliepimas išsaugotas.",
+      rv2_waiting:"Laukiame kitos pusės. Iki tol jūsų atsiliepimas paslėptas.", rv2_done:"Abu atsiliepimai jau matomi.",
+      rv2_theirs:"Kitos pusės atsiliepimas", rv2_yours:"Jūsų atsiliepimas", rv2_closes:"Atsiliepimų laikas baigiasi {d}", rv2_verified:"Patvirtintas Cuvori užsakymas",
+      rv2_none:"Atsiliepimų kol kas nėra", rv2_needReason:"Pasirinkite priežastį.", rv2_needWhy:"Parašykite, kas nutiko (bent 10 simbolių).",
+      rv2_locked:"Abu atsiliepimai jau vieši, keisti nebegalima.", rv2_closed:"Šio užsakymo atsiliepimų laikas baigėsi.",
+      rv2_notDone:"Atsiliepimą galėsite palikti, kai užsakymas bus užbaigtas.", rv2_report:"Pranešti apie atsiliepimą", rv2_editsLeft:"Dar galite pakeisti {n} kart(us), kol atsiliepimas paslėptas.",
+      rv2_scopeNote:"Naudokite tik tada, kai nepadaryta tai, dėl ko susitarta užsakyme — ne tada, kai atsisakyta papildomo darbo, kurio užsakyme nebuvo.",
+      rvr_poor_quality:"Prasta kokybė", rvr_missed_deadline:"Praleistas terminas", rvr_poor_communication:"Prastas bendravimas",
+      rvr_scope_not_followed:"Nesilaikyta sutartos apimties", rvr_unprofessional:"Neprofesionalus elgesys", rvr_other:"Kita",
+      rvr_scope_changes:"Nuolat keitė sutartą apimtį", rvr_payment_issue:"Mokėjimo ar ginčo problema",
+      rvr_unreasonable_demands:"Nepagrįsti reikalavimai", rvr_missing_materials:"Nepateikė reikalingos medžiagos", rvr_abusive:"Įžeidžiamas elgesys" },
+    es:{ rv2_cardLine:"Este pedido ha terminado — ¿qué tal fue?", rv2_leave:"Dejar una reseña", rv2_edit:"Editar tu reseña", rv2_title:"¿Qué tal fue trabajar con {name}?",
+      rv2_blind:"Tu reseña se mostrará cuando ambas partes se hayan valorado o cuando termine el plazo.",
+      rv2_rating:"Tu valoración", rv2_why:"¿Qué pasó?", rv2_reason:"Motivo principal", rv2_reasonPick:"Elige un motivo",
+      rv2_comment:"Añadir un comentario (opcional)", rv2_ph:"¿Cómo fue trabajar juntos?", rv2_phLow:"Explica qué salió mal",
+      rv2_submit:"Enviar reseña", rv2_update:"Actualizar reseña", rv2_thanks:"Gracias — tu reseña se ha guardado.",
+      rv2_waiting:"Esperando a la otra parte. Hasta entonces tu reseña queda oculta.", rv2_done:"Las dos reseñas ya son públicas.",
+      rv2_theirs:"Su reseña", rv2_yours:"Tu reseña", rv2_closes:"El plazo de reseñas termina el {d}", rv2_verified:"Pedido Cuvori verificado",
+      rv2_none:"Todavía no hay reseñas", rv2_needReason:"Elige un motivo.", rv2_needWhy:"Cuenta qué pasó (al menos 10 caracteres).",
+      rv2_locked:"Las dos reseñas son públicas y ya no se pueden cambiar.", rv2_closed:"El plazo de reseñas de este pedido ha terminado.",
+      rv2_notDone:"Podrás valorar cuando el pedido esté completado.", rv2_report:"Denunciar esta reseña", rv2_editsLeft:"Puedes cambiarla {n} vez/veces más antes de que sea pública.",
+      rv2_scopeNote:"Úsalo solo cuando no se entregó algo acordado en el pedido, no cuando se rechazó trabajo extra fuera del pedido.",
+      rvr_poor_quality:"Mala calidad", rvr_missed_deadline:"Plazo incumplido", rvr_poor_communication:"Mala comunicación",
+      rvr_scope_not_followed:"No siguió el alcance acordado", rvr_unprofessional:"Comportamiento poco profesional", rvr_other:"Otro",
+      rvr_scope_changes:"Cambió el alcance acordado repetidamente", rvr_payment_issue:"Problema de pago o disputa",
+      rvr_unreasonable_demands:"Exigencias poco razonables", rvr_missing_materials:"No facilitó los materiales necesarios", rvr_abusive:"Comportamiento abusivo o inapropiado" },
+    pl:{ rv2_cardLine:"To zlecenie jest zakończone — jak poszło?", rv2_leave:"Wystaw opinię", rv2_edit:"Edytuj opinię", rv2_title:"Jak wyglądała współpraca z {name}?",
+      rv2_blind:"Twoja opinia pojawi się, gdy obie strony wystawią opinie albo gdy skończy się termin.",
+      rv2_rating:"Twoja ocena", rv2_why:"Co się stało?", rv2_reason:"Główny powód", rv2_reasonPick:"Wybierz powód",
+      rv2_comment:"Dodaj komentarz (opcjonalnie)", rv2_ph:"Jak wyglądała współpraca?", rv2_phLow:"Napisz, co poszło nie tak",
+      rv2_submit:"Wyślij opinię", rv2_update:"Zaktualizuj opinię", rv2_thanks:"Dziękujemy — opinia została zapisana.",
+      rv2_waiting:"Czekamy na drugą stronę. Do tego czasu opinia pozostaje ukryta.", rv2_done:"Obie opinie są już widoczne.",
+      rv2_theirs:"Opinia drugiej strony", rv2_yours:"Twoja opinia", rv2_closes:"Termin opinii mija {d}", rv2_verified:"Potwierdzone zlecenie Cuvori",
+      rv2_none:"Nie ma jeszcze opinii", rv2_needReason:"Wybierz powód.", rv2_needWhy:"Napisz, co się stało (co najmniej 10 znaków).",
+      rv2_locked:"Obie opinie są już publiczne i nie można ich zmienić.", rv2_closed:"Termin wystawienia opinii do tego zlecenia minął.",
+      rv2_notDone:"Opinię można wystawić po zakończeniu zlecenia.", rv2_report:"Zgłoś tę opinię", rv2_editsLeft:"Możesz to zmienić jeszcze {n} raz(y), zanim stanie się publiczne.",
+      rv2_scopeNote:"Tylko wtedy, gdy nie dostarczono czegoś uzgodnionego w zleceniu — nie za odmowę dodatkowej pracy spoza zlecenia.",
+      rvr_poor_quality:"Słaba jakość", rvr_missed_deadline:"Niedotrzymany termin", rvr_poor_communication:"Słaba komunikacja",
+      rvr_scope_not_followed:"Nie trzymał(a) się uzgodnionego zakresu", rvr_unprofessional:"Nieprofesjonalne zachowanie", rvr_other:"Inne",
+      rvr_scope_changes:"Wielokrotnie zmieniał(a) uzgodniony zakres", rvr_payment_issue:"Problem z płatnością lub sporem",
+      rvr_unreasonable_demands:"Nieuzasadnione żądania", rvr_missing_materials:"Nie dostarczył(a) potrzebnych materiałów", rvr_abusive:"Obraźliwe lub niewłaściwe zachowanie" },
+    uk:{ rv2_cardLine:"Замовлення завершено — як усе пройшло?", rv2_leave:"Залишити відгук", rv2_edit:"Змінити відгук", rv2_title:"Як пройшла робота з {name}?",
+      rv2_blind:"Ваш відгук стане видимим, коли обидві сторони напишуть відгуки або коли завершиться строк.",
+      rv2_rating:"Ваша оцінка", rv2_why:"Що сталося?", rv2_reason:"Головна причина", rv2_reasonPick:"Оберіть причину",
+      rv2_comment:"Додати коментар (необов'язково)", rv2_ph:"Як вам працювалося разом?", rv2_phLow:"Опишіть, що пішло не так",
+      rv2_submit:"Надіслати відгук", rv2_update:"Оновити відгук", rv2_thanks:"Дякуємо — відгук збережено.",
+      rv2_waiting:"Чекаємо на другу сторону. До того ваш відгук прихований.", rv2_done:"Обидва відгуки тепер видимі.",
+      rv2_theirs:"Відгук другої сторони", rv2_yours:"Ваш відгук", rv2_closes:"Строк відгуків завершується {d}", rv2_verified:"Підтверджене замовлення Cuvori",
+      rv2_none:"Відгуків поки немає", rv2_needReason:"Оберіть причину.", rv2_needWhy:"Напишіть, що сталося (щонайменше 10 символів).",
+      rv2_locked:"Обидва відгуки вже публічні, змінити їх не можна.", rv2_closed:"Строк відгуків для цього замовлення завершився.",
+      rv2_notDone:"Залишити відгук можна після завершення замовлення.", rv2_report:"Поскаржитися на відгук", rv2_editsLeft:"Можна змінити ще {n} раз(и), поки відгук прихований.",
+      rv2_scopeNote:"Лише коли не зроблено те, про що домовлено в замовленні, — не за відмову від додаткової роботи поза замовленням.",
+      rvr_poor_quality:"Низька якість", rvr_missed_deadline:"Зірваний строк", rvr_poor_communication:"Погане спілкування",
+      rvr_scope_not_followed:"Не дотримано узгодженого обсягу", rvr_unprofessional:"Непрофесійна поведінка", rvr_other:"Інше",
+      rvr_scope_changes:"Постійно змінював(ла) узгоджений обсяг", rvr_payment_issue:"Проблема з оплатою або спір",
+      rvr_unreasonable_demands:"Необґрунтовані вимоги", rvr_missing_materials:"Не надав(ла) потрібних матеріалів", rvr_abusive:"Образлива або неприйнятна поведінка" }
+  };
+  for(const code in T_REV){ if(T[code]) Object.assign(T[code], T_REV[code]); }
+
 
   state.people = {};          // user id -> {name}
   state.convs = {};           // other user key -> {id, other, name, last}
@@ -5150,7 +5279,7 @@
     const base = row || { id:myId(), display_name:displayName(), role_label:"editor", city:"", country:"", languages:[], specializations:[], tools:[], credentials:[], bio:"", rate_amount:null, rate_unit:"hour", available:true, responds_hours:24, turnaround_days:7, revisions:2, is_public:false, created_at:new Date().toISOString(), _draft:!row };
     PROFILES[ownKey()]=rowToProfile(base, projects||[]); if(!row) PROFILES[ownKey()].draft=true;
     PROFILES[ownKey()].services=mySvcs||[]; PROFILES[ownKey()].servicesComplete=true;
-    await loadReviewsFor([myId()]); renderMyReviewsPanel();
+    await loadReviewsFor([myId()]); await loadProfileReviews(myId()); renderMyReviewsPanel();
     return PROFILES[ownKey()];
   }
 
@@ -5294,8 +5423,8 @@
     const row=$("#jobProfRow"), chips=$("#jobFilterRow"); if(!row||!chips) return;
     const present=new Set($$("#jobList .job[data-job]:not(.demo-hidden)").map(j=>j.dataset.role).filter(Boolean));
     const profs=PROF.professions.filter(p=>present.has(p.slug) || p.slug===state.js.profession).sort((a,b)=>a.sort_order-b.sort_order);
-    row.innerHTML=`<span class="filter-label">${escapeHtml(t("p_roleFilter"))}</span><button class="chip prof-chip${state.js.profession?"":" selected"}" data-prof="">${escapeHtml(t("pf_all"))}</button>`+
-      profs.map(p=>`<button class="chip prof-chip${state.js.profession===p.slug?" selected":""}" data-prof="${escapeHtml(p.slug)}">${escapeHtml(pl(p.labels))}</button>`).join("");
+    row.innerHTML=`<span class="filter-label">${escapeHtml(t("jk_kind"))}</span><button class="chip prof-chip${state.js.profession?"":" selected"}" data-prof="">${escapeHtml(t("jk_all"))}</button>`+
+      profs.map(p=>`<button class="chip prof-chip${state.js.profession===p.slug?" selected":""}" data-prof="${escapeHtml(p.slug)}">${escapeHtml(jobKindName(p.slug))}</button>`).join("");
     $$(".prof-chip",row).forEach(b=>b.addEventListener("click",()=>{ const slug=b.dataset.prof||null; if(slug!==state.js.profession){ state.js.profession=slug; state.js.f={}; } renderJobFilterBar(); runJobSearch(); }));
     const keys=state.js.profession?jobFilterKeys(state.js.profession):[];
     const n=Object.keys(state.js.f).length;
@@ -5304,6 +5433,110 @@
     chips.classList.toggle("hidden", !keys.length);
     $$("[data-jk]",chips).forEach(b=>b.addEventListener("click",()=>{ const k=b.dataset.jk, v=b.dataset.jv; const cur=(state.js.f[k]||[]).slice(); const i=cur.indexOf(v); if(i>=0) cur.splice(i,1); else cur.push(v); if(cur.length) state.js.f[k]=cur; else delete state.js.f[k]; renderJobFilterBar(); runJobSearch(); }));
     $("#clearJobChips",chips)?.addEventListener("click",()=>{ state.js.f={}; renderJobFilterBar(); runJobSearch(); });
+    syncJobsRolePicker();
+  }
+
+
+  // Browse jobs talks about the work, not the worker: "Video editing", not "Video editor".
+  // A profession missing here (one added later in the admin panel) falls back to its own name.
+  const JOB_KIND = {
+    "video-editor":{en:"Video editing",de:"Videoschnitt",ru:"Видеомонтаж",lt:"Vaizdo montažas",es:"Edición de vídeo",pl:"Montaż wideo",uk:"Відеомонтаж"},
+    "videographer":{en:"Video shooting",de:"Videodreh",ru:"Видеосъёмка",lt:"Filmavimas",es:"Grabación de vídeo",pl:"Filmowanie",uk:"Відеозйомка"},
+    "photographer":{en:"Photography",de:"Fotografie",ru:"Фотосъёмка",lt:"Fotografavimas",es:"Fotografía",pl:"Fotografia",uk:"Фотозйомка"},
+    "motion-designer":{en:"Motion design",de:"Motion Design",ru:"Моушн-дизайн",lt:"Judesio dizainas",es:"Motion design",pl:"Motion design",uk:"Моушн-дизайн"},
+    "animator":{en:"Animation",de:"Animation",ru:"Анимация",lt:"Animacija",es:"Animación",pl:"Animacja",uk:"Анімація"},
+    "colorist":{en:"Colour grading",de:"Farbkorrektur",ru:"Цветокоррекция",lt:"Spalvų korekcija",es:"Corrección de color",pl:"Korekcja koloru",uk:"Кольорокорекція"},
+    "drone-operator":{en:"Drone filming",de:"Drohnenaufnahmen",ru:"Съёмка с дрона",lt:"Filmavimas dronu",es:"Grabación con dron",pl:"Nagrania dronem",uk:"Зйомка дроном"},
+    "sound-designer":{en:"Sound design",de:"Sounddesign",ru:"Саунд-дизайн",lt:"Garso dizainas",es:"Diseño de sonido",pl:"Sound design",uk:"Саунд-дизайн"},
+    "audio-editor":{en:"Audio editing",de:"Audioschnitt",ru:"Аудиомонтаж",lt:"Garso montažas",es:"Edición de audio",pl:"Montaż dźwięku",uk:"Аудіомонтаж"},
+    "voice-over":{en:"Voice-over",de:"Sprachaufnahme",ru:"Озвучка",lt:"Įgarsinimas",es:"Locución",pl:"Lektor",uk:"Озвучення"},
+    "music-producer":{en:"Music production",de:"Musikproduktion",ru:"Продюсирование музыки",lt:"Muzikos kūrimas",es:"Producción musical",pl:"Produkcja muzyczna",uk:"Музичне продюсування"},
+    "graphic-designer":{en:"Graphic design",de:"Grafikdesign",ru:"Графический дизайн",lt:"Grafikos dizainas",es:"Diseño gráfico",pl:"Projektowanie graficzne",uk:"Графічний дизайн"},
+    "brand-designer":{en:"Brand & logo design",de:"Marken- & Logodesign",ru:"Дизайн бренда и логотипа",lt:"Prekės ženklo ir logotipo dizainas",es:"Diseño de marca y logotipo",pl:"Projektowanie marki i logo",uk:"Дизайн бренду та логотипу"},
+    "ui-ux-designer":{en:"UI/UX design",de:"UI/UX-Design",ru:"UI/UX-дизайн",lt:"UI/UX dizainas",es:"Diseño UI/UX",pl:"Projektowanie UI/UX",uk:"UI/UX-дизайн"},
+    "illustrator":{en:"Illustration",de:"Illustration",ru:"Иллюстрация",lt:"Iliustravimas",es:"Ilustración",pl:"Ilustracja",uk:"Ілюстрація"},
+    "three-d-artist":{en:"3D modelling",de:"3D-Modellierung",ru:"3D-моделирование",lt:"3D modeliavimas",es:"Modelado 3D",pl:"Modelowanie 3D",uk:"3D-моделювання"},
+    "presentation-designer":{en:"Presentation design",de:"Präsentationsdesign",ru:"Дизайн презентаций",lt:"Prezentacijų dizainas",es:"Diseño de presentaciones",pl:"Projektowanie prezentacji",uk:"Дизайн презентацій"},
+    "photo-retoucher":{en:"Photo retouching",de:"Bildretusche",ru:"Ретушь фото",lt:"Nuotraukų retušavimas",es:"Retoque fotográfico",pl:"Retusz zdjęć",uk:"Ретуш фото"},
+    "copywriter":{en:"Copywriting",de:"Werbetexte",ru:"Копирайтинг",lt:"Reklaminiai tekstai",es:"Redacción publicitaria",pl:"Copywriting",uk:"Копірайтинг"},
+    "content-writer":{en:"Content writing",de:"Content-Texte",ru:"Написание контента",lt:"Turinio rašymas",es:"Redacción de contenidos",pl:"Pisanie treści",uk:"Написання контенту"},
+    "scriptwriter":{en:"Scriptwriting",de:"Drehbuch",ru:"Сценарий",lt:"Scenarijaus rašymas",es:"Guion",pl:"Scenariusz",uk:"Сценарій"},
+    "translator":{en:"Translation",de:"Übersetzung",ru:"Перевод",lt:"Vertimas",es:"Traducción",pl:"Tłumaczenie",uk:"Переклад"},
+    "proofreader":{en:"Proofreading & editing",de:"Lektorat & Korrektur",ru:"Корректура и редактура",lt:"Korektūra ir redagavimas",es:"Corrección y edición",pl:"Korekta i redakcja",uk:"Коректура та редагування"},
+    "social-media-manager":{en:"Social media management",de:"Social-Media-Betreuung",ru:"Ведение соцсетей",lt:"Socialinių tinklų priežiūra",es:"Gestión de redes sociales",pl:"Prowadzenie social mediów",uk:"Ведення соцмереж"},
+    "ads-specialist":{en:"Paid ads",de:"Bezahlte Anzeigen",ru:"Платная реклама",lt:"Mokama reklama",es:"Publicidad de pago",pl:"Reklamy płatne",uk:"Платна реклама"},
+    "seo-specialist":{en:"SEO",de:"SEO",ru:"SEO",lt:"SEO",es:"SEO",pl:"SEO",uk:"SEO"},
+    "ugc-creator":{en:"UGC content",de:"UGC-Content",ru:"UGC-контент",lt:"UGC turinys",es:"Contenido UGC",pl:"Treści UGC",uk:"UGC-контент"},
+    "web-developer":{en:"Web development",de:"Webentwicklung",ru:"Веб-разработка",lt:"Svetainių kūrimas",es:"Desarrollo web",pl:"Tworzenie stron",uk:"Веб-розробка"},
+    "mobile-developer":{en:"Mobile app development",de:"App-Entwicklung",ru:"Разработка мобильных приложений",lt:"Mobiliųjų programėlių kūrimas",es:"Desarrollo de apps móviles",pl:"Tworzenie aplikacji mobilnych",uk:"Розробка мобільних застосунків"},
+    "no-code-developer":{en:"No-code website",de:"No-Code-Website",ru:"Сайт на no-code",lt:"No-code svetainė",es:"Web no-code",pl:"Strona no-code",uk:"No-code сайт"},
+    "game-developer":{en:"Game development",de:"Spieleentwicklung",ru:"Разработка игр",lt:"Žaidimų kūrimas",es:"Desarrollo de videojuegos",pl:"Tworzenie gier",uk:"Розробка ігор"}
+  };
+  function jobKindName(slug){ const k=JOB_KIND[slug]; return k ? pl(k) : profName(slug); }
+  function jobKindText(p){ const k=JOB_KIND[p.slug]; return k ? Object.values(k).join(" ") : ""; }
+
+  // ---- Browse jobs: one search box. Click it for the list of work types (it scrolls); type to narrow the
+  // list and the jobs at the same time; pick a type to filter by it. ----
+  function jobKindOpen(open){
+    const pop=$("#jobKindList"), inp=$("#jobSearch"), box=$("#jobSearchBar"); if(!pop||!inp) return;
+    pop.classList.toggle("hidden", !open); inp.setAttribute("aria-expanded", open?"true":"false");
+    if(box) box.classList.toggle("open", !!open);
+    if(open){ pop.scrollTop=0; setTimeout(()=>{ const sel=pop.querySelector('.pp-opt[data-slug="'+(state.js.profession||"__none__")+'"]'); if(sel) sel.scrollIntoView({block:"nearest"}); },0); }
+    else pop.querySelectorAll(".pp-opt.on").forEach(b=>b.classList.remove("on"));
+  }
+  function jobKindMatches(list, q){
+    const words=foldText(q).split(/[\s,]+/).filter(Boolean); if(!words.length) return list;
+    const byKind=list.filter(p=>{ const hay=foldText(jobKindText(p)); return words.every(w=>hay.includes(w)); });
+    const byProf=profMatches(list, q);
+    const seen=new Set(); return [...byKind, ...byProf].filter(p=>seen.has(p.slug)?false:(seen.add(p.slug),true));
+  }
+  function renderJobKindList(q){
+    const pop=$("#jobKindList"); if(!pop) return;
+    const all=jobProfessions(), list=jobKindMatches(all, q);
+    if(!list.length){ pop.innerHTML=`<div class="pp-none">${escapeHtml(fill(t("pj_noMatch"),{q:q}))}</div>`; return; }
+    const groups=[]; list.forEach(p=>{ const g=groups.find(x=>x.slug===p.group_slug); (g?g.items:(groups.push({slug:p.group_slug,items:[]}),groups[groups.length-1].items)).push(p); });
+    pop.innerHTML=`<button type="button" class="pp-opt" role="option" data-slug="">${escapeHtml(t("jk_all"))}</button>`+groups.map(g=>{
+      const gl=groupLabels(g.slug) ? pl(groupLabels(g.slug)) : "";
+      return (gl?`<div class="pp-group">${escapeHtml(gl)}</div>`:"")+g.items.map(p=>`<button type="button" class="pp-opt" role="option" data-slug="${escapeHtml(p.slug)}">${escapeHtml(jobKindName(p.slug))}</button>`).join("");
+    }).join("");
+  }
+  // the box shows the chosen type of work; while it does, the text is a filter, not a search
+  function syncJobsRolePicker(){
+    const inp=$("#jobSearch"), clr=$("#jobKindClear"); if(!inp) return;
+    if(state.js.profession && !profBySlug(state.js.profession)) state.js.profession=null;
+    if(state.js.profession){ inp.value=jobKindName(state.js.profession); inp.dataset.picked="1"; }
+    else if(inp.dataset.picked){ inp.value=""; delete inp.dataset.picked; }
+    inp.classList.toggle("picked", !!state.js.profession);
+    if(clr) clr.classList.toggle("hidden", !state.js.profession && !inp.value);
+  }
+  function setJobsRole(slug){
+    const next=slug||null;
+    if(next!==state.js.profession){ state.js.profession=next; state.js.f={}; }
+    const inp=$("#jobSearch"); if(inp && !next){ inp.value=""; delete inp.dataset.picked; }
+    jobKindOpen(false);
+    renderJobFilterBar(); runJobSearch();
+  }
+  function initJobsRolePicker(){
+    const inp=$("#jobSearch"), pop=$("#jobKindList"), clr=$("#jobKindClear"); if(!inp||!pop) return;
+    const openWith=q=>{ renderJobKindList(q); jobKindOpen(true); };
+    inp.addEventListener("focus",()=>openWith(inp.dataset.picked?"":inp.value));
+    inp.addEventListener("click",()=>{ if(pop.classList.contains("hidden")) openWith(inp.dataset.picked?"":inp.value); });
+    inp.addEventListener("input",()=>{
+      if(inp.dataset.picked){ delete inp.dataset.picked; inp.classList.remove("picked"); state.js.profession=null; state.js.f={}; renderJobFilterBar(); }
+      clr&&clr.classList.toggle("hidden", !inp.value);
+      openWith(inp.value);
+    });
+    inp.addEventListener("keydown",e=>{
+      const opts=[...pop.querySelectorAll(".pp-opt")]; const i=opts.findIndex(o=>o.classList.contains("on"));
+      if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault(); if(!opts.length) return; if(pop.classList.contains("hidden")) openWith(inp.value);
+        const next=e.key==="ArrowDown" ? Math.min(i+1, opts.length-1) : Math.max(i-1, 0); opts.forEach(o=>o.classList.remove("on"));
+        const el=[...pop.querySelectorAll(".pp-opt")][i<0&&e.key==="ArrowUp"?0:next]; if(el){ el.classList.add("on"); el.scrollIntoView({block:"nearest"}); } return; }
+      if(e.key==="Enter"){ const on=pop.querySelector(".pp-opt.on"); if(on){ e.preventDefault(); setJobsRole(on.dataset.slug); } else jobKindOpen(false); return; }
+      if(e.key==="Escape"){ jobKindOpen(false); }
+    });
+    inp.addEventListener("blur",()=>setTimeout(()=>jobKindOpen(false),150));
+    pop.addEventListener("mousedown",e=>{ const b=e.target.closest(".pp-opt"); if(b){ e.preventDefault(); setJobsRole(b.dataset.slug); } });
+    clr&&clr.addEventListener("click",()=>{ setJobsRole(""); inp.focus(); });
   }
   function renderRealJobs(){
     if(!REAL) return;
@@ -5368,6 +5601,7 @@
     if(isEditor()) await loadReminderData();
     state.unreadMsgs=(await realNotifications()).length;
     if(isAdmin()){ const { data } = await sb.rpc("admin_open_reports"); state.openReports=Number(data)||0; } else state.openReports=0;
+    await loadReviewInvites();
     const sc=$("[data-stat='chats'] .stat-num"); if(sc) sc.textContent=Object.keys(state.convs).length;
     updateNotifBadge();
   }
@@ -5493,58 +5727,132 @@
   function starPick(n){ return [1,2,3,4,5].map(i=>`<button type="button" class="star-pick ${i<=n?"on":""}" data-star="${i}" aria-label="${i}">★</button>`).join(""); }
   function monthYear(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{month:"short",year:"numeric"}); }catch(e){ return ""; } }
 
-  // ----- reviews -----
+  // ----- reviews, one per side of a finished Order -----
+  // The public number comes only from reviews written by the two people named on a completed
+  // Order. The older profile-to-profile table (public.reviews) is left alone but no longer
+  // feeds the rating: a review has to be earned by an Order now.
+  const RV_REASONS={
+    client:["poor_quality","missed_deadline","poor_communication","scope_not_followed","unprofessional","other"],
+    freelancer:["poor_communication","scope_changes","payment_issue","unreasonable_demands","missing_materials","abusive","other"]
+  };
+  async function loadReviewInvites(){
+    state.reviewInvites=[];
+    if(!REAL || !myId()) return [];
+    const { data } = await sb.rpc("my_review_invites");
+    state.reviewInvites=Array.isArray(data)?data:[];
+    state.pendingReviews=state.reviewInvites.length;
+    return state.reviewInvites;
+  }
+  function reviewInviteFor(userId){ return (state.reviewInvites||[]).find(i=>i.other_id===userId)||null; }
   async function loadReviewsFor(ids){
     if(!REAL || !ids.length) return;
-    const { data } = await sb.from("reviews").select("*").in("editor", ids).order("created_at",{ascending:false});
-    const rows=data||[];
-    const names={};
-    const clientIds=[...new Set(rows.map(r=>r.client))];
-    if(clientIds.length){ const { data:ps } = await sb.from("profiles").select("id,first_name").in("id",clientIds); (ps||[]).forEach(p=>names[p.id]=p.first_name||t("a_guest")); }
+    const { data } = await sb.rpc("profile_ratings", { p_ids:ids });
+    const by={}; (data||[]).forEach(r=>{ by[r.user_id]=r; });
     ids.forEach(id=>{
       const p=PROFILES["u:"+id]; if(!p) return;
-      const mine=rows.filter(r=>r.editor===id);
-      p.reviews=mine.map(r=>({ id:r.id, client:r.client, who:names[r.client]||t("a_guest"), stars:r.stars, text:r.body||"", when:monthYear(r.created_at), verified:!!r.via_contract }));
-      p.reviewCount=mine.length;
-      p.rating=mine.length ? (mine.reduce((s,r)=>s+r.stars,0)/mine.length).toFixed(1) : "–";
+      const agg=by[id];
+      p.reviewCount=agg?Number(agg.reviews)||0:0;
+      p.rating=p.reviewCount?Number(agg.rating).toFixed(1):"–";
+      if(!Array.isArray(p.reviews)) p.reviews=[];
     });
   }
-  function myReviewOf(key){ const p=PROFILES[key]; if(!p||!myId()) return null; return (p.reviews||[]).find(r=>r.client===myId())||null; }
-  async function reviewModal(key){
+  async function loadProfileReviews(id){
+    if(!REAL || !id) return;
+    const { data } = await sb.rpc("profile_reviews", { p_user:id, p_limit:20 });
+    const p=PROFILES["u:"+id]; if(!p||!data) return;
+    p.reviewCount=Number(data.count)||0;
+    p.rating=p.reviewCount?Number(data.rating).toFixed(1):"–";
+    p.reviews=(data.reviews||[]).map(r=>({ id:r.id, who:r.who||t("a_guest"), stars:Number(r.rating)||0, text:r.comment||"",
+      when:monthYear(r.submitted_at), verified:true, role:r.role, reason:r.reason||null }));
+  }
+  // what the two sides see about their own Order while the blind is still down
+  function orderReviewPanel(rv){
+    if(!rv) return "";
+    const mine=rv.mine, theirs=rv.theirs;
+    const lines=[];
+    if(mine){
+      lines.push(`<div class="rv-line"><strong>${t("rv2_yours")}</strong> <span style="color:var(--warn)">${stars(mine.rating)}</span>${mine.comment?`<div class="muted" style="white-space:pre-wrap;margin-top:4px">${escapeHtml(mine.comment)}</div>`:""}</div>`);
+    }
+    if(theirs){
+      lines.push(`<div class="rv-line"><strong>${t("rv2_theirs")}</strong> <span style="color:var(--warn)">${stars(theirs.rating)}</span>${theirs.comment?`<div style="white-space:pre-wrap;margin-top:4px">${escapeHtml(theirs.comment)}</div>`:""}${theirs.reason?`<div class="muted small" style="margin-top:4px">${escapeHtml(t("rvr_"+theirs.reason))}</div>`:""}<div style="margin-top:6px"><button class="link-btn" data-rv-report="${escapeHtml(theirs.id)}">${t("rv2_report")}</button></div></div>`);
+    } else if(rv.theirs_waiting){
+      lines.push(`<div class="muted small">${t("rv2_waiting")}</div>`);
+    }
+    if(mine && !mine.revealed) lines.push(`<div class="muted small">${t("rv2_blind")}</div>`);
+    if(mine && mine.revealed && theirs) lines.push(`<div class="muted small">${t("rv2_done")}</div>`);
+    if(!mine && rv.eligible) lines.push(`<div class="muted small">${escapeHtml(fill(t("rv2_closes"),{d:fmtDate(rv.closes_at)}))}</div>`);
+    if(!lines.length) return "";
+    return `<div class="rv-box"><strong>${t("reviewsTitle")}</strong>${lines.join("")}</div>`;
+  }
+  // the whole review flow: stars, a reason when the rating is low, a comment, submit
+  async function orderReviewModal(orderId, after){
     if(!requireAuth()) return;
-    const p=PROFILES[key]; if(!p||!p.real) return;
-    const { data:okToReview } = await sb.rpc("can_review", { ed:p.id });
-    if(!okToReview){ toast(t("rv_needChat")); return; }
-    const existing=myReviewOf(key); let stars=existing?existing.stars:5;
-    openModal(existing?t("rv_editTitle"):t("rv_title"), `
-      <p class="muted" style="margin-bottom:10px">${fill(t("rv_intro"),{name:escapeHtml(p.name)})}</p>
-      <div class="star-row" id="rvStars">${starPick(stars)}</div>
-      <label style="margin-top:12px">${t("rv_textLabel")}</label><textarea id="rvText" maxlength="2000" style="min-height:100px" placeholder="${t("rv_placeholder")}">${escapeHtml(existing?existing.text:"")}</textarea>
-      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="primary" id="rvSave">${existing?t("p_saveChanges"):t("rv_submit")}</button>${existing?`<button class="secondary" id="rvDelete">${t("rv_delete")}</button>`:""}</div>`, root=>{
-        $("#rvStars",root).addEventListener("click",e=>{ const b=e.target.closest(".star-pick"); if(!b) return; stars=+b.dataset.star; $("#rvStars",root).innerHTML=starPick(stars); });
+    const { data:rv, error } = await sb.rpc("order_review_state", { p_order:orderId });
+    if(error||!rv){ toast(errText(error)); return; }
+    if(!rv.eligible && !rv.mine){ toast(t(rv.status==="completed"?"rv2_closed":"rv2_notDone")); return; }
+    const mine=rv.mine||null;
+    if(mine && mine.revealed){ toast(t("rv2_locked")); return; }
+    const role=rv.role==="freelancer"?"freelancer":"client";
+    const reasons=RV_REASONS[role];
+    let rating=mine?Number(mine.rating):5;
+    let reason=mine&&mine.reason?mine.reason:"";
+    const low=()=>rating<=3;
+    const reasonOpts=()=>`<option value="">${t("rv2_reasonPick")}</option>`+reasons.map(r=>`<option value="${r}"${r===reason?" selected":""}>${escapeHtml(t("rvr_"+r))}</option>`).join("");
+    openModal(fill(t("rv2_title"),{name:rv.other_name||""}), `
+      <p class="muted" style="margin-bottom:10px">${t("rv2_blind")}</p>
+      <label>${t("rv2_rating")}</label>
+      <div class="star-row" id="rvStars">${starPick(rating)}</div>
+      <div id="rvLowBox" class="${low()?"":"hidden"}" style="margin-top:12px">
+        <label>${t("rv2_reason")}</label>
+        <select id="rvReason">${reasonOpts()}</select>
+        <div id="rvScopeNote" class="muted small hidden" style="margin-top:6px">${t("rv2_scopeNote")}</div>
+      </div>
+      <label style="margin-top:12px" id="rvTextLabel">${low()?t("rv2_why"):t("rv2_comment")}</label>
+      <textarea id="rvText" maxlength="2000" style="min-height:100px" placeholder="${low()?t("rv2_phLow"):t("rv2_ph")}">${escapeHtml(mine?mine.comment||"":"")}</textarea>
+      ${mine?`<div class="muted small" style="margin-top:6px">${escapeHtml(fill(t("rv2_editsLeft"),{n:mine.edits_left}))}</div>`:""}
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="primary" id="rvSave">${mine?t("rv2_update"):t("rv2_submit")}</button><button class="secondary" data-close-modal>${t("cancelBtn")}</button></div>`, root=>{
+        const sync=()=>{
+          $("#rvStars",root).innerHTML=starPick(rating);
+          $("#rvLowBox",root).classList.toggle("hidden",!low());
+          $("#rvTextLabel",root).textContent=low()?t("rv2_why"):t("rv2_comment");
+          $("#rvText",root).placeholder=low()?t("rv2_phLow"):t("rv2_ph");
+          const sc=$("#rvScopeNote",root); if(sc) sc.classList.toggle("hidden", $("#rvReason",root).value!=="scope_not_followed");
+        };
+        $("#rvStars",root).addEventListener("click",e=>{ const b=e.target.closest(".star-pick"); if(!b) return; rating=+b.dataset.star; sync(); });
+        $("#rvReason",root).addEventListener("change",e=>{ reason=e.target.value; sync(); });
         $("#rvSave",root).addEventListener("click",async()=>{
-          const body=$("#rvText",root).value.trim();
-          const { error } = await sb.from("reviews").upsert({ editor:p.id, client:myId(), stars, body, updated_at:new Date().toISOString() }, { onConflict:"editor,client" });
-          if(error){ toast(/row-level security/i.test(error.message||"")?t("rv_needChat"):errText(error)); console.error(error); return; }
-          closeModal(); toast(t("rv_thanks")); await loadReviewsFor([p.id]); openProfile(key); renderRealCards(); setTimeout(()=>$$(".ep-tab").find(b=>b.dataset.tab==="reviews")?.click(),50);
-        });
-        $("#rvDelete",root)?.addEventListener("click",async()=>{
-          const { error } = await sb.from("reviews").delete().eq("editor",p.id).eq("client",myId());
-          if(error){ toast(t("a_error")); return; }
-          closeModal(); await loadReviewsFor([p.id]); openProfile(key); renderRealCards();
+          const comment=$("#rvText",root).value.trim();
+          reason=$("#rvReason",root).value||"";
+          if(low() && !reason){ toast(t("rv2_needReason")); return; }
+          if(low() && comment.length<10){ toast(t("rv2_needWhy")); return; }
+          const btn=$("#rvSave",root); btn.disabled=true;
+          const { data, error:e2 } = await sb.rpc("order_review_submit", { p_order:orderId, p_rating:rating, p_comment:comment, p_reason:low()?reason:null });
+          if(e2||data!=="ok"){ toast(errText(e2,data)); btn.disabled=false; return; }
+          closeModal(); toast(t("rv2_thanks"));
+          await loadReviewInvites(); updateNotifBadge();
+          if(myId()){ await loadReviewsFor([myId()]); await loadProfileReviews(myId()); renderMyReviewsPanel(); }
+          if(typeof after==="function") after();
         });
       });
+  }
+  function myReviewOf(key){ const p=PROFILES[key]; if(!p||!myId()) return null; return (p.reviews||[]).find(r=>r.mine)||null; }
+  // On a profile, the button only exists when a finished Order with that person is waiting for a review.
+  async function reviewModal(key){
+    const p=PROFILES[key]; if(!p||!p.real) return;
+    const inv=reviewInviteFor(p.id);
+    if(!inv){ toast(t("rv2_notDone")); return; }
+    orderReviewModal(inv.order_id, ()=>{ loadProfileReviews(p.id).then(()=>openProfile(key)); });
   }
   function reviewButtonHtml(key){
     const p=PROFILES[key];
     if(!REAL || !p || !p.real || isOwner(key)) return "";
-    const mine=myReviewOf(key);
-    return `<div style="margin-top:12px"><button class="secondary" data-review="${key}">${mine?t("rv_editTitle"):t("rv_leave")}</button></div>`;
+    if(!reviewInviteFor(p.id)) return "";
+    return `<div style="margin-top:12px"><button class="secondary" data-review="${key}">${t("rv2_leave")}</button></div>`;
   }
   function renderMyReviewsPanel(){
     const host=$("#accountReviews"); if(!host||!REAL) return;
     const p=ownKey()?PROFILES[ownKey()]:null;
-    if(!isEditor()||!p||!p.reviews||!p.reviews.length){ host.innerHTML=`<div class="empty-state small"><strong>${t("p_noReviewsTitle")}</strong><p class="muted">${t(isEditor()?"rv_noneEditor":"reviewsDesc")}</p></div>`; return; }
+    if(!p||!p.reviews||!p.reviews.length){ host.innerHTML=`<div class="empty-state small"><strong>${t("p_noReviewsTitle")}</strong><p class="muted">${t(isEditor()?"rv_noneEditor":"reviewsDesc")}</p></div>`; return; }   // clients are reviewed too
     host.innerHTML=`<div class="muted" style="margin-bottom:8px"><span class="stars" style="color:var(--warn)">${stars(Math.round(+p.rating)||5)}</span> ${fill(t("ratingLabel"),{r:p.rating,n:p.reviewCount})}</div>`+p.reviews.slice(0,3).map(r=>`<div class="review-item"><div class="review-top"><strong>${escapeHtml(r.who)}</strong><span class="muted"><span style="color:var(--warn)">${stars(r.stars)}</span> · ${r.when}</span></div><p>${escapeHtml(r.text)}</p></div>`).join("");
   }
 
@@ -5709,7 +6017,7 @@
       else if(ADMIN.tab==="professions"){ await adminLoadProfessions(); renderAdminProfessions(); }
       else if(ADMIN.tab==="fees"){ const { data, error } = await sb.rpc("admin_fee_schedules"); if(error) throw error; ADMIN.fees=data||[]; renderAdminFees(); }
       else if(ADMIN.tab==="jobs"){ const { data, error } = await sb.rpc("admin_job_queue"); if(error) throw error; ADMIN.jobQueue=data||[]; const r=await sb.rpc("setting",{ p_key:"posting_rules" }); ADMIN.rules=(r.data&&typeof r.data==="object")?r.data:{}; renderAdminJobs(); }
-      else { const { data, error } = await sb.rpc("admin_list_reviews"); if(error) throw error; ADMIN.reviews=data||[]; renderAdminReviews(); }
+      else { const { data, error } = await sb.rpc("admin_list_order_reviews", { p_status:null }); if(error) throw error; ADMIN.reviews=data||[]; renderAdminReviews(); }
     }catch(e){ console.error(e); host.innerHTML=`<div class="notice danger">${escapeHtml(e.message||"Error")}</div>`; }
   }
   function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}); }catch(e){ return ""; } }
@@ -5773,8 +6081,23 @@
   }
   function renderAdminReviews(){
     const host=$("#adminBody");
-    host.innerHTML=`<div class="admin-stats"><span><strong>${ADMIN.reviews.length}</strong> reviews</span></div><div class="admin-table" style="margin-top:12px">${ADMIN.reviews.map(r=>`<div class="admin-row"><div class="admin-main"><div><span style="color:var(--warn)">${stars(r.stars)}</span> <strong>${escapeHtml(r.client_name||r.client_email||"?")}</strong> <span class="muted small">→ ${escapeHtml(r.editor_name||"?")} · ${fmtDate(r.created_at)}</span></div><div class="muted small">${escapeHtml(r.body||"(no text)")}</div></div><div class="admin-actions"><button class="link-btn danger-text" data-rdel="${r.id}">Delete</button></div></div>`).join("")||`<div class="muted">No reviews yet.</div>`}</div>`;
-    $$("[data-rdel]").forEach(b=>b.addEventListener("click",async()=>{ const { error } = await sb.from("reviews").delete().eq("id",b.dataset.rdel); if(error){ toast(error.message); return; } toast("Review deleted"); openAdmin(); }));
+    const rows=ADMIN.reviews.map(r=>{
+      const hidden=r.moderation_status==="hidden";
+      return `<div class="admin-row"><div class="admin-main">
+        <div><span style="color:var(--warn)">${stars(r.rating)}</span> <strong>${escapeHtml(r.reviewer_name||"?")}</strong> <span class="muted small">→ ${escapeHtml(r.reviewee_name||"?")} · ${fmtDate(r.submitted_at)} · ${escapeHtml(r.reviewer_role||"")}${r.is_revealed?"":" · blind"}${hidden?" · hidden":""}</span></div>
+        <div class="muted small">${escapeHtml(r.comment||"(no text)")}</div>
+        ${r.low_reason?`<div class="muted small">${escapeHtml(t("rvr_"+r.low_reason))}</div>`:""}
+        ${r.moderation_reason?`<div class="muted small">Moderation note: ${escapeHtml(r.moderation_reason)}</div>`:""}
+      </div><div class="admin-actions">${hidden
+        ? `<button class="link-btn" data-rshow="${escapeHtml(r.id)}">Show</button>`
+        : `<button class="link-btn danger-text" data-rhide="${escapeHtml(r.id)}">Hide</button>`}</div></div>`;
+    }).join("")||`<div class="muted">No reviews yet.</div>`;
+    host.innerHTML=`<div class="admin-stats"><span><strong>${ADMIN.reviews.length}</strong> reviews</span></div><div class="admin-table" style="margin-top:12px">${rows}</div>`;
+    const moderate=async(id,status,reason)=>{ const { data, error } = await sb.rpc("admin_moderate_review",{ p_id:id, p_status:status, p_reason:reason||"" });
+      if(error||data!=="ok"){ toast(errText(error,data)); return; } toast("Saved"); openAdmin(); };
+    // the words a person wrote are never edited here: a review is only hidden, with a reason kept for the record
+    $$("[data-rhide]").forEach(b=>b.addEventListener("click",()=>oNoteModal("Hide review","Why is this review being hidden? The text itself is kept.","reason","Hide",false,async note=>{ closeModal(); await moderate(b.dataset.rhide,"hidden",note); })));
+    $$("[data-rshow]").forEach(b=>b.addEventListener("click",()=>moderate(b.dataset.rshow,"visible","")));
   }
   function initAdmin(){
     $$("[data-admin-open]").forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); openAdmin(); }));
@@ -6900,7 +7223,7 @@
   }
 
   // ---------- chat cards: one line, click to open ----------
-  const O_CARD_EVENTS={ proposed:"c_ev_proposed", accept:"c_ev_accept", client_accepted:"c_ev_client_accepted", freelancer_accepted:"c_ev_freelancer_accepted", decline:"c_ev_decline", cancel:"c_ev_cancel",
+  const O_CARD_EVENTS={ review_invited:"rv2_cardLine", proposed:"c_ev_proposed", accept:"c_ev_accept", client_accepted:"c_ev_client_accepted", freelancer_accepted:"c_ev_freelancer_accepted", decline:"c_ev_decline", cancel:"c_ev_cancel",
     mark_paid:"c_ev_mark_paid", confirm_paid:"c_ev_confirm_paid", complete:"c_ev_complete", funded:"c_ev_funded", deliver:"c_ev_deliver", request_changes:"c_ev_request_changes", dispute:"c_ev_dispute",
     approve:"c_ev_approve", auto_release:"c_ev_auto_release", resolved_release:"c_ev_resolved_release", resolved_refund:"c_ev_resolved_refund", resolved_split:"c_ev_resolved_split", terms_changed:"c_ev_terms_changed",
     milestone_submitted:"c_ev_milestone_submitted", milestone_approved:"c_ev_milestone_approved", amendment_proposed:"c_ev_amendment_proposed", amendment_accepted:"c_ev_amendment_accepted", amendment_declined:"c_ev_amendment_declined", cancel_refund:"c_ev_cancel_refund", chargeback_won:"c_ev_chargeback_won", chargeback_lost:"c_ev_chargeback_lost" };
@@ -7081,6 +7404,16 @@
       }
     }
 
+    // --- reviews, once the Order is finished ---
+    if(o.status==="completed" && (iAmClient||iAmFl)){
+      const { data:rv } = await sb.rpc("order_review_state", { p_order:o.id });
+      if(rv){
+        extra=(extra||"")+orderReviewPanel(rv);
+        if(rv.eligible && !rv.mine) act("review","primary",t("rv2_leave"),()=>orderReviewModal(o.id,again));
+        else if(rv.eligible && rv.mine && !rv.mine.revealed && rv.mine.edits_left>0) act("review","secondary",t("rv2_edit"),()=>orderReviewModal(o.id,again));
+      }
+    }
+
     // --- milestones ---
     let msHtml="";
     if(ms.length){
@@ -7128,6 +7461,7 @@
           if(a==="changes") return oNoteModal(t("o_requestChanges")+" · "+m.title, t("es_changesDesc"), t("o_changesPh"), t("es_changesBtn"), false, async note=>{ if(!note){ toast(t("a_fillAll")); return; } const { data, error } = await sb.rpc("order_milestone_action",{ p_ms:m.id, p_action:"request_changes", p_note:note }); if(error||data!=="ok"){ toast(errText(error,data)); return; } closeModal(); toast(t("c_updated")); again(); });
           if(a==="approve"){ const { data, error } = await sb.rpc("order_milestone_action",{ p_ms:m.id, p_action:"approve" }); if(error||data!=="ok"){ toast(errText(error,data)); return; } toast(t("c_updated")); again(); }
         }));
+        $$("[data-rv-report]",root).forEach(btn=>btn.addEventListener("click",()=>{ const id=btn.dataset.rvReport; if(typeof reportModal==="function") reportModal("review", id); else oNoteModal(t("rv2_report"), t("rv2_report"), "", t("rv2_report"), false, async note=>{ const { data, error } = await sb.rpc("submit_report",{ p_kind:"abuse", p_target_kind:"review", p_target_id:id, p_body:note||"" }); if(error||data!=="ok"){ toast(errText(error,data)); return; } closeModal(); toast(t("ra_reportSent")); }); }));
         $$("[data-amact]",root).forEach(btn=>btn.addEventListener("click",async()=>{ const a=btn.dataset.amact; btn.disabled=true; const { data, error } = await sb.rpc("order_amendment_decide",{ p_amend:open.id, p_accept:a==="accept" }); if(error||data!=="ok"){ toast(errText(error,data)); btn.disabled=false; return; } toast(t("c_updated")); again(); }));
       }, "wide");
   }
@@ -7399,7 +7733,7 @@
 
   // ---------- Inner page behaviours ----------
   function runJobSearch(){
-    const q=($("#jobSearch").value||"").trim().toLowerCase();
+    const q=($("#jobSearch").dataset.picked ? "" : ($("#jobSearch").value||"")).trim().toLowerCase();
     const active={};
     $$(".job-filter:checked").forEach(c=>{(active[c.dataset.key]=active[c.dataset.key]||[]).push(c.value);});
     let n=0;
@@ -7486,6 +7820,7 @@
     // Post a job
     $$("#page-post-job input,#page-post-job textarea,#page-post-job select").forEach(i=>{i.addEventListener("input",updateJobPreview);i.addEventListener("change",updateJobPreview);});
     initJobRolePicker();                                   // the skills and software lists follow the profession
+    initJobsRolePicker();                                  // Browse jobs: type to find a type of work, list scrolls
     fillJobCatSelect(); renderJobFilterBar(); updateJobPreview();
     // How it works
     $$("#howSeg .seg-btn").forEach(b=>b.addEventListener("click",()=>{

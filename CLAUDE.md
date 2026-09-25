@@ -61,3 +61,15 @@ Follow the order in `README.md`. Do not start the Frame.io-style review system u
 - Database access rules are enforced server-side (e.g. Supabase Row Level Security), not only in the frontend.
 - Uploaded media has correct permissions.
 - Error messages never leak secrets or private data.
+
+## Reviews — decisions that are settled
+
+Do not change any of these without asking Egidijus first:
+
+- One overall rating, 1 to 5 stars. No sub-scores for quality, communication, delivery or anything else.
+- Reviews are two-sided and belong to a completed Order. One per side per Order, never about yourself, never from someone who was not on the Order.
+- Blind: a review is shown when both sides have written one, or when the review window ends. The window is the `review_window_days` setting, never a number in the code.
+- 1-3 stars require a reason and a written explanation; 4-5 stars require nothing written.
+- Both clients and freelancers build reputations, and the public number stays simple: `4.8 ★ · 37 reviews`.
+- Reviews are never bought, boosted or invented, and the "Verified Cuvori Order" badge is only ever earned by a real Order.
+- Moderation hides, it never rewrites: the text a person wrote is kept even when the review is hidden.

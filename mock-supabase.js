@@ -98,7 +98,11 @@
     cfg.professions.forEach(p=>{ p.professional_count=db.services.filter(s=>s.profession_slug===p.slug && s.is_public && (db.editor_profiles.find(e=>e.id===s.profile_id)||{}).is_public && listed(s.profile_id)).length; });
     return cfg;
   }
-  const db = { profiles:[], editor_profiles:[], projects:[], jobs:[], conversations:[], messages:[], reviews:[], invites:[], contracts:[], payout_details:[], user_flags:[], user_identifiers:[], deleted_user_identifiers:[], reports:[], services:[], order_milestones:[], order_amendments:[], order_events:[], order_payments:[], fee_schedules:[{id:1,provider:"stripe",region:"EEA",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"Stripe: standard European cards"},{id:2,provider:"stripe",region:"INTL",country:null,customer_kind:"any",method:"any",percent:3.25,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"non-European cards"},{id:3,provider:"stripe",region:"ANY",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"country unknown"}] };
+  const db = { profiles:[], editor_profiles:[], projects:[], jobs:[], conversations:[], messages:[], reviews:[], invites:[], contracts:[], payout_details:[], user_flags:[], user_identifiers:[], deleted_user_identifiers:[], reports:[], services:[], order_milestones:[], order_amendments:[], order_events:[], order_payments:[], order_reviews:[], fee_schedules:[{id:1,provider:"stripe",region:"EEA",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"Stripe: standard European cards"},{id:2,provider:"stripe",region:"INTL",country:null,customer_kind:"any",method:"any",percent:3.25,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"non-European cards"},{id:3,provider:"stripe",region:"ANY",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"country unknown"}] };
+  const rvDays = () => (window.__MOCK_REVIEW_DAYS||14);
+  const rvOpens = (c) => new Date(c.completed_at||c.closed_at||c.created_at||Date.now()).getTime();
+  const rvDue = (c) => rvOpens(c) + rvDays()*86400000;
+  const rvPublic = (r) => r.moderation_status==="visible" && (r.is_revealed || Date.now() > new Date(r.reveal_due).getTime());
   const users = {}; let session = null; const listeners = []; const invites = {"CUV-2026-EDIT":null,"CUV-MAYA-0001":null};
   const channels = [];
   const norm=v=>String(v||"").toLowerCase().replace(/[\s\-\.]/g,"");
@@ -188,7 +192,10 @@
             if(table==="payout_details") r = r.filter(x => x.id===uid());
             if(table==="jobs"){ const a=(db.profiles.find(p=>p.id===uid())||{}).is_admin; r = r.filter(x => (jobOpenNow(x)&&listedOwner(x.owner)) || x.owner===uid() || a); }
             if(table==="messages") r = r.filter(x => db.conversations.some(c=>c.id===x.conversation_id && uid() && (c.user_a===uid()||c.user_b===uid())));
-            if(st.order) r = r.slice().sort((a,b)=> (a[st.order.k]>b[st.order.k]?1:a[st.order.k]<b[st.order.k]?-1:0) * (st.order.asc?1:-1));
+            // ties keep the order the rows were written in (a real database orders by its own key too):
+            // without this, two rows written in the same millisecond come back in an arbitrary order
+            if(st.order){ const pos=new Map(r.map((x,i)=>[x,i])); const k=st.order.k, dir=st.order.asc?1:-1;
+              r = r.slice().sort((a,b)=>{ const d=(a[k]>b[k]?1:a[k]<b[k]?-1:0); return (d||(pos.get(a)-pos.get(b))) * dir; }); }
             if(st.limit) r = r.slice(0, st.limit);
             out = (st.single||st.maybe) ? (r[0]||null) : r;
             if(st.single && !out) error={message:"no rows"};
@@ -269,7 +276,7 @@
         if(!c && (!oP || oP.banned || !(meP&&meP.is_admin || db.editor_profiles.some(e=>e.id===other&&e.is_public) || db.jobs.some(j=>j.owner===other&&j.status==="open")))) return {error:{message:"not_available"}};
         if(!c){ c={id:uuid(),user_a:a,user_b:b,created_at:new Date().toISOString(),last_message_at:new Date().toISOString()}; db.conversations.push(c); } return {data:c.id}; }
       const me=()=>db.profiles.find(p=>p.id===uid()); const adm=()=>me()&&me().is_admin;
-      const purge=(t)=>{ const p0=db.profiles.find(p=>p.id===t); if(p0&&(p0.banned||db.user_flags.some(f=>f.user_id===t))){ const note=db.user_flags.filter(f=>f.user_id===t).map(f=>f.kind+': '+f.reason).join(' | ')||'banned'; db.user_identifiers.filter(i=>i.user_id===t).forEach(i=>db.deleted_user_identifiers.push({id:uuid(),kind:i.kind,value_hash:i.value_hash,label:i.label,note})); } db.user_identifiers=db.user_identifiers.filter(i=>i.user_id!==t); db.user_flags=db.user_flags.filter(f=>f.user_id!==t); db.reviews=db.reviews.filter(r=>r.client!==t&&r.editor!==t); db.messages=db.messages.filter(m=>m.sender!==t); db.conversations=db.conversations.filter(c=>c.user_a!==t&&c.user_b!==t); db.jobs=db.jobs.filter(j=>j.owner!==t); db.projects=db.projects.filter(p=>p.owner!==t); db.editor_profiles=db.editor_profiles.filter(e=>e.id!==t); db.profiles=db.profiles.filter(p=>p.id!==t); for(const e in users) if(users[e].id===t) delete users[e]; };
+      const purge=(t)=>{ const p0=db.profiles.find(p=>p.id===t); if(p0&&(p0.banned||db.user_flags.some(f=>f.user_id===t))){ const note=db.user_flags.filter(f=>f.user_id===t).map(f=>f.kind+': '+f.reason).join(' | ')||'banned'; db.user_identifiers.filter(i=>i.user_id===t).forEach(i=>db.deleted_user_identifiers.push({id:uuid(),kind:i.kind,value_hash:i.value_hash,label:i.label,note})); } db.user_identifiers=db.user_identifiers.filter(i=>i.user_id!==t); db.user_flags=db.user_flags.filter(f=>f.user_id!==t); db.reviews=db.reviews.filter(r=>r.client!==t&&r.editor!==t); db.order_reviews=db.order_reviews.filter(r=>r.reviewer!==t&&r.reviewee!==t); db.messages=db.messages.filter(m=>m.sender!==t); db.conversations=db.conversations.filter(c=>c.user_a!==t&&c.user_b!==t); db.jobs=db.jobs.filter(j=>j.owner!==t); db.projects=db.projects.filter(p=>p.owner!==t); db.editor_profiles=db.editor_profiles.filter(e=>e.id!==t); db.profiles=db.profiles.filter(p=>p.id!==t); for(const e in users) if(users[e].id===t) delete users[e]; };
       if(fn==="payout_info"){ const ed=args.ed; if(!uid()) return {data:null}; const ok=uid()===ed||db.contracts.some(k=>k.editor===ed&&k.client===uid()&&(k.payment_mode||"direct")==="direct"&&["accepted","paid_marked","paid","completed"].includes(k.status)); if(!ok) return {data:null}; const p=db.payout_details.find(x=>x.id===ed); return {data:p?{methods:p.methods,note:p.note}:null}; }
       if(fn==="propose_contract"){ const cv=db.conversations.find(c=>c.id===args.conv&&(c.user_a===uid()||c.user_b===uid())); if(!cv) return {error:{message:"not your conversation"}}; const isEd=id=>(db.profiles.find(p=>p.id===id)||{}).role==="editor"; let ed,cl; if(isEd(cv.user_a)&&!isEd(cv.user_b)){ed=cv.user_a;cl=cv.user_b;} else if(isEd(cv.user_b)&&!isEd(cv.user_a)){ed=cv.user_b;cl=cv.user_a;} else if(isEd(cv.user_a)&&isEd(cv.user_b)){ cl=uid(); ed=uid()===cv.user_a?cv.user_b:cv.user_a; } else return {error:{message:"no editor in this conversation"}}; if(db.contracts.some(x=>x.conversation_id===args.conv&&["proposed","accepted","paid_marked","paid","funded","delivered","disputed"].includes(x.status))) return {error:{message:"active_contract_exists"}}; const bad=validateContract(args); if(bad) return {error:{message:bad}}; const c={id:uuid(),conversation_id:args.conv,editor:ed,client:cl,proposed_by:uid(),title:args.title,description:args.description||"",price:args.price,currency:"EUR",pricing:args.pricing||"project",deadline:args.deadline,revisions:args.revisions==null?2:args.revisions,status:"proposed",payment_mode:args.mode==="escrow"?"escrow":"direct",amount_cents:Math.round(args.price*100),contract_type:args.ctype||"fixed",law_country:args.law||"XX",language:args.lang||"en",terms:args.terms||{},terms_version:1,terms_changed_by:uid(),created_at:new Date().toISOString()}; db.contracts.push(c); evt(c,"proposed"); return {data:c.id}; }
       if(fn==="store_contract_doc"){ const c=db.contracts.find(x=>x.id===args.cid&&(x.editor===uid()||x.client===uid())); if(!c) return {data:"not_found"}; if(c.terms_doc) return {data:"ok"}; if(["proposed","declined","cancelled"].includes(c.status)) return {data:"not_allowed"}; if(!args.doc||typeof args.doc!=="object"||JSON.stringify(args.doc).length>200000) return {data:"bad_terms"}; c.terms_doc=args.doc; return {data:"ok"}; }
@@ -354,6 +361,86 @@
       if(fn==="admin_list_bad_actors"){ if(!adm()) return {data:[]}; return {data: db.profiles.filter(p=>p.banned||db.user_flags.some(f=>f.user_id===p.id)).map(p=>{ const fl=db.user_flags.filter(f=>f.user_id===p.id).sort((a,b)=>b.created_at.localeCompare(a.created_at)); const e=db.editor_profiles.find(x=>x.id===p.id); const lost=db.contracts.filter(c=>c.disputed_at&&["completed","refunded"].includes(c.status)&&((c.editor===p.id&&c.resolution==="refund")||(c.client===p.id&&c.resolution==="release"))).length; const won=db.contracts.filter(c=>c.disputed_at&&["completed","refunded"].includes(c.status)&&((c.editor===p.id&&c.resolution==="release")||(c.client===p.id&&c.resolution==="refund"))).length; const open=db.contracts.filter(c=>c.status==="disputed"&&(c.editor===p.id||c.client===p.id)).length; return {...p, display_name:e?e.display_name:null, flag_count:fl.length, last_flag:fl[0]?fl[0].created_at:null, disputes_lost:lost, disputes_won:won, disputes_open:open, flags:fl, identifiers:db.user_identifiers.filter(i=>i.user_id===p.id).map(i=>({kind:i.kind,label:i.label,shared:db.user_identifiers.filter(j=>j.kind===i.kind&&j.value_hash===i.value_hash&&j.user_id!==p.id).length}))}; })}; }
       if(fn==="editor_can_receive"){ const p=db.payout_details.find(x=>x.id===args.ed); return {data:!!(p&&p.stripe_payouts_enabled)}; }
       if(fn==="admin_list_contracts"){ if(!adm()) return {data:[]}; return {data: db.contracts.map(c=>({...c, funded_cents:c.funded_cents||0, released_cents:c.released_cents||0, refunded_cents:c.refunded_cents||0, editor_name:(db.editor_profiles.find(e=>e.id===c.editor)||{}).display_name, client_name:(db.profiles.find(p=>p.id===c.client)||{}).first_name})).sort((a,b)=>(b.status==="disputed")-(a.status==="disputed"))}; }
+      // ----- reviews that belong to an Order (v22) -----
+      if(fn==="review_window_days"){ return {data: (window.__MOCK_REVIEW_DAYS||14)}; }
+      if(fn==="my_review_invites"){
+        if(!uid()) return {data:[]};
+        const out=db.contracts.filter(c=>c.status==="completed" && (c.client===uid()||c.editor===uid()))
+          .filter(c=>!db.order_reviews.some(r=>r.order_id===c.id && r.reviewer===uid()))
+          .filter(c=>rvDue(c)>Date.now())
+          .map(c=>{ const other=c.client===uid()?c.editor:c.client; const pr=db.profiles.find(p=>p.id===other)||{};
+            const ep=db.editor_profiles.find(e=>e.id===other);
+            return { order_id:c.id, other_id:other, title:c.title, closes_at:new Date(rvDue(c)).toISOString(), other_name:(ep&&ep.display_name)||pr.first_name||"Cuvori" }; });
+        return {data: out};
+      }
+      if(fn==="profile_ratings"){
+        const ids=args.p_ids||[]; const out=[];
+        ids.forEach(id=>{ const vis=db.order_reviews.filter(r=>r.reviewee===id && rvPublic(r));
+          if(vis.length) out.push({ user_id:id, rating:(vis.reduce((s,r)=>s+r.rating,0)/vis.length).toFixed(1), reviews:vis.length }); });
+        return {data: out};
+      }
+      if(fn==="profile_reviews"){
+        const id=args.p_user; const vis=db.order_reviews.filter(r=>r.reviewee===id && rvPublic(r)).sort((a,b)=>new Date(b.submitted_at)-new Date(a.submitted_at));
+        return {data: { user_id:id, rating: vis.length?(vis.reduce((s,r)=>s+r.rating,0)/vis.length).toFixed(1):null, count:vis.length,
+          reviews: vis.map(r=>{ const pr=db.profiles.find(p=>p.id===r.reviewer)||{}; const ep=db.editor_profiles.find(e=>e.id===r.reviewer);
+            const c=db.contracts.find(x=>x.id===r.order_id)||{};
+            return { id:r.id, rating:r.rating, comment:r.comment, reason:r.low_reason, role:r.reviewer_role, profession:c.profession_slug||null,
+                     submitted_at:r.submitted_at, verified:true, who:(ep&&ep.display_name)||pr.first_name||"Cuvori" }; }) }};
+      }
+      if(fn==="order_review_state"){
+        const c=db.contracts.find(x=>x.id===args.p_order); if(!c) return {data:{eligible:false,reason:"not_found"}};
+        const me0=uid(); const role=me0===c.client?"client":(me0===c.editor?"freelancer":null);
+        if(!role) return {data:{eligible:false,reason:"not_your_order"}};
+        const other=role==="client"?c.editor:c.client; const pr=db.profiles.find(p=>p.id===other)||{}; const ep=db.editor_profiles.find(e=>e.id===other);
+        const mine=db.order_reviews.find(r=>r.order_id===c.id && r.reviewer===me0)||null;
+        const theirs=db.order_reviews.find(r=>r.order_id===c.id && r.reviewer!==me0)||null;
+        const shown=!!(theirs && rvPublic(theirs));
+        return {data:{ eligible: c.status==="completed" && rvDue(c)>Date.now(), role, status:c.status,
+          window_days:(window.__MOCK_REVIEW_DAYS||14), closes_at:new Date(rvDue(c)).toISOString(),
+          other_name:(ep&&ep.display_name)||pr.first_name||"Cuvori", other_id:other,
+          mine: mine?{ id:mine.id, rating:mine.rating, comment:mine.comment, reason:mine.low_reason, submitted_at:mine.submitted_at, revealed:rvPublic(mine), edits_left:Math.max(0,2-(mine.edits||0)) }:null,
+          theirs: shown?{ id:theirs.id, rating:theirs.rating, comment:theirs.comment, reason:theirs.low_reason, submitted_at:theirs.submitted_at }:null,
+          theirs_waiting: !!theirs && !shown }};
+      }
+      if(fn==="order_review_submit"){
+        const me0=uid(); if(!me0) return {data:"not_signed_in"};
+        const c=db.contracts.find(x=>x.id===args.p_order); if(!c) return {data:"not_found"};
+        const role=me0===c.client?"client":(me0===c.editor?"freelancer":null);
+        if(!role) return {data:"not_your_order"};
+        if(c.status!=="completed") return {data:"review_not_completed"};
+        if(rvDue(c)<=Date.now()) return {data:"review_window_closed"};
+        const rating=args.p_rating, comment=(args.p_comment||"").trim(); let reason=args.p_reason||null;
+        if(!(rating>=1&&rating<=5)) return {data:"bad_rating"};
+        if(rating<=3){ if(!reason) return {data:"reason_required"}; if(comment.length<10) return {data:"comment_required"}; }
+        else reason=null;
+        const allowed=role==="client"?["poor_quality","missed_deadline","poor_communication","scope_not_followed","unprofessional","other"]
+                                     :["poor_communication","scope_changes","payment_issue","unreasonable_demands","missing_materials","abusive","other"];
+        if(reason && !allowed.includes(reason)) return {data:"bad_reason"};
+        let mine=db.order_reviews.find(r=>r.order_id===c.id && r.reviewer===me0);
+        if(mine){
+          if(rvPublic(mine)) return {data:"review_locked"};
+          if((mine.edits||0)>=2) return {data:"review_edit_limit"};
+          mine.rating=rating; mine.comment=comment; mine.low_reason=reason; mine.edits=(mine.edits||0)+1;
+        } else {
+          mine={ id:uuid(), order_id:c.id, reviewer:me0, reviewee:role==="client"?c.editor:c.client, reviewer_role:role,
+                 rating, comment, low_reason:reason, submitted_at:new Date().toISOString(), reveal_due:new Date(rvDue(c)).toISOString(),
+                 is_revealed:false, revealed_at:null, moderation_status:"visible", moderation_reason:null, edits:0 };
+          db.order_reviews.push(mine);
+        }
+        const other=db.order_reviews.find(r=>r.order_id===c.id && r.reviewer!==me0);
+        if(other){ [mine,other].forEach(r=>{ if(!r.is_revealed){ r.is_revealed=true; r.revealed_at=new Date().toISOString(); } }); }
+        return {data:"ok"};
+      }
+      if(fn==="admin_list_order_reviews"){ if(!adm()) return {data:[]};
+        return {data: db.order_reviews.filter(r=>!args.p_status||r.moderation_status===args.p_status).map(r=>({...r,
+          reviewer_name:(db.profiles.find(p=>p.id===r.reviewer)||{}).first_name||"user",
+          reviewee_name:(db.profiles.find(p=>p.id===r.reviewee)||{}).first_name||"user" }))};
+      }
+      if(fn==="admin_moderate_review"){ if(!adm()) return {data:"forbidden"};
+        const r=db.order_reviews.find(x=>x.id===args.p_id); if(!r) return {data:"not_found"};
+        if(!["visible","reported","hidden"].includes(args.p_status)) return {data:"bad_status"};
+        r.moderation_status=args.p_status; r.moderation_reason=(args.p_reason||"").trim()||null; return {data:"ok"};
+      }
       if(fn==="can_review"){ const ed=args.ed; return {data: !!uid() && uid()!==ed && db.profiles.some(p=>p.id===ed&&p.role==="editor") && db.conversations.some(c=>(c.user_a===uid()&&c.user_b===ed)||(c.user_b===uid()&&c.user_a===ed))}; }
       const held=(t)=>db.contracts.some(k=>(k.editor===t||k.client===t)&&["funded","delivered","disputed","releasing","resolving"].includes(k.status));
       if(fn==="delete_my_account"){ if(!uid()) return {data:"not_signed_in"}; if(held(uid())) return {data:"active_payments"}; purge(uid()); return {data:"ok"}; }
