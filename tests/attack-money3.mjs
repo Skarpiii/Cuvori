@@ -315,7 +315,9 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
   info(`Q6a chargeback on the first payment (${ch.amount}) -> ${w1.status}, pulled back=${reversalsOf(c).reduce((a, r) => a + r.amount, 0)}, freelancer keeps=${moneyOut(c).transferred}, released_cents=${c.released_cents}`);
   STRIPE.idem.clear(); STRIPE.disputes[ch.id].status = "lost";
   const l = await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.closed", ch, { status: "lost" })));
-  vuln(moneyOut(c).transferred !== 12000 - ch.amount, `Q6b ...lost (${l.status}) -> freelancer keeps ${moneyOut(c).transferred} (must be ${12000 - ch.amount}), reversals=${reversalsOf(c).length}, refunded_cents=${c.refunded_cents}`);
+  // the bank takes the whole first payment (price + card fee) from Cuvori; the freelancer gives back only the price
+  // they received from it (10000), never the card processing fee they never got
+  vuln(moneyOut(c).transferred !== 2000, `Q6b ...lost (${l.status}) -> freelancer keeps ${moneyOut(c).transferred} (must be 2000: the top-up's price), reversals=${reversalsOf(c).length}, refunded_cents=${c.refunded_cents}`);
   reset();
 }
 // ---- Q2 mechanism: where does the stale-claim delivery go? ----

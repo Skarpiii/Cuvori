@@ -1,7 +1,7 @@
 // Shared fakes for the payment-function attack suites: a small Stripe (with the rules that bite in
 // production — idempotency, transfer caps per source charge, refund caps per payment, disputes,
 // balance), a small Supabase REST, and helpers to sign webhooks.
-process.env.STRIPE_SECRET_KEY = "sk_test_fake"; process.env.SUPABASE_SERVICE_ROLE_KEY = "service_fake"; process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake"; process.env.SITE_URL = "https://cuvori.test";
+process.env.STRIPE_SECRET_KEY = "sk_test_fake"; process.env.SUPABASE_SERVICE_ROLE_KEY = "service_fake"; process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake"; process.env.SITE_URL = "https://cuvori.test"; process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://tnxujwlfatcvxzevllfr.supabase.co";
 import crypto from "node:crypto";
 export const F = (process.env.TARGET || new URL("..", import.meta.url).pathname.replace(/\/$/, "")) + "/netlify/functions/";
 export const uuid = () => crypto.randomUUID();
@@ -13,8 +13,8 @@ export const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [
   payout_details: [{ id: users.ed.id, methods: [], note: "", stripe_account_id: "acct_1EditorAAAAAAAA", stripe_payouts_enabled: true },
                    { id: users.ed2.id, methods: [], note: "", stripe_account_id: "acct_1SecondBBBBBBBB", stripe_payouts_enabled: true }] };
 export const STRIPE = { sessions: {}, charges: {}, intents: {}, transfers: [], refunds: [], reversals: [], disputes: {}, idem: new Map(), balance: 0, settleDelay: false,
-  accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
-              acct_1SecondBBBBBBBB: { id: "acct_1SecondBBBBBBBB", payouts_enabled: true, charges_enabled: true, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
+  accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
+              acct_1SecondBBBBBBBB: { id: "acct_1SecondBBBBBBBB", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
 export const hooks = { stripe: null, db: null };
 export const urls = [];
 const tick = () => new Promise(r => setImmediate(r));
@@ -31,7 +31,7 @@ export function pay(sessionId, opts = {}) {
   const pi = rid("pi"), ch = rid("ch"); const total = s.amount_total;
   const fee = opts.fee != null ? opts.fee : Math.round(total * 0.015 + 25);
   STRIPE.intents[pi] = { id: pi, amount: total, latest_charge: ch };
-  STRIPE.charges[ch] = { id: ch, amount: total, amount_refunded: 0, sourced: 0, payment_intent: pi, balance_transaction: { id: rid("txn"), fee, net: total - fee, status: STRIPE.settleDelay ? "pending" : "available" }, payment_method_details: { card: { fingerprint: "fp_" + (opts.card || "one"), brand: "visa", last4: "4242" } } };
+  STRIPE.charges[ch] = { id: ch, currency: "eur", amount: total, amount_refunded: 0, sourced: 0, payment_intent: pi, balance_transaction: { id: rid("txn"), fee, net: total - fee, status: STRIPE.settleDelay ? "pending" : "available" }, payment_method_details: { card: { fingerprint: "fp_" + (opts.card || "one"), brand: "visa", last4: "4242" } } };
   if (!STRIPE.settleDelay) STRIPE.balance += total - fee;
   s.payment_status = "paid"; s.payment_intent = pi;
   return { ...s };
@@ -52,6 +52,8 @@ export function stripeHandle(path, method, p) {
       metadata: { contract_id: p.get("metadata[contract_id]"), amount_cents: p.get("metadata[amount_cents]"), fee_cents: p.get("metadata[fee_cents]"), kind: p.get("metadata[kind]") }, params: Object.fromEntries(p) };
     return [200, STRIPE.sessions[id]];
   }
+  if (seg[1] === "charges" && seg[2] && method === "GET") { const ch = STRIPE.charges[seg[2]]; return ch ? [200, ch] : err(404, "No such charge", "resource_missing"); }
+  if (seg[1] === "disputes" && seg[2] && method === "GET") { const d = STRIPE.disputeObjs && STRIPE.disputeObjs[seg[2]]; return d ? [200, d] : err(404, "No such dispute", "resource_missing"); }
   if (seg[1] === "payment_intents" && method === "GET") { const pi = STRIPE.intents[seg[2]]; if (!pi) return err(404, "No such payment_intent", "resource_missing"); return [200, { ...pi, latest_charge: STRIPE.charges[pi.latest_charge] }]; }
   if (path === "/transfers" && method === "POST") {
     const amount = +p.get("amount"), src = p.get("source_transaction"), dest = p.get("destination");
@@ -92,10 +94,11 @@ globalThis.fetch = async (url, init = {}) => {
     try { const h = hooks.stripe && await hooks.stripe(path, method, p); [status, data] = h || stripeHandle(path, method, p); }
     catch (e) { if (key && method === "POST") STRIPE.idem.delete(key); throw e; }
     finally { await tick(); }
+    if (status >= 400 && status < 500 && data && data.error && !data.error.type) data = { ...data, error: { ...data.error, type: "invalid_request_error" } };   // real Stripe always names the error type
     if (key && method === "POST") STRIPE.idem.set(key, { body, status, data });
     return res(status, data);
   }
-  if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(401, {}); }
+  if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(403, { code: 403, error_code: "bad_jwt", msg: "invalid JWT: unable to parse or verify signature" }); }
   if (u.pathname.startsWith("/rest/v1/rpc/")) { const fn = u.pathname.split("/")[4], args = JSON.parse(body); DB.rpc_calls.push({ fn, args });
     if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country === "US" ? 3.25 : 1.5; const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
     if (fn === "expire_jobs") return res(200, 0);
@@ -112,7 +115,7 @@ globalThis.fetch = async (url, init = {}) => {
 };
 export const req = (method, path, { token, body, raw, headers } = {}) => new Request("https://cuvori.test/.netlify/functions/" + path, { method, headers: { ...(token ? { authorization: "Bearer " + token } : {}), ...(headers || {}) }, body: raw != null ? raw : body !== undefined ? JSON.stringify(body) : undefined });
 export const sigFor = (payload, t = Math.floor(Date.now() / 1000), secret = "whsec_fake") => ({ t, v1: crypto.createHmac("sha256", secret).update(`${t}.${payload}`).digest("hex") });
-export const signed = (obj, secret) => { const raw = JSON.stringify({ id: rid("evt"), ...obj }); const s = sigFor(raw, undefined, secret); return { raw, headers: { "stripe-signature": `t=${s.t},v1=${s.v1}` } }; };
+export const signed = (obj, secret) => { if (obj && /^charge\.dispute\./.test(obj.type || "") && obj.data && obj.data.object) { STRIPE.disputeObjs = STRIPE.disputeObjs || {}; STRIPE.disputeObjs[obj.data.object.id] = { ...(STRIPE.disputeObjs[obj.data.object.id] || {}), ...obj.data.object }; } const raw = JSON.stringify({ id: rid("evt"), ...obj }); const s = sigFor(raw, undefined, secret); return { raw, headers: { "stripe-signature": `t=${s.t},v1=${s.v1}` } }; };
 export const call = async (fn, r) => { try { const x = await fn(r); let j = null; try { j = await x.clone().json(); } catch {} return { status: x.status, json: j, headers: x.headers }; } catch (e) { return { status: 500, thrown: e.constructor.name + ": " + e.message }; } };
 export const mk = (o = {}) => { const c = { id: uuid(), conversation_id: conv, editor: users.ed.id, client: users.cl.id, proposed_by: users.ed.id, title: "Job", price: 100, currency: "EUR", pricing: "project", status: "accepted", payment_mode: "escrow", amount_cents: 10000, fee_cents: 0, funded_cents: 0, released_cents: 0, refunded_cents: 0, has_milestones: false, stripe_payment_intent: null, ...o }; DB.contracts.push(c); return c; };
 export const past = (h = 1) => new Date(Date.now() - h * 3600e3).toISOString();

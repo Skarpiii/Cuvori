@@ -18,8 +18,8 @@ const conv = uuid();
 const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [],
   payout_details: [{ id: users.ed.id, methods: [], note: "", stripe_account_id: "acct_1EditorAAAAAAAA", stripe_payouts_enabled: true },
                    { id: users.ed2.id, methods: [], note: "", stripe_account_id: "acct_1VictimBBBBBBBB", stripe_payouts_enabled: true }] };
-const STRIPE = { sessions: {}, transfers: [], refunds: [], idem: new Map(), accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
-                                                                                acct_1VictimBBBBBBBB: { id: "acct_1VictimBBBBBBBB", payouts_enabled: true, charges_enabled: true, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
+const STRIPE = { sessions: {}, transfers: [], refunds: [], idem: new Map(), accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
+                                                                                acct_1VictimBBBBBBBB: { id: "acct_1VictimBBBBBBBB", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
 const hooks = { stripe: null, db: null };
 const urls = [];
 const tick = () => new Promise(r => setImmediate(r));
@@ -63,7 +63,7 @@ globalThis.fetch = async (url, init = {}) => {
     if (key && method === "POST") STRIPE.idem.set(key, { body, status, data });
     return res(status, data);
   }
-  if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(401, {}); }
+  if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(403, { code: 403, error_code: "bad_jwt", msg: "invalid JWT" }); }
   if (u.pathname.startsWith("/rest/v1/rpc/")) { const fn = u.pathname.split("/")[4], args = JSON.parse(body); DB.rpc_calls.push({ fn, args });
     if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country === "US" ? 3.25 : 1.5; const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
     return res(200, null); }
