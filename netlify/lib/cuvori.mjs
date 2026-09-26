@@ -1,31 +1,48 @@
-// Shared helpers for Cuvori's Netlify functions (hardened copy).
-// v18: the Order is the contract. The DB table is still `contracts`; every row is an Order.
-// v21: money that survives the real world — several payments per Order (top-ups), transfers tied to
-// their charge, refunds spread over the payments they came from, chargebacks before and after a
-// release, retries that never pay twice (fresh idempotency keys after a definite failure, the same
-// key after an unknown outcome), and a reconciliation path when a webhook never arrives.
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 
-export const SUPABASE_URL = process.env.SUPABASE_URL || "https://tnxujwlfatcvxzevllfr.supabase.co";
-// Supabase's dashboard now calls this the "secret key"; accept either name so a sensible copy-paste works
-export const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || "";
-export const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
-export const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
-export const SITE_URL = (process.env.SITE_URL || process.env.URL || "https://cuvori.netlify.app").replace(/\/$/, "");
+const env = (name) => String(process.env[name] || "").trim();
+function configuredOrigin(value, name) {
+  if (!value) throw new Error(`Missing configuration: ${name}`);
+  let url;
+  try { url = new URL(value); } catch { throw new Error(`Invalid configuration: ${name}`); }
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash)
+    throw new Error(`Invalid origin configuration: ${name}`);
+  return url.origin;
+}
+// The project address is public (it is in the page too); a missing variable must not take every payment function down.
+export const SUPABASE_URL = configuredOrigin(env("SUPABASE_URL") || "https://tnxujwlfatcvxzevllfr.supabase.co", "SUPABASE_URL");
+// Legacy service-role keys are JWTs; new secret keys use only the apikey header.
+export const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SECRET_KEY");
+export const STRIPE_KEY = env("STRIPE_SECRET_KEY");
+export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
+export const SITE_URL = configuredOrigin(env("SITE_URL") || env("URL"), "SITE_URL or URL");
 // the page may live on another host (GitHub Pages) and call these functions across origins
-export const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || `${SITE_URL},https://cuvori.io,https://www.cuvori.io`).split(",").map(s => s.trim().replace(/\/$/, "")).filter(Boolean);
+// An explicit list replaces the defaults; wildcard origins are not accepted.
+export const ALLOWED_ORIGINS = [...new Set((env("ALLOWED_ORIGINS") || `${SITE_URL},https://cuvori.io,https://www.cuvori.io`).split(",").map(s => s.trim()).filter(Boolean).map(s => configuredOrigin(s, "ALLOWED_ORIGINS")))];
+if (!ALLOWED_ORIGINS.length) throw new Error("ALLOWED_ORIGINS must contain at least one origin");
 export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
-// Stripe takes at most 999,999.99 per payment, and the processing fee rides on top of the price
+// Cuvori's conservative per-payment total cap, including the quoted fee.
+// Provider limits also depend on currency/payment method and must be checked at Checkout.
+export const MAX_PAYMENT_CENTS = 99999999;
 export const MIN_CENTS = 100, MAX_CENTS = 95000000;
 export const HOLDING = ["funded", "delivered", "disputed"];
+const holdsFunds = (c) => !!c && [...HOLDING, "releasing", "resolving"].includes(c.status);
 
-export function escrowEnabled() { return !!(STRIPE_KEY && SERVICE_KEY); }
+export function escrowEnabled() { return !!(STRIPE_KEY && SERVICE_KEY && WEBHOOK_SECRET); }
 
-let corsOrigin = null;
-export function setCors(req) { const o = (req && req.headers.get("origin") || "").replace(/\/$/, ""); corsOrigin = ALLOWED_ORIGINS.includes(o) ? o : null; }
-const corsHeaders = () => corsOrigin ? { "access-control-allow-origin": corsOrigin, "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, OPTIONS", "vary": "origin" } : {};
-export const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...corsHeaders() } });
-export const bad = (msg, status = 400) => json(status, { error: msg });
+const corsContext = new AsyncLocalStorage();
+export function setCors(req) {
+  const o = req && req.headers.get("origin") || "";
+  corsContext.enterWith({ origin: ALLOWED_ORIGINS.includes(o) ? o : null });
+}
+const corsHeaders = () => {
+  const origin = corsContext.getStore()?.origin;
+  return origin ? { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, OPTIONS", "vary": "origin" } : { "vary": "origin" };
+};
+export const json = (status, body, extraHeaders = {}) => new Response(JSON.stringify(body), { status, headers: { ...extraHeaders, "content-type": "application/json", "cache-control": "no-store", ...corsHeaders() } });
+export const bad = (msg, status = 400, extraHeaders = {}) => json(status, { error: msg }, extraHeaders);
 export const isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);
 export const isAcct = (s) => typeof s === "string" && /^acct_[A-Za-z0-9]{8,64}$/.test(s);
 export const isPi = (s) => typeof s === "string" && /^pi_[A-Za-z0-9_]{4,80}$/.test(s);
@@ -34,11 +51,11 @@ export const isSession = (s) => typeof s === "string" && /^cs_[A-Za-z0-9_]{4,120
 export const centsOf = (c) => (Number.isInteger(c.amount_cents) && c.amount_cents > 0 ? c.amount_cents : null);
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 // what the provider is holding for this Order right now (Orders from before v18 carry no counters)
-export const heldCents = (c) => { const f = nz(c.funded_cents) || (["funded", "delivered", "disputed", "releasing", "resolving"].includes(c.status) ? centsOf(c) || 0 : 0); return Math.max(f - nz(c.released_cents) - nz(c.refunded_cents), 0); };
+export const heldCents = (c) => { const f = nz(c.funded_cents) || (holdsFunds(c) ? centsOf(c) || 0 : 0); return Math.max(f - nz(c.released_cents) - nz(c.refunded_cents), 0); };
 export const chargebackOpen = (c) => !!c && c.chargeback_status === "open";
 export async function readJson(req) { try { const b = await req.json(); return b && typeof b === "object" && !Array.isArray(b) ? b : {}; } catch { return {}; } }
 // Never let an exception (Stripe/Supabase message, stack) reach the browser
-export const safe = (fn) => async (req, ctx) => {
+export const safe = (fn) => async (req, ctx) => corsContext.run({ origin: null }, async () => {
   setCors(req);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
   try { return await fn(req, ctx); }
@@ -47,7 +64,7 @@ export const safe = (fn) => async (req, ctx) => {
     const ref = crypto.randomUUID().slice(0, 8); console.error("fn error", ref, e && e.stack || e);
     return bad(`Something went wrong (ref ${ref})`, 500);
   }
-};
+});
 export const fail = (msg, status = 409) => { const e = new Error(msg); e.expose = true; e.status = status; return e; };
 const SETTLING = "The card payment is still settling at the payment provider. Cuvori retries this every hour; nothing needs to be done.";
 const NOT_READY = "The freelancer's Stripe account is not ready to receive money. Once they finish their Stripe setup, Cuvori retries this every hour.";
@@ -67,6 +84,7 @@ function encode(obj, prefix) {
   return out.filter(Boolean).join("&");
 }
 export async function stripe(method, path, body, opts = {}) {
+  if (!STRIPE_KEY) throw fail("Payments are not configured. Please contact support.", 503);
   if (!/^\/[a-z_]+(\/[A-Za-z0-9_]+)*$/.test(path)) throw new Error("bad Stripe path");
   const headers = { Authorization: `Bearer ${STRIPE_KEY}`, "Stripe-Version": "2024-06-20" };
   if (opts.idempotency) headers["Idempotency-Key"] = opts.idempotency;
@@ -77,8 +95,11 @@ export async function stripe(method, path, body, opts = {}) {
   let r;
   try { r = await fetch(url, init); }
   catch (e) { const x = new Error("Could not reach the payment provider: " + (e && e.message || "network")); x.network = true; throw x; }
-  let data; try { data = await r.json(); } catch { data = {}; }
-  if (!r.ok) { const e = new Error((data.error && data.error.message) || "Stripe error"); e.stripe = data.error || {}; e.status = r.status; throw e; }
+  let data;
+  try { data = await r.json(); }
+  catch { const e = new Error("Unreadable payment provider response"); e.outcomeUnknown = true; e.status = r.status; throw e; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) { const e = new Error("Invalid payment provider response"); e.outcomeUnknown = true; throw e; }
+  if (!r.ok) { const e = new Error((data.error && data.error.message) || "Stripe error"); e.stripe = data.error || {}; e.status = r.status; e.shouldRetry = r.headers.get("Stripe-Should-Retry") === "true"; throw e; }
   return data;
 }
 const stripeCode = (e) => (e && e.stripe && (e.stripe.code || e.stripe.decline_code)) || "";
@@ -102,8 +123,13 @@ export function verifyWebhook(rawBody, sigHeader, secret = WEBHOOK_SECRET, toler
 }
 
 // ---- Supabase REST with the service role ----
+function requireServiceKey() {
+  if (!SERVICE_KEY) throw fail("Database access is not configured. Please contact support.", 503);
+}
 async function sbFetch(path, init = {}) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, { ...init, signal: AbortSignal.timeout(8000), headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json", Prefer: init.prefer || "return=representation", ...(init.headers || {}) } });
+  requireServiceKey();
+  const auth = SERVICE_KEY.startsWith("sb_secret_") ? {} : { Authorization: `Bearer ${SERVICE_KEY}` };
+  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, { ...init, signal: AbortSignal.timeout(8000), headers: { apikey: SERVICE_KEY, ...auth, "content-type": "application/json", Prefer: init.prefer || "return=representation", ...(init.headers || {}) } });
   const text = await r.text();
   let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!r.ok) { const e = new Error((data && data.message) || `Supabase ${r.status}`); e.status = r.status; throw e; }
@@ -135,18 +161,37 @@ export async function contractByPi(pi) {
 export async function userFromRequest(req) {
   const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") || "");
   if (!m) return null;
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${m[1]}` }, signal: AbortSignal.timeout(8000) });
-  if (!r.ok) return null;
-  const u = await r.json();
-  if (!u || !isUuid(u.id)) return null;
+  requireServiceKey();
+  let r;
+  try { r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${m[1]}` }, signal: AbortSignal.timeout(8000) }); }
+  catch { throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503); }
+  if (r.status === 429) throw fail("Too many sign-in checks. Please try again shortly.", 429);
+  if (r.status >= 500) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503);
+  let u;
+  try { u = await r.json(); }
+  catch { throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503); }
+  if (!r.ok) {
+    // Supabase Auth: `error_code` is the name ("bad_jwt"); `code` is often just the HTTP status number
+    const code = u && (u.error_code || (typeof u.code === "string" ? u.code : null));
+    if (code === "user_banned") throw fail("Account suspended", 403);
+    if (["bad_jwt", "session_not_found", "session_expired", "user_not_found", "no_authorization", "invalid_credentials"].includes(code)) return null;
+    // Older Auth responses may have no code. An API-key failure concerns the backend,
+    // so signing in again would not help. Never send the provider's raw message back.
+    const message = String(u && (u.message || u.msg || u.error_description || u.error) || "");
+    if (!code && (r.status === 401 || r.status === 403) && /jwt|token|session|expired/i.test(message) && !/api.?key/i.test(message)) return null;
+    throw fail("Sign-in verification is unavailable. Please contact support if this continues.", 503);
+  }
+  if (!u || !isUuid(u.id)) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503);
   return db.one("profiles", `id=eq.${u.id}&select=id,email,first_name,role,is_admin,banned`);
 }
 export const isBanned = async (uid) => { const p = await db.one("profiles", `id=eq.${uid}&select=banned`); return !p || !!p.banned; };
 
 // ---- the price the client pays: from the fee table in the database, never a number in code ----
 export async function quoteFor(priceCents, currency = "EUR", country = null, customer = "any", method = "any") {
+  if (!Number.isSafeInteger(priceCents) || priceCents < MIN_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400);
   const qte = await db.rpc("order_quote", { p_price_cents: priceCents, p_currency: currency, p_country: country, p_customer: customer, p_method: method });
-  if (!qte || !Number.isInteger(qte.total_cents) || qte.total_cents < priceCents) throw new Error("bad quote");
+  if (!qte || !Number.isSafeInteger(qte.total_cents) || qte.total_cents < priceCents) throw new Error("bad quote");
+  if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400);
   return qte;
 }
 
@@ -166,10 +211,9 @@ export async function contractEvent(c, ev, sender, extra) {
 const fundRows = async (c) => { const rows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&status=eq.succeeded&select=*&order=created_at.asc`); return rows || []; };
 
 // ---- idempotency keys that survive retries ----
-// Stripe replays the first result of a key for 24 h, errors included. So: one key per attempt-scope, kept
-// while the outcome is unknown (network trouble, another request in flight), thrown away after a definite
-// failure so the next attempt is a real attempt. A Stripe-side lookup before every money call is the
-// second guard: a transfer or refund that already exists is never made twice, whatever the key.
+// Keep the key after uncertain outcomes, including server errors. Only known rejections permit
+// a new attempt. Provider lookups are additional safeguards, not a guarantee of exactly-once execution.
+// Old unresolved attempts stop for reconciliation before Stripe can expire their keys.
 export async function moneyKey(scope) {
   const row = await db.one("money_keys", `scope=eq.${q(scope)}&select=key`);
   if (row && row.key) return row.key;
@@ -206,7 +250,15 @@ export async function lockOrder(id) {
 async function moneyPost(scope, path, body) {
   const key = await moneyKey(scope);
   try { return await stripe("POST", path, body, { idempotency: key }); }
-  catch (e) { if (e.status && !isIdemInFlight(e)) await dropKey(scope); throw e; }   // a definite no: next time a fresh key
+  catch (e) {
+    // Keep the key only when the outcome is unknown (no answer, unreadable answer, Stripe says "retry with the
+    // same key", or the same key is still in flight). Any other answer is final for this key — including a 500,
+    // which Stripe saves and would replay for 24 h. The next attempt gets a fresh key; the Stripe-side lookups
+    // before every transfer, refund and reversal are what keep a fresh attempt from paying twice.
+    const unknown = e.network || e.outcomeUnknown || e.shouldRetry || isIdemInFlight(e) || !e.status;
+    if (!unknown) await db.remove("money_keys", `scope=eq.${q(scope)}&key=eq.${q(key)}`).catch(() => {});
+    throw e;
+  }
 }
 
 // Editor's connected account, verified against Stripe (not just the DB row)
@@ -219,10 +271,9 @@ export async function payoutAccount(editorId) {
   if (!acct || !acct.metadata || acct.metadata.cuvori_user !== editorId) return null;
   return acct;
 }
-// Stripe's summary booleans cover the full indirect-charge path: the platform charge,
-// transfer to the connected account, and the connected account's external payout.
-// Checking the raw transfers capability alone can miss a restriction elsewhere in that path.
-export const accountReady = (a) => !!(a && a.charges_enabled && a.payouts_enabled);
+// Keep the existing charge/payout restrictions and explicitly require the capability
+// used by Cuvori's separate transfers. Review requested capabilities with stripe-connect.mjs.
+export const accountReady = (a) => !!(a && a.charges_enabled === true && a.payouts_enabled === true && a.capabilities?.transfers === "active");
 
 // ---- money movements ----
 export async function transfersOf(c) { const r = await stripe("GET", "/transfers", { transfer_group: `contract_${c.id}`, limit: 100 }); return (r.data || []).filter(t => t.metadata && t.metadata.contract_id === c.id); }
@@ -238,6 +289,8 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   const existing = await transfersOf(c);
   const prior = existing.find(t => !t.reversed && (t.metadata.milestone_id || "") === (milestoneId || "") && (t.metadata.purpose || "release") === purpose && (!t.metadata.attempt || t.metadata.attempt === attemptTag));
   if (prior) { if (prior.amount !== editorCents) throw new Error(`transfer ${prior.id} exists with a different amount`); return prior.id; }
+  // Existing transfers above still need reconciliation; a ban blocks new transfers.
+  if (await isBanned(c.editor)) throw fail("This freelancer cannot receive payments", 409);
   const acct = await payoutAccount(c.editor);
   if (!accountReady(acct)) throw fail(NOT_READY);
   // tie the transfer to the card charge when there is exactly one: Stripe then allows it before the money
@@ -525,16 +578,25 @@ export async function applyPaidSession(s) {
 const pendingReversal = (c) => String(c.money_error || "").startsWith("chargeback:");
 const pendingRepay = (c) => String(c.money_error || "").startsWith("chargeback won");
 // an error with no answer from the provider or the database: fail the webhook so Stripe sends the event again
-const retryable = (e) => !!(e && (e.network || !e.status || e.status >= 500));
+const retryable = (e) => !!(e && (e.network || e.outcomeUnknown || e.shouldRetry || !e.status || e.status >= 500));
 export async function onDisputeCreated(o) {
-  const c0 = await contractByPi(o.payment_intent);
+  const initial = await contractByPi(o.payment_intent);
+  if (!initial) return "ignored";
+  const unlock = await lockOrder(initial.id);
+  try { return await createDisputeLocked(initial.id, o); }
+  finally { await unlock(); }
+}
+async function createDisputeLocked(id, o) {
+  const c0 = await db.contract(id);
   if (!c0) return "ignored";
+  if (c0.chargeback_status === "open" && c0.chargeback_id !== o.id)
+    throw fail("Another chargeback on this order needs reconciliation first.", 503);
   const retry = c0.chargeback_id === o.id;                                // Stripe sends the event again when the first handling did not finish
   if (retry && c0.chargeback_status !== "open") return "already";        // decided meanwhile: nothing left to cover
   const cents = Number.isInteger(o.amount) ? o.amount : 0;
   if (!retry) {
     // the facts first, before any money moves: the Order is frozen, the history and the chat say why, the client is flagged
-    const holding = HOLDING.includes(c0.status) || c0.status === "releasing" || c0.status === "resolving";
+    const holding = holdsFunds(c0);
     const base = { chargeback_id: o.id, chargeback_status: "open", chargeback_cents: cents, auto_release_at: null };
     await db.update("order_milestones", `order_id=eq.${c0.id}`, { auto_release_at: null }).catch(() => {});
     const u = (await db.update("contracts", `id=eq.${c0.id}`, holding
@@ -545,7 +607,7 @@ export async function onDisputeCreated(o) {
     const flagged = await db.one("user_flags", `user_id=eq.${c0.client}&contract_id=eq.${c0.id}&kind=eq.chargeback&select=id`);
     if (!flagged) await db.insert("user_flags", { user_id: c0.client, kind: "chargeback", reason: `Chargeback ${o.id} on "${String(c0.title).slice(0, 120)}" (order was ${c0.status})`, contract_id: c0.id }).catch(() => {});
   }
-  await coverChargeback(c0.id, o.id, cents);
+  await coverChargebackLocked(c0.id, o.id, cents);
   return "recorded";
 }
 // Money that already went to the freelancer and that the held amount cannot cover is pulled back, so the
@@ -555,10 +617,34 @@ export async function onDisputeCreated(o) {
 // Called by the webhook, its retries, and the hourly job while `money_error` says a pull-back is owed.
 export async function coverChargeback(id, disputeId, centsHint, pullBack = true) {
   const unlock = await lockOrder(id);
-  try {
+  try { return await coverChargebackLocked(id, disputeId, centsHint, pullBack); }
+  finally { await unlock(); }
+}
+// Refunds in this integration consume order principal first. Processing fees are not
+// added to the order's funded counter and must not consume an unrelated top-up's principal.
+async function disputePrincipal(c, dispute) {
+  const pi = typeof dispute.payment_intent === "string" ? dispute.payment_intent : dispute.payment_intent?.id;
+  if (!isPi(pi) || !Number.isSafeInteger(dispute.amount) || dispute.amount <= 0) throw new Error("invalid dispute payment or amount");
+  const funds = await fundRows(c);
+  const payment = funds.find(f => f.provider_ref === pi);
+  const principal = payment ? payment.amount_cents : (!funds.length && pi === c.stripe_payment_intent ? centsOf(c) : null);
+  if (!Number.isSafeInteger(principal) || principal <= 0) throw new Error("disputed payment principal is not recorded");
+  const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id;
+  if (!isStripeId(chargeId) || !chargeId.startsWith("ch_")) throw new Error("disputed charge is not recorded");
+  const charge = await stripe("GET", `/charges/${chargeId}`);
+  const chargePi = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+  if (chargePi !== pi || String(charge.currency).toLowerCase() !== String(c.currency || "EUR").toLowerCase()
+    || !Number.isSafeInteger(charge.amount_refunded) || charge.amount_refunded < 0)
+    throw new Error("disputed charge does not match the order payment");
+  return Math.min(dispute.amount, Math.max(principal - charge.amount_refunded, 0));
+}
+async function coverChargebackLocked(id, disputeId, centsHint, pullBack = true) {
     let c = await db.contract(id);
     if (!c || c.chargeback_id !== disputeId) return null;
-    const cents = Number.isInteger(centsHint) && centsHint > 0 ? centsHint : nz(c.chargeback_cents);
+    // Resolve the payment at Stripe; a gross dispute amount alone is not enough for top-ups.
+    const dispute = await stripe("GET", `/disputes/${disputeId}`);
+    if (dispute.id !== disputeId) throw new Error("dispute mismatch");
+    const cents = await disputePrincipal(c, dispute);
     // 1. the books follow Stripe first, so what follows is decided on the real state (a half-finished earlier attempt included)
     let st = await syncReversals(c, disputeId); c = st.row;
     // 2. what still has to come back: while holding, only the part the held amount cannot cover (the held amount is
@@ -566,11 +652,11 @@ export async function coverChargeback(id, disputeId, centsHint, pullBack = true)
     //    release, the disputed amount minus what this dispute already pulled back
     let need = 0;
     if (pullBack && c.chargeback_status === "open") {
-      const holding = HOLDING.includes(c.status) || c.status === "releasing" || c.status === "resolving";
-      const fundedNow = nz(c.funded_cents) || (["funded", "delivered", "disputed", "releasing", "resolving"].includes(c.status) ? centsOf(c) || 0 : 0);
+      const holding = holdsFunds(c);
+      const fundedNow = nz(c.funded_cents) || (holdsFunds(c) ? centsOf(c) || 0 : 0);
       const heldReal = Math.max(fundedNow - st.net - nz(c.refunded_cents), 0);
       const already = ((await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&note=eq.${q("chargeback " + disputeId)}&select=amount_cents`)) || []).reduce((a, r) => a + r.amount_cents, 0);
-      need = Math.min(st.net, holding ? Math.max(cents - heldReal, 0) : Math.max((cents || st.net) - already, 0));
+      need = Math.min(st.net, holding ? Math.max(cents - heldReal, 0) : Math.max(cents - already, 0));
     }
     let err = null;
     if (need > 0) {
@@ -583,7 +669,6 @@ export async function coverChargeback(id, disputeId, centsHint, pullBack = true)
       if (retryable(err)) throw err;
     } else if (pendingReversal(c)) await db.update("contracts", `id=eq.${c.id}`, { money_error: null }).catch(() => {});
     return c;
-  } finally { await unlock(); }
 }
 // The books follow Stripe: released_cents becomes what the freelancer has net of every reversal on this Order's
 // transfers, and a ledger line records whatever was reversed since the last one. Both writes land on the same
@@ -608,32 +693,89 @@ export async function onDisputeClosed(o) {
   if (!c0 || c0.chargeback_id !== o.id) return "ignored";
   const won = o.status === "won", lost = o.status === "lost";
   if (!won && !lost) return "ignored";
+  const unlock = await lockOrder(c0.id);
+  try { return await closeDisputeLocked(c0, o, won, lost); }
+  finally { await unlock(); }
+}
+async function closeDisputeLocked(c0, o, won, lost) {
   // the books follow Stripe before the outcome is applied (a pull-back that was still owed is made now when the bank sided with the client)
-  await coverChargeback(c0.id, o.id, 0, lost).catch(e => console.error("reversal sync", c0.id, e.message));
+  await coverChargebackLocked(c0.id, o.id, 0, lost);
   const c = (await db.contract(c0.id)) || c0;
+  if (c.chargeback_id !== o.id) return "ignored";
   if (c.chargeback_status !== "open") {
-    if (won && c.chargeback_status === "won" && pendingRepay(c)) { await repayWon(c); return "won"; }   // the retry finishes the re-payment
+    if (won && c.chargeback_status === "won" && pendingRepay(c)) { await repayWonLocked(c); return "won"; }   // the retry finishes the re-payment
+    if (lost && c.chargeback_status === "lost") await recordClosedChargeback(c, o.id);
     return "already";
   }
   const now = new Date().toISOString();
   if (won) {
-    const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_status=eq.open`, { chargeback_status: "won", money_error: null }))[0];
+    const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_id=eq.${q(o.id)}&chargeback_status=eq.open`, { chargeback_status: "won", money_error: "chargeback won; re-payment pending" }))[0];
     if (!u) return "already";
     if (u.status === "disputed") await db.update("contracts", `id=eq.${c.id}`, { dispute_reason: `${u.dispute_reason || ""}\nThe bank sided with Cuvori. Decide the dispute as usual${u.stripe_reversal_id ? "; the money pulled back from the freelancer is part of the held amount" : ""}.`.slice(0, 2000) });
     await orderEvent(u, "chargeback_won", { chargeback: o.id }, null);
     await contractEvent(u, "chargeback_won", c.client);
-    await repayWon(u);
+    await repayWonLocked(u);
     return "won";
   }
-  // lost: the bank gave the client the money. What Cuvori held (or pulled back) is gone; nothing else moves.
-  // (a pull-back that reduced released_cents is inside heldCents now, so it counts as gone too)
-  const gone = HOLDING.includes(c.status) ? heldCents(c) : (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.reversal&note=eq.${q("chargeback " + o.id)}&select=amount_cents`) || []).reduce((a, r) => a + r.amount_cents, 0);
-  const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_status=eq.open`, { chargeback_status: "lost", status: "refunded", resolution: "chargeback", closed_at: now, resolved_at: now, auto_release_at: null, refunded_cents: nz(c.refunded_cents) + gone, money_error: pendingReversal(c) || (gone === 0 && nz(c.released_cents) > 0) ? "chargeback lost; the pull-back from the freelancer did not finish — check by hand" : null }))[0];
+  // A partial chargeback consumes only that payment's disputed principal. Keep any
+  // undisputed remainder frozen for an explicit decision, with automatic release disabled.
+  let gone = await disputePrincipal(c, o);
+  const held = heldCents(c);
+  let unrecovered = 0;
+  if (gone > held) {
+    // the bank took more than Cuvori still holds (the pull-back from the freelancer did not go through): close the
+    // chargeback with what was held, and tell a person exactly what Cuvori lost. Failing for ever would keep the
+    // order frozen with no way for an admin to act.
+    unrecovered = gone - held; gone = held;
+  }
+  // A durable plan bridges the non-transactional contract/ledger writes. If either
+  // response is lost, the next webhook repairs the same ledger entry without recounting it.
+  const scope = `chargeback_result:${c.id}:${o.id}`;
+  const previous = await db.one("money_keys", `scope=eq.${q(scope)}&select=key`);
+  let plan;
+  if (previous) {
+    plan = parseChargebackPlan(previous.key);
+    if (plan.before !== nz(c.refunded_cents) || plan.remaining + plan.amount !== held || plan.amount !== gone)
+      throw fail("The chargeback balance changed and needs reconciliation.", 503);
+  } else {
+    plan = { v: 1, amount: gone, before: nz(c.refunded_cents), after: nz(c.refunded_cents) + gone, remaining: held - gone };
+    await db.insert("money_keys", { scope, key: JSON.stringify(plan) });
+  }
+  gone = plan.amount;
+  const remaining = plan.remaining;
+  const keepOpen = remaining > 0;
+  const u = (await db.update("contracts", `id=eq.${c.id}&chargeback_id=eq.${q(o.id)}&chargeback_status=eq.open`, {
+    chargeback_status: "lost", status: keepOpen ? "disputed" : nz(c.released_cents) > 0 ? "completed" : "refunded",
+    resolution: keepOpen ? null : "chargeback", closed_at: keepOpen ? null : now, resolved_at: keepOpen ? null : now,
+    completed_at: keepOpen ? null : nz(c.released_cents) > 0 ? c.completed_at || now : null,
+    auto_release_at: null, refunded_cents: plan.after, money_error: unrecovered > 0 ? `chargeback lost; ${(unrecovered / 100).toFixed(2)} could not be pulled back from the freelancer — Cuvori covered it, check by hand` : null,
+    ...(keepOpen ? { dispute_reason: `${c.dispute_reason || ""}\nPartial chargeback lost. The remaining ${remaining} minor units require an explicit settlement decision.`.slice(-2000) } : {})
+  }))[0];
   if (!u) return "already";
-  if (gone > 0) await ledger(u, { kind: "chargeback", amount_cents: gone, provider_ref: o.id, note: "chargeback_lost" });
+  await recordClosedChargeback(u, o.id);
   await orderEvent(u, "chargeback_lost", { chargeback: o.id, amount_cents: gone }, null);
   await contractEvent(u, "chargeback_lost", c.client, { amount_cents: gone });
   return "lost";
+}
+function parseChargebackPlan(raw) {
+  const p = JSON.parse(raw);
+  if (p.v !== 1 || ![p.amount, p.before, p.after, p.remaining].every(n => Number.isSafeInteger(n) && n >= 0) || p.after !== p.before + p.amount)
+    throw new Error("invalid chargeback accounting plan");
+  return p;
+}
+async function recordClosedChargeback(c, disputeId) {
+  const stored = await db.one("money_keys", `scope=eq.${q(`chargeback_result:${c.id}:${disputeId}`)}&select=key`);
+  // Old closures have no plan. Their historical counters cannot be reconstructed here.
+  if (!stored) return;
+  const plan = parseChargebackPlan(stored.key);
+  if (nz(c.refunded_cents) < plan.after) throw new Error("chargeback counter is not recorded");
+  if (!plan.amount) return;
+  const existing = await db.one("order_payments", `order_id=eq.${c.id}&kind=eq.chargeback&provider_ref=eq.${q(disputeId)}&select=amount_cents`);
+  if (existing) {
+    if (existing.amount_cents !== plan.amount) throw new Error("chargeback ledger amount mismatch");
+    return;
+  }
+  await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind: "chargeback", amount_cents: plan.amount, provider_ref: disputeId, note: "chargeback_lost" });
 }
 // The bank sided with Cuvori: money that was pulled back from the freelancer goes to them again — unless the
 // Order is still holding, where it is part of the held amount and the dispute decision moves it. Safe to
@@ -648,7 +790,7 @@ async function repayWonLocked(c0) {
   if (c.chargeback_status !== "won") return 0;
   const rows = (await db.select("order_payments", `order_id=eq.${c.id}&kind=in.(reversal,release)&select=kind,note,amount_cents`)) || [];
   const back = rows.filter(r => r.kind === "reversal").reduce((a, r) => a + r.amount_cents, 0) - rows.filter(r => r.kind === "release" && r.note === "chargeback_won").reduce((a, r) => a + r.amount_cents, 0);
-  if (back <= 0 || HOLDING.includes(c.status)) { if (pendingRepay(c)) await db.update("contracts", `id=eq.${c.id}`, { money_error: null }).catch(() => {}); return 0; }
+  if (back <= 0 || holdsFunds(c)) { if (pendingRepay(c)) await db.update("contracts", `id=eq.${c.id}`, { money_error: null }).catch(() => {}); return 0; }
   try {
     const t = await releaseToEditor(c, back, null, `retransfer_${c.chargeback_id}`);
     const v = (await db.update("contracts", `id=eq.${c.id}`, { released_cents: nz(c.released_cents) + back, money_error: null }))[0];
