@@ -35,8 +35,9 @@ export default safe(async (req) => {
   else if (["funded", "delivered"].includes(c.status) && price > paidIn) { amount = price - paidIn; kind = "topup"; }
   else return bad("This order is not waiting for payment", 409);
   // the amount being charged now (not just the price) must be a whole number of cents inside the limits:
-  // a whole Order from €1, a top-up from €0.50 (the smallest card payment), never above €950,000.
-  // quoteFor checks this again and also caps the fee-inclusive total; this is the early, explicit gate.
+  // a whole Order from €1, a top-up from €0.50, never above €950,000. The €0.50 is Cuvori's own floor for the
+  // top-up amount, chosen so the charge (amount + fee) always clears Stripe's per-currency minimum for the whole
+  // charge (€0.50 for euro). quoteFor checks the amount again and caps the fee-inclusive total; this is the early gate.
   const minFor = kind === "fund" ? MIN_CENTS : MIN_TOPUP_CENTS;
   if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return bad("Payment amount out of range", 409);
   if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
