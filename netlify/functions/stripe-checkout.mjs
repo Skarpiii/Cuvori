@@ -21,7 +21,12 @@ export default safe(async (req) => {
   // Anything else (missing, negative, a fraction) means the payment record needs checking by hand before more money moves.
   const fc = c.funded_cents;
   const RECONCILE = "This order's payment record needs checking before another payment can be taken. Please contact Cuvori support.";
-  if (c.status === "accepted" && !(fc == null || fc === 0)) return bad(RECONCILE, 409);
+  if (c.status === "accepted") {
+    // a first payment only when nothing at all says this Order was paid: no counter, no payment on the row, no ledger line
+    if (!(fc == null || fc === 0) || c.stripe_payment_intent || c.stripe_charge_id) return bad(RECONCILE, 409);
+    const paidRows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&select=id&limit=1`);
+    if (paidRows && paidRows.length) return bad(RECONCILE, 409);
+  }
   if (["funded", "delivered"].includes(c.status) && !(Number.isSafeInteger(fc) && fc > 0)) return bad(RECONCILE, 409);
   const paidIn = c.status === "accepted" ? 0 : fc;
   if (c.status === "accepted") { amount = price; kind = "fund"; }
