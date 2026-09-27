@@ -1,7 +1,7 @@
 // POST { contract_id } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, payoutAccount, accountReady, isBanned, centsOf, MIN_CENTS, MAX_CENTS, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, payoutAccount, accountReady, isBanned, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -32,6 +32,11 @@ export default safe(async (req) => {
   if (c.status === "accepted") { amount = price; kind = "fund"; }
   else if (["funded", "delivered"].includes(c.status) && price > paidIn) { amount = price - paidIn; kind = "topup"; }
   else return bad("This order is not waiting for payment", 409);
+  // the amount being charged now (not just the price) must be a whole number of cents inside the limits:
+  // a whole Order from €1, a top-up from €0.50 (the smallest card payment), never above €950,000.
+  // quoteFor checks this again and also caps the fee-inclusive total; this is the early, explicit gate.
+  const minFor = kind === "fund" ? MIN_CENTS : MIN_TOPUP_CENTS;
+  if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return bad("Payment amount out of range", 409);
   if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
   if (await isBanned(c.editor)) return bad("This freelancer cannot receive payments", 409);
   const acct = await payoutAccount(c.editor);
