@@ -22,8 +22,10 @@ export default safe(async (req) => {
   const fc = c.funded_cents;
   const RECONCILE = "This order's payment record needs checking before another payment can be taken. Please contact Cuvori support.";
   if (c.status === "accepted") {
-    // a first payment only when nothing at all says this Order was paid: no counter, no payment on the row, no ledger line
-    if (!(fc == null || fc === 0) || c.stripe_payment_intent || c.stripe_charge_id) return bad(RECONCILE, 409);
+    // a first payment only when nothing at all says this Order was paid: no counters (paid in, paid out, refunded),
+    // no payment time, no payment or charge on the row, no ledger line
+    const zeroOrEmpty = (v) => v == null || v === 0;
+    if (!zeroOrEmpty(fc) || !zeroOrEmpty(c.released_cents) || !zeroOrEmpty(c.refunded_cents) || c.funded_at || c.stripe_payment_intent || c.stripe_charge_id) return bad(RECONCILE, 409);
     const paidRows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&select=id&limit=1`);
     if (paidRows && paidRows.length) return bad(RECONCILE, 409);
   }
