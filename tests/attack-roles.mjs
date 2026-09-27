@@ -97,6 +97,16 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   }
   reset();
 }
+// ---------- R-I3: an "accepted" Order carrying any trace of money must not be funded as if new ----------
+{
+  for (const [name, extra] of [["released_cents", { released_cents: 5000 }], ["refunded_cents", { refunded_cents: 5000 }], ["funded_at", { funded_at: new Date().toISOString() }],
+      ["a fraction paid in", { funded_cents: 0.5 }], ["negative paid in", { funded_cents: -1 }]]) {
+    const c = mk(extra);   // status accepted
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status === 200, `R-I3 first payment on an accepted Order with ${name} set -> HTTP ${r.status} ${r.json && r.json.error || ""} (must be refused)`);
+  }
+  reset();
+}
 // ---------- R-I2: top-up amount out of range (price grew by a fraction / a few cents / to above the cap) ----------
 {
   for (const [name, price, funded] of [["49 cents", 10049, 10000], ["a fraction", 10000.5, 10000], ["above the cap", 95000000 + 10000, 10000]]) {
