@@ -336,6 +336,7 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
 // ---------- B22: outside refunds and disputes through the dashboard
 {
   const c = mk(); const f = await fund(fx, c); c.status = "delivered"; const ch = chargeOf(f.session.payment_intent);
+  STRIPE.refunds.push({ id: "re_dash22", amount: ch.amount - ch.amount_refunded, metadata: {}, payment_intent: ch.payment_intent, charge: ch.id, status: "succeeded" });   // the dashboard refund of everything still on the charge
   ch.amount_refunded = ch.amount; const w = await call(fx.webhook, req("POST", "x", signed({ type: "charge.refunded", data: { object: { id: ch.id, payment_intent: ch.payment_intent, amount: ch.amount, amount_refunded: ch.amount, refunded: true } } })));
   vuln(c.status !== "refunded" || c.refunded_cents !== 10000, `B22a full refund from the Stripe dashboard -> ${w.status}, status=${c.status}, refunded_cents=${c.refunded_cents}`);
   const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));

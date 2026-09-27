@@ -10,7 +10,7 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
 const chargeEvent = (ch) => signed({ type: "charge.refunded", data: { object: { id: ch.id, object: "charge", payment_intent: ch.payment_intent, amount: ch.amount, amount_refunded: ch.amount_refunded, refunded: ch.amount_refunded >= ch.amount } } });
 const cbEvent = (type, ch, extra = {}) => signed({ type, data: { object: { id: extra.id || "dp_" + ch.id, object: "dispute", charge: ch.id, payment_intent: ch.payment_intent, amount: extra.amount || ch.amount, status: extra.status || "needs_response", ...extra } } });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const refundsOn = (pi) => STRIPE.refunds.filter(r => r.payment_intent === pi).reduce((a, r) => a + r.amount, 0);
+const refundsOn = (pi) => STRIPE.refunds.filter(r => r.payment_intent === pi && !(r.metadata && r.metadata.kind === "fee_surplus")).reduce((a, r) => a + r.amount, 0);
 const sum = (rows) => rows.reduce((a, r) => a + r.amount_cents, 0);
 const reversalsOf = (c) => { const ids = new Set(STRIPE.transfers.filter(t => t.contract === c.id).map(t => t.id)); return STRIPE.reversals.filter(r => ids.has(r.transfer)); };
 const books = (c) => { const m = moneyOut(c); return `status=${c.status} transferred=${m.transferred} refunded=${m.refunded} | released_cents=${c.released_cents} refunded_cents=${c.refunded_cents} | ledger release=${sum(ledger(c, "release"))} refund=${sum(ledger(c, "refund"))} | money_error=${c.money_error || "-"}`; };
@@ -72,7 +72,7 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
   vuln(c.refunded_cents !== 6000, `P3a two dashboard refunds of 3000 (${w1.status}/${w2.status}) -> refunded_cents=${c.refunded_cents} (must be 6000), refund rows=${ledger(c, "refund").length}, held=${c.funded_cents - c.released_cents - c.refunded_cents} (really ${10000 - 6000})`);
   // the admin, believing 7000 is held, releases it to the freelancer
   const r = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: c.id, decision: "release" } }));
-  const mo = moneyOut(c); const refunded = STRIPE.refunds.filter(x => x.payment_intent === pi).reduce((a, x) => a + x.amount, 0);
+  const mo = moneyOut(c); const refunded = refundsOn(pi);
   vuln(mo.transferred + refunded > 10000, `P3b admin 'release' (${r.status}) -> freelancer ${mo.transferred} + client ${refunded} = ${mo.transferred + refunded} out of a 10000 order (platform pays ${mo.transferred + refunded - 10000})`);
   reset();
 }
@@ -257,7 +257,7 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
   const rows = ledger(c, "fund").filter(r => r.provider_ref === s.payment_intent);
   vuln(rows.length !== 1, `Q2a webhook retry ${w.status} + page check ${k.status} (${k.json && k.json.result}) take over together -> fund rows for the top-up=${rows.length} (must be 1), funded_cents=${c.funded_cents}`);
   const r = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id } }));            // freelancer gives everything back
-  const back = STRIPE.refunds.filter(x => x.contract === c.id).reduce((a, x) => a + x.amount, 0);
+  const back = moneyOut(c).refunded;
   vuln(back !== 12000, `Q2b freelancer cancels (${r.status} ${r.json && r.json.error || ""}) -> client got back ${back} of 12000; status=${c.status}, money_error=${c.money_error || ""}`);
   reset();
 }

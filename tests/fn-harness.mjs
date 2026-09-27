@@ -71,7 +71,7 @@ export function stripeHandle(path, method, p) {
     if (amount > ch.amount - ch.amount_refunded) return err(400, "Refund amount (€" + (amount / 100).toFixed(2) + ") is greater than unrefunded amount on charge (€" + ((ch.amount - ch.amount_refunded) / 100).toFixed(2) + ")", "amount_too_large");
     if (ch.sourced > ch.amount - ch.amount_refunded - amount) return err(400, "Cannot refund more than the amount not yet transferred from this charge");
     ch.amount_refunded += amount; STRIPE.balance -= amount;
-    const r = { id: rid("re"), amount, contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]"), reason: p.get("metadata[reason]") || "" }, payment_intent: pi, charge: ch.id, status: "succeeded" }; STRIPE.refunds.push(r); return [200, r];
+    const r = { id: rid("re"), amount, contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]"), reason: p.get("metadata[reason]") || "", ...(p.get("metadata[kind]") ? { kind: p.get("metadata[kind]") } : {}) }, payment_intent: pi, charge: ch.id, status: "succeeded" }; STRIPE.refunds.push(r); return [200, r];
   }
   return err(404, "unknown " + path);
 }
@@ -100,7 +100,7 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(403, { code: 403, error_code: "bad_jwt", msg: "invalid JWT: unable to parse or verify signature" }); }
   if (u.pathname.startsWith("/rest/v1/rpc/")) { const fn = u.pathname.split("/")[4], args = JSON.parse(body); DB.rpc_calls.push({ fn, args });
-    if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country === "US" ? 3.25 : 1.5; const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
+    if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country == null || args.p_country === "US" ? 3.25 : 1.5; /* no country = the ceiling row, what the page and the checkout use */ const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
     if (fn === "expire_jobs") return res(200, 0);
     return res(200, null); }
   if (u.pathname.startsWith("/rest/v1/")) {
@@ -119,7 +119,7 @@ export const signed = (obj, secret) => { if (obj && /^charge\.dispute\./.test(ob
 export const call = async (fn, r) => { try { const x = await fn(r); let j = null; try { j = await x.clone().json(); } catch {} return { status: x.status, json: j, headers: x.headers }; } catch (e) { return { status: 500, thrown: e.constructor.name + ": " + e.message }; } };
 export const mk = (o = {}) => { const c = { id: uuid(), conversation_id: conv, editor: users.ed.id, client: users.cl.id, proposed_by: users.ed.id, title: "Job", price: 100, currency: "EUR", pricing: "project", status: "accepted", payment_mode: "escrow", amount_cents: 10000, fee_cents: 0, funded_cents: 0, released_cents: 0, refunded_cents: 0, has_milestones: false, stripe_payment_intent: null, ...o }; DB.contracts.push(c); return c; };
 export const past = (h = 1) => new Date(Date.now() - h * 3600e3).toISOString();
-export const moneyOut = (c) => ({ transferred: STRIPE.transfers.filter(t => t.contract === c.id).reduce((a, t) => a + t.amount - t.amount_reversed, 0), refunded: STRIPE.refunds.filter(r => r.contract === c.id).reduce((a, r) => a + r.amount, 0), orphans: STRIPE.refunds.filter(r => r.contract === c.id && r.metadata.reason).reduce((a, r) => a + r.amount, 0) });
+export const moneyOut = (c) => ({ transferred: STRIPE.transfers.filter(t => t.contract === c.id).reduce((a, t) => a + t.amount - t.amount_reversed, 0), refunded: STRIPE.refunds.filter(r => r.contract === c.id && r.metadata.kind !== "fee_surplus").reduce((a, r) => a + r.amount, 0), feeBack: STRIPE.refunds.filter(r => r.contract === c.id && r.metadata.kind === "fee_surplus").reduce((a, r) => a + r.amount, 0), orphans: STRIPE.refunds.filter(r => r.contract === c.id && r.metadata.reason).reduce((a, r) => a + r.amount, 0) });
 export const reset = () => { hooks.stripe = null; hooks.db = null; STRIPE.settleDelay = false; };
 export const onlyDue = (c) => { for (const x of DB.contracts) if (x !== c && ["delivered", "releasing", "resolving"].includes(x.status)) x.status = "completed"; for (const m of DB.order_milestones) if (m.order_id !== c.id && m.status !== "released") m.status = "released"; };
 export const fns = async () => ({
