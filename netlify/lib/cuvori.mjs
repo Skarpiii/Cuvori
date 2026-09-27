@@ -26,7 +26,7 @@ export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
 // Cuvori's conservative per-payment total cap, including the quoted fee.
 // Provider limits also depend on currency/payment method and must be checked at Checkout.
 export const MAX_PAYMENT_CENTS = 99999999;
-export const MIN_CENTS = 100, MAX_CENTS = 95000000;
+export const MIN_CENTS = 100, MAX_CENTS = 95000000, MIN_TOPUP_CENTS = 50;
 export const HOLDING = ["funded", "delivered", "disputed"];
 const holdsFunds = (c) => !!c && [...HOLDING, "releasing", "resolving"].includes(c.status);
 
@@ -188,7 +188,9 @@ export const isBanned = async (uid) => { const p = await db.one("profiles", `id=
 
 // ---- the price the client pays: from the fee table in the database, never a number in code ----
 export async function quoteFor(priceCents, currency = "EUR", country = null, customer = "any", method = "any") {
-  if (!Number.isSafeInteger(priceCents) || priceCents < MIN_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400);
+  // a whole Order starts at €1 (MIN_CENTS, checked by the caller); a top-up for an agreed amendment may be smaller.
+  // €0.50 is the smallest card payment Stripe takes in euros, so nothing below it can ever be paid.
+  if (!Number.isSafeInteger(priceCents) || priceCents < MIN_TOPUP_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400);
   const qte = await db.rpc("order_quote", { p_price_cents: priceCents, p_currency: currency, p_country: country, p_customer: customer, p_method: method });
   if (!qte || !Number.isSafeInteger(qte.total_cents) || qte.total_cents < priceCents) throw new Error("bad quote");
   if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400);
