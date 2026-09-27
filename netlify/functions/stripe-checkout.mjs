@@ -9,7 +9,7 @@ export default safe(async (req) => {
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
-  const { contract_id: id, country, customer } = await readJson(req);
+  const { contract_id: id } = await readJson(req);
   const c = await db.contract(id);
   if (!c || c.client !== me.id) return bad("Not your order", 403);
   if (c.payment_mode !== "escrow") return bad("This order is paid directly, not through Cuvori", 409);
@@ -45,13 +45,14 @@ export default safe(async (req) => {
   const acct = await payoutAccount(c.editor);
   if (!accountReady(acct)) return bad("The freelancer's Stripe account can't receive payments right now. Ask them to finish or update their Stripe setup under Account → Payout details.", 409);
 
-  const cc = typeof country === "string" && /^[A-Za-z]{2}$/.test(country) ? country.toUpperCase() : null;
-  const kind_c = customer === "business" ? "business" : customer === "consumer" ? "consumer" : "any";
-  const quote = await quoteFor(amount, c.currency || "EUR", cc, kind_c, "card");
+  // The processing fee is the highest card rate (the fee table's "unknown country" row), the same for everyone,
+  // and the same number the page showed. Nothing the client declares can lower it. Once the payment is made,
+  // whatever was collected above the provider's real fee is refunded to the card automatically (settleFee).
+  const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card");
   const fee = quote.processing_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: `Order: ${String(c.title || "").slice(0, 180) || "Cuvori order"}` } } }];
-  if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing (charged by the payment provider, not Cuvori)" } } });
+  if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing — the payment provider's highest card rate, charged now; anything above its real cost is refunded to your card automatically. Cuvori keeps none of it." } } });
   // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
   // replays the answer for the same idempotency key). That needs the same request each time, so the expiry
   // is a fixed point 60–90 min ahead rather than "now + 30 min".
