@@ -17,9 +17,13 @@ export default safe(async (req) => {
   if (!price || price < MIN_CENTS || price > MAX_CENTS) return bad("Amount out of range", 409);
   // what still needs funding: the whole price on an accepted Order, or the part an amendment added
   let amount, kind;
-  // what has been paid in: a paid Order whose counter is empty (made before the counters existed) counts as paid in full,
-  // the same way heldCents() reads it, so it is never offered the whole price a second time
-  const paidIn = Number.isInteger(c.funded_cents) && c.funded_cents > 0 ? c.funded_cents : (["funded", "delivered"].includes(c.status) ? price : 0);
+  // what has been paid in. No guessing: an unpaid Order must show nothing paid, a paid one a real positive amount.
+  // Anything else (missing, negative, a fraction) means the payment record needs checking by hand before more money moves.
+  const fc = c.funded_cents;
+  const RECONCILE = "This order's payment record needs checking before another payment can be taken. Please contact Cuvori support.";
+  if (c.status === "accepted" && !(fc == null || fc === 0)) return bad(RECONCILE, 409);
+  if (["funded", "delivered"].includes(c.status) && !(Number.isSafeInteger(fc) && fc > 0)) return bad(RECONCILE, 409);
+  const paidIn = c.status === "accepted" ? 0 : fc;
   if (c.status === "accepted") { amount = price; kind = "fund"; }
   else if (["funded", "delivered"].includes(c.status) && price > paidIn) { amount = price - paidIn; kind = "topup"; }
   else return bad("This order is not waiting for payment", 409);
