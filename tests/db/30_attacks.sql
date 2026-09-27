@@ -738,5 +738,26 @@ begin
   return r || '|' || c.amount_cents || '|' || public.order_held_cents(c);
 end $$;
 grant execute on function t.f_discount_after_funding() to authenticated;
+create or replace function t.f_tiny_topup(p_when text) returns text language plpgsql as $$
+declare oid uuid; aid uuid; r text;
+begin
+  perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(10000));
+  perform t.as_user('107'); perform public.order_accept(oid);
+  if p_when = 'after' then
+    perform t.fund(oid);                                                                                     -- the client pays €100 first
+    perform t.as_user('207');
+    begin aid := public.order_amend(oid, '{"note":"tiny","price_delta_cents":30}'); exception when others then return 'refused:' || sqlerrm; end;
+    return 'proposed';
+  else
+    perform t.as_user('207'); aid := public.order_amend(oid, '{"note":"tiny","price_delta_cents":30}');   -- allowed while unpaid
+    perform t.fund(oid);                                                                                     -- then the client pays €100
+    perform t.as_user('107'); r := public.order_amendment_decide(aid, true);                                 -- and tries to accept the +€0.30
+    return r;
+  end if;
+end $$;
+grant execute on function t.f_tiny_topup(text) to authenticated;
+select t.try('editor','proposes a €0.30 price increase on a paid Order (can never be charged)', t.u('207'), $$select t.f_tiny_topup('after')$$, $$select $1 = 'proposed'$$);
+select t.try('client','accepts a €0.30 increase after paying (can never be charged)', t.u('107'), $$select t.f_tiny_topup('before')$$, $$select $1 = 'ok'$$);
+
 select t.try('client','accepts a discount after paying, so the freelancer would be paid more than the new price', t.u('107'), $$select t.f_discount_after_funding()$$,
   $$select split_part($1, '|', 1) = 'ok' or split_part($1, '|', 2)::int < split_part($1, '|', 3)::int$$);
