@@ -324,6 +324,8 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
 // is already out of the held amount, so it only shrinks what a payment can still return; Cuvori's own
 // earlier refunds count towards the plan, so a retry never pays twice. Returns the refund ids.
 const OURS = (r) => !!(r.metadata && (r.metadata.contract_id || r.metadata.reason));
+// the automatic refund of the processing-fee surplus (see settleFee): Cuvori's own, but never Order money
+export const FEE_REFUND = (r) => !!(r && r.metadata && r.metadata.kind === "fee_surplus");
 export async function refundToClient(c, cents) {
   if (!Number.isInteger(cents) || cents <= 0) throw new Error("bad refund amount");
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
@@ -333,7 +335,7 @@ export async function refundToClient(c, cents) {
   try {
     for (const s of sources) {
       if (!isPi(s.pi)) continue;
-      const existing = ((await stripe("GET", "/refunds", { payment_intent: s.pi, limit: 50 })).data || []).filter(r => r.status !== "failed" && r.status !== "canceled");
+      const existing = ((await stripe("GET", "/refunds", { payment_intent: s.pi, limit: 50 })).data || []).filter(r => r.status !== "failed" && r.status !== "canceled" && !FEE_REFUND(r));
       s.outside = Math.min(existing.filter(r => !OURS(r)).reduce((a, r) => a + r.amount, 0), s.amount);
       s.done = existing.filter(OURS).reduce((a, r) => a + r.amount, 0);
       s.ids = existing.filter(OURS).map(r => r.id);
@@ -573,8 +575,45 @@ export async function applyPaidSession(s) {
   await contractEvent(u, "funded", c.client, { amount_cents: amount });
   const card = charge && charge.payment_method_details && charge.payment_method_details.card;
   if (card && card.fingerprint) await db.rpc("record_card", { uid: c.client, fingerprint: card.fingerprint, label: `${card.brand || "card"} ••${card.last4 || "????"}` }).catch(e => console.error("card", e.message));
+  // the fee surplus goes back to the card now; if this fails the hourly job settles it later
+  try { const row = await fundRowOf(u, s.payment_intent); if (row) await settleFee(u, row); } catch (e) { console.error("fee settle", s.payment_intent, e.message); }
   return "funded";
 }
+
+// ---- the processing fee: the highest card rate is charged up front, the surplus over the provider's real fee goes back ----
+// Cuvori keeps none of the fee. Stripe reports the fee it actually took on the payment's balance transaction; the
+// difference between what the client paid as "Payment processing" and that fee is refunded to the card automatically.
+// Runs once per payment (the ledger row remembers the outcome), safe to repeat, and retried by the hourly job while
+// the provider's fee is not yet known. A fee above what was collected (rare) is recorded and absorbed: nothing more
+// can be taken from the card.
+export async function settleFee(c, row) {
+  if (!row || row.kind !== "fund" || row.status !== "succeeded" || !isPi(row.provider_ref)) return "ignored";
+  if (Number.isInteger(row.fee_refund_cents)) return "already";
+  const pi = row.provider_ref, collected = Number.isInteger(row.fee_cents) ? row.fee_cents : 0;
+  let actual = Number.isInteger(row.provider_fee_cents) ? row.provider_fee_cents : null;
+  if (actual == null) {
+    const p = await stripe("GET", `/payment_intents/${pi}`, { "expand[]": "latest_charge.balance_transaction" });
+    const bt = p && p.latest_charge && p.latest_charge.balance_transaction;
+    if (!bt || typeof bt !== "object" || !Number.isInteger(bt.fee)) return "pending";
+    if (bt.currency && String(bt.currency).toLowerCase() !== String(c.currency || "EUR").toLowerCase()) return "pending";   // settled in another currency: a person looks
+    actual = bt.fee;
+    await db.update("order_payments", `id=eq.${row.id}`, { provider_fee_cents: actual });
+  }
+  const surplus = collected - actual;
+  const done = async (refunded, ref, extra) => {
+    await db.update("order_payments", `id=eq.${row.id}`, { fee_refund_cents: refunded, fee_refund_ref: ref || null });
+    await orderEvent(c, refunded > 0 ? "fee_refunded" : "fee_exact", { amount_cents: refunded, collected_cents: collected, provider_fee_cents: actual, ...(extra || {}) }, null);
+  };
+  if (surplus <= 0) { await done(0, null, surplus < 0 ? { shortfall_cents: -surplus } : {}); return surplus < 0 ? "shortfall" : "exact"; }
+  // a refund made by an earlier, interrupted attempt is used, never made twice
+  const prior = ((await stripe("GET", "/refunds", { payment_intent: pi, limit: 50 })).data || []).filter(r => FEE_REFUND(r) && r.status !== "failed" && r.status !== "canceled");
+  let r = prior[0] || null;
+  if (!r) r = await moneyPost(`feerefund:${pi}`, "/refunds", { payment_intent: pi, amount: surplus, metadata: { contract_id: c.id, kind: "fee_surplus" } });
+  await done(prior.length ? prior.reduce((a, x) => a + x.amount, 0) : surplus, r.id);
+  return "refunded";
+}
+// the ledger row of a payment, for settleFee
+export const fundRowOf = (c, pi) => db.one("order_payments", `order_id=eq.${c.id}&kind=eq.fund&provider_ref=eq.${q(pi)}&select=*`);
 
 // ---- chargebacks: the bank pulls the money back on the client's word; Cuvori answers with the facts ----
 const pendingReversal = (c) => String(c.money_error || "").startsWith("chargeback:");
@@ -638,7 +677,10 @@ async function disputePrincipal(c, dispute) {
   if (chargePi !== pi || String(charge.currency).toLowerCase() !== String(c.currency || "EUR").toLowerCase()
     || !Number.isSafeInteger(charge.amount_refunded) || charge.amount_refunded < 0)
     throw new Error("disputed charge does not match the order payment");
-  return Math.min(dispute.amount, Math.max(principal - charge.amount_refunded, 0));
+  // what was refunded of the Order money: everything refunded on the charge except the processing-fee surplus
+  const feeBack = ((await stripe("GET", "/refunds", { payment_intent: pi, limit: 50 })).data || []).filter(r => FEE_REFUND(r) && r.status !== "failed" && r.status !== "canceled").reduce((a, r) => a + r.amount, 0);
+  const principalRefunded = Math.max(charge.amount_refunded - feeBack, 0);
+  return Math.min(dispute.amount, Math.max(principal - principalRefunded, 0));
 }
 async function coverChargebackLocked(id, disputeId, centsHint, pullBack = true) {
     let c = await db.contract(id);
