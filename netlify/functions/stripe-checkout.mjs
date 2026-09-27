@@ -12,7 +12,7 @@ export default safe(async (req) => {
   const { contract_id: id, country, customer } = await readJson(req);
   const c = await db.contract(id);
   if (!c || c.client !== me.id) return bad("Not your order", 403);
-  if (c.payment_mode !== "escrow") return bad("This order is paid directly, not through Cuvori");
+  if (c.payment_mode !== "escrow") return bad("This order is paid directly, not through Cuvori", 409);
   const price = centsOf(c);
   if (!price || price < MIN_CENTS || price > MAX_CENTS) return bad("Amount out of range", 409);
   // what still needs funding: the whole price on an accepted Order, or the part an amendment added
@@ -40,7 +40,7 @@ export default safe(async (req) => {
   if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
   if (await isBanned(c.editor)) return bad("This freelancer cannot receive payments", 409);
   const acct = await payoutAccount(c.editor);
-  if (!accountReady(acct)) return bad("The freelancer has not finished setting up payouts yet. Ask them to connect Stripe under Account → Payout details.", 409);
+  if (!accountReady(acct)) return bad("The freelancer's Stripe account can't receive payments right now. Ask them to finish or update their Stripe setup under Account → Payout details.", 409);
 
   const cc = typeof country === "string" && /^[A-Za-z]{2}$/.test(country) ? country.toUpperCase() : null;
   const kind_c = customer === "business" ? "business" : customer === "consumer" ? "consumer" : "any";
