@@ -720,3 +720,23 @@ select t.try('banned','reviews an Order', t.u('301'), $$select public.order_revi
 select t.try('admin','hides a review, which takes it out of the public count (normal)', t.u('401'), $$select public.admin_moderate_review('40000000-0000-0000-0000-000000000002', 'hidden', 'personal information')$$, $$select $1 = 'ok' and (public.profile_reviews('00000000-0000-0000-0000-000000000104')->>'count')::int = 0$$, 'allow');
 select t.try('admin','hiding a review keeps the words the person wrote (normal)', t.u('401'), $$select public.admin_moderate_review('40000000-0000-0000-0000-000000000002', 'hidden', 'personal information')$$, $$select (select comment from public.order_reviews where order_id = '30000000-0000-0000-0000-000000000008') = 'Good job overall'$$, 'allow');
 select t.try('admin','reads the moderation queue (normal)', t.u('401'), $$select count(*)::text from public.admin_list_order_reviews(null)$$, $$select $1::int >= 2$$, 'allow');
+
+-- ---------- v23: a discount proposed before payment cannot be accepted after it ----------
+insert into auth.users (id, email, raw_user_meta_data) values (t.u('107'), 'c7@t.com', '{"first_name":"Cody"}'), (t.u('207'), 'e7@t.com', '{"first_name":"Emil"}');
+update public.profiles set role = 'editor' where id = t.u('207');
+insert into public.editor_profiles (id, display_name, is_public) values (t.u('207'), 'Emil Edits', true);
+insert into public.conversations (id, user_a, user_b) values ('10000000-0000-0000-0000-000000000023', t.u('107'), t.u('207'));
+create or replace function t.f_discount_after_funding() returns text language plpgsql as $$
+declare oid uuid; c public.contracts%rowtype; aid uuid; r text;
+begin
+  perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(10000));
+  perform t.as_user('107'); perform public.order_accept(oid);
+  perform t.as_user('207'); aid := public.order_amend(oid, '{"note":"small discount","price_delta_cents":-2000}');   -- allowed: nothing paid yet
+  perform t.fund(oid);                                                                                                -- the client pays €100
+  perform t.as_user('107'); r := public.order_amendment_decide(aid, true);                                            -- the client accepts the discount afterwards
+  select * into c from public.contracts where id = oid;
+  return r || '|' || c.amount_cents || '|' || public.order_held_cents(c);
+end $$;
+grant execute on function t.f_discount_after_funding() to authenticated;
+select t.try('client','accepts a discount after paying, so the freelancer would be paid more than the new price', t.u('107'), $$select t.f_discount_after_funding()$$,
+  $$select split_part($1, '|', 1) = 'ok' or split_part($1, '|', 2)::int < split_part($1, '|', 3)::int$$);
