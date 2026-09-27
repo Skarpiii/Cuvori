@@ -97,6 +97,18 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   }
   reset();
 }
+// ---------- R-I2: top-up amount out of range (price grew by a fraction / a few cents / to above the cap) ----------
+{
+  for (const [name, price, funded] of [["49 cents", 10049, 10000], ["a fraction", 10000.5, 10000], ["above the cap", 95000000 + 10000, 10000]]) {
+    const c = mk({ status: "funded", amount_cents: price, price: price / 100, funded_cents: funded });
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status === 200, `R-I2 top-up of '${name}' (price ${price}, paid ${funded}) -> HTTP ${r.status} ${r.json && r.json.error || ""} (must be refused)`);
+  }
+  const ok = mk({ status: "funded", amount_cents: 10050, price: 100.5, funded_cents: 10000 });
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: ok.id } }));
+  vuln(r.status !== 200, `R-I2 a €0.50 top-up (the smallest allowed) still works -> HTTP ${r.status} ${r.json && r.json.error || ""}`);
+  reset();
+}
 // ---------- R-J: resolve split percentage tampering (admin, but nonsense numbers) ----------
 {
   for (const p of [-5, 0, 100, 150, Number.NaN, Number.POSITIVE_INFINITY, "50", null]) {
