@@ -240,6 +240,17 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-S: the card fee line on Stripe's page says what it is, and says it truthfully ----------
+{
+  const c = mk({ title: "Logo animation" });
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const p = (STRIPE.sessions[c.stripe_checkout_id] || {}).params || {};
+  const name = p["line_items[1][price_data][product_data][name]"] || "", desc = p["line_items[1][price_data][product_data][description]"] || "";
+  vuln(r.status !== 200 || name !== "Card fee" || !desc.includes("covers even the most expensive cards") || !desc.includes("goes back to your card automatically") || !desc.includes("Cuvori keeps none of it") || /highest card rate/i.test(name + desc),
+    `R-S the card fee line on Stripe's page -> ${JSON.stringify(name)} / ${JSON.stringify(desc)}`);
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
