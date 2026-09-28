@@ -219,6 +219,27 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-R: an emoji built from several pieces (a flag, a skin tone, a family) is kept whole or left out, never cut ----------
+{
+  const nameOf = (c) => { const s = STRIPE.sessions[c.stripe_checkout_id]; return (s && s.params && s.params["line_items[0][price_data][product_data][name]"]) || ""; };
+  for (const [what, title, want] of [
+    ["a flag", "a".repeat(179) + "🇱🇹", "a".repeat(179)],                 // 181 characters as the database counts them; the cut at 180 falls inside the flag
+    ["a family emoji", "a".repeat(178) + "👨‍👩‍👧", "a".repeat(178)],        // the cut falls inside the family
+    ["a skin tone", "a".repeat(179) + "👍🏽", "a".repeat(179)],            // the cut falls between the thumb and its skin tone
+    ["a flag that fits", "a".repeat(178) + "🇱🇹", "a".repeat(178) + "🇱🇹"], // exactly 180: kept whole
+  ]) {
+    const c = mk({ title });
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status !== 200 || nameOf(c) !== "Order: " + want, `R-R title with ${what} where it is cut -> HTTP ${r.status}, the line on Stripe's page ends ${JSON.stringify(nameOf(c).slice(-6))} (must end ${JSON.stringify(("Order: " + want).slice(-6))})`);
+  }
+  // the same for a note: the freelancer cancels with a family emoji where the note is cut (500)
+  const a = mk(); await fund(fx, a);
+  await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: a.id, note: "a".repeat(498) + "👨‍👩‍👧 sorry" } }));
+  const ev = DB.order_events.find(e => e.order_id === a.id && e.event === "cancelled");
+  vuln(!ev || ev.data.note !== "a".repeat(498), `R-R cancel note with a family emoji where it is cut -> ${ev ? "note ends " + JSON.stringify(String(ev.data.note).slice(-4)) : "history line LOST"} (must end with the plain text, the family left out whole)`);
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
