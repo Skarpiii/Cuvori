@@ -45,7 +45,7 @@ export default safe(async (req) => {
   const acct = await payoutAccount(c.editor);
   if (!accountReady(acct)) return bad("The freelancer's Stripe account can't receive payments right now. Ask them to finish or update their Stripe setup under Account → Payout details.", 409);
 
-  // The processing fee is the highest card rate (the fee table's "unknown country" row), the same for everyone,
+  // The card fee is charged at a rate that covers even the most expensive cards (the fee table's "unknown country" row), the same for everyone,
   // and the same number the page showed. Nothing the client declares can lower it. Once the payment is made,
   // whatever was collected above the provider's real fee is refunded to the card automatically (settleFee).
   const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card");
@@ -56,7 +56,7 @@ export default safe(async (req) => {
   // a flag or a family emoji, which would show as a stray symbol.
   const title = cut(c.title, 180) || "Cuvori order";
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: kind === "topup" ? `Agreed price increase — ${title}` : `Order: ${title}` } } }];
-  if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing — the payment provider's highest card rate, charged now; anything above its real cost is refunded to your card automatically. Cuvori keeps none of it." } } });
+  if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Card fee", description: "Charged at a rate that covers even the most expensive cards. Anything above what your card really costs goes back to your card automatically after payment. Cuvori keeps none of it." } } });
   // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
   // replays the answer for the same idempotency key). That needs the same request each time, so the expiry
   // is a fixed point 60–90 min ahead rather than "now + 30 min".
