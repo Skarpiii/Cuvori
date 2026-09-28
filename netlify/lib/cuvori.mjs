@@ -50,9 +50,21 @@ export const isStripeId = (s) => typeof s === "string" && /^[a-z]{2,4}_[A-Za-z0-
 export const isSession = (s) => typeof s === "string" && /^cs_[A-Za-z0-9_]{4,120}$/.test(s);
 export const centsOf = (c) => (Number.isInteger(c.amount_cents) && c.amount_cents > 0 ? c.amount_cents : null);
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
-// Shortens text to at most n characters without cutting an emoji in half: half an emoji is refused by the database and
-// cannot be sent to Stripe. (A plain .slice() counts an emoji as two and can split it.)
-export const cut = (text, n) => Array.from(String(text ?? "")).slice(0, n).join("");
+// Shortens text to at most n characters without breaking anything a person sees as one character: never half an emoji
+// (the database refuses it and Stripe cannot be sent it), and never part of an emoji built from several pieces (a flag, a
+// skin tone, a family), which would show as a stray symbol. Still never more than n characters as the database counts them.
+const GRAPHEMES = typeof Intl === "object" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+export const cut = (text, n) => {
+  const s = String(text ?? "");
+  if (!GRAPHEMES) return Array.from(s).slice(0, n).join("");
+  let out = "", used = 0;
+  for (const { segment } of GRAPHEMES.segment(s)) {
+    const size = Array.from(segment).length;
+    if (used + size > n) break;
+    out += segment; used += size;
+  }
+  return out;
+};
 // what the provider is holding for this Order right now (Orders from before v18 carry no counters)
 export const heldCents = (c) => { const f = nz(c.funded_cents) || (holdsFunds(c) ? centsOf(c) || 0 : 0); return Math.max(f - nz(c.released_cents) - nz(c.refunded_cents), 0); };
 export const chargebackOpen = (c) => !!c && c.chargeback_status === "open";
