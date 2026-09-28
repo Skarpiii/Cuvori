@@ -148,6 +148,26 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   reset();
 }
 
+// ---------- F12: the fee table can never make Cuvori pay the card cost — the checkout stops instead ----------
+{
+  const quoteOf = (p, extra) => ({ price_cents: p, processing_cents: 0, cuvori_cents: 0, total_cents: p, currency: "EUR", payer: "platform", percent: 0, fixed_cents: 0, schedule_id: null, region: "ANY", ...(extra || {}) });
+  for (const [name, answer] of [
+    ["no active fee row matches", (p) => quoteOf(p)],
+    ["the row is set to payer = platform", (p) => quoteOf(p, { schedule_id: 3, percent: 3.25, fixed_cents: 25 })],
+    ["the client row has a zero rate", (p) => quoteOf(p, { payer: "client", schedule_id: 3 })],
+  ]) {
+    hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, answer(args.p_price_cents)] : null;
+    const c = mk({ amount_cents: 10000 }); const sessionsBefore = Object.keys(STRIPE.sessions).length;
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status === 200 || Object.keys(STRIPE.sessions).length !== sessionsBefore || c.stripe_checkout_id,
+      `F12 ${name} -> HTTP ${r.status} ${r.json && r.json.error || ""} (must refuse, no Stripe page made)`);
+    reset();
+  }
+  const ok = mk({ amount_cents: 10000 }); const f = await fund(fx, ok);
+  vuln(!f.checkout || f.checkout.status !== 200 || ok.status !== "funded", `F12 with a proper client-paid fee row, payment works as before -> HTTP ${f.checkout && f.checkout.status}, status=${ok.status}`);
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
