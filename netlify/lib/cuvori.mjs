@@ -50,6 +50,9 @@ export const isStripeId = (s) => typeof s === "string" && /^[a-z]{2,4}_[A-Za-z0-
 export const isSession = (s) => typeof s === "string" && /^cs_[A-Za-z0-9_]{4,120}$/.test(s);
 export const centsOf = (c) => (Number.isInteger(c.amount_cents) && c.amount_cents > 0 ? c.amount_cents : null);
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+// Shortens text to at most n characters without cutting an emoji in half: half an emoji is refused by the database and
+// cannot be sent to Stripe. (A plain .slice() counts an emoji as two and can split it.)
+export const cut = (text, n) => Array.from(String(text ?? "")).slice(0, n).join("");
 // what the provider is holding for this Order right now (Orders from before v18 carry no counters)
 export const heldCents = (c) => { const f = nz(c.funded_cents) || (holdsFunds(c) ? centsOf(c) || 0 : 0); return Math.max(f - nz(c.released_cents) - nz(c.refunded_cents), 0); };
 export const chargebackOpen = (c) => !!c && c.chargeback_status === "open";
@@ -653,7 +656,7 @@ async function createDisputeLocked(id, o) {
     await orderEvent(u, "chargeback", { chargeback: o.id, amount_cents: cents, reason: o.reason || "" }, null);
     await contractEvent(u, "dispute", c0.client, { amount_cents: cents, label: "chargeback" });
     const flagged = await db.one("user_flags", `user_id=eq.${c0.client}&contract_id=eq.${c0.id}&kind=eq.chargeback&select=id`);
-    if (!flagged) await db.insert("user_flags", { user_id: c0.client, kind: "chargeback", reason: `Chargeback ${o.id} on "${String(c0.title).slice(0, 120)}" (order was ${c0.status})`, contract_id: c0.id }).catch(() => {});
+    if (!flagged) await db.insert("user_flags", { user_id: c0.client, kind: "chargeback", reason: `Chargeback ${o.id} on "${cut(c0.title, 120)}" (order was ${c0.status})`, contract_id: c0.id }).catch(() => {});
   }
   await coverChargebackLocked(c0.id, o.id, cents);
   return "recorded";
