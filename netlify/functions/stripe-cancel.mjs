@@ -1,7 +1,7 @@
 // POST { contract_id } (freelancer) — give a funded Order back: everything still held goes back to the
 // client. A client who wants out after funding asks the freelancer (or opens a dispute); money never
 // moves on one side's say-so in the other direction.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, orderEvent, chargebackOpen } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, orderEvent, chargebackOpen, cut } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -22,7 +22,7 @@ export default safe(async (req) => {
     row = await db.claim(id, ["funded", "delivered"], { status: "resolving", resolution: "refund", split_editor_cents: 0, refund_cents: held, resolved_by: me.id, resolved_at: now, auto_release_at: null });
     if (!row) return bad("This order cannot be cancelled right now", 409);
     await db.update("order_milestones", `order_id=eq.${c.id}&status=in.(pending,submitted)`, { auto_release_at: null }).catch(() => {});
-    await orderEvent(row, "cancelled", { by: "freelancer", refund_cents: held, note: typeof note === "string" ? note.slice(0, 500) : "" }, me.id);
+    await orderEvent(row, "cancelled", { by: "freelancer", refund_cents: held, note: typeof note === "string" ? cut(note, 500) : "" }, me.id);
   }
   const u = await settle(row, me.id, "cancel_refund");
   return json(200, { ok: true, status: u && u.status, refunded: held });

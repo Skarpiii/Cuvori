@@ -1,7 +1,7 @@
 // POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
 // Decides a dispute (release / refund / split), and can take over a release that got stuck before any
 // transfer was made (freelancer's account closed, for example) so the client is not left waiting for ever.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf, lockOrder } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf, lockOrder, cut } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -11,7 +11,7 @@ export default safe(async (req) => {
   const body = await readJson(req);
   const decision = body.decision;
   if (!["release", "refund", "split"].includes(decision)) return bad("decision must be release, refund or split");
-  const note = typeof body.note === "string" ? body.note.slice(0, 2000) : "";
+  const note = typeof body.note === "string" ? cut(body.note, 2000) : "";
   const c = await db.contract(body.contract_id);
   if (!c) return bad("Not found", 404);
   if (c.payment_mode !== "escrow") return bad("This order is not holding money", 409);
@@ -57,7 +57,7 @@ export default safe(async (req) => {
     const loser = decision === "refund" ? c.editor : decision === "release" ? c.client : null;
     // a retried decision must not flag the same person twice for the same contract
     const already = loser ? await db.one("user_flags", `user_id=eq.${loser}&contract_id=eq.${c.id}&kind=eq.dispute_lost&select=id`) : null;
-    if (loser && !already) await db.insert("user_flags", { user_id: loser, kind: "dispute_lost", reason: `Lost dispute on "${String(c.title).slice(0, 200)}"${note ? ": " + note : ""}`, contract_id: c.id, created_by: me.id });
+    if (loser && !already) await db.insert("user_flags", { user_id: loser, kind: "dispute_lost", reason: `Lost dispute on "${cut(c.title, 200)}"${note ? ": " + note : ""}`, contract_id: c.id, created_by: me.id });
   }
   if (note) await db.insert("messages", { conversation_id: c.conversation_id, sender: me.id, kind: "text", body: `Cuvori decision: ${note}` });
   return json(200, { ok: true, status: u && u.status, editorCents: row.split_editor_cents, refundCents: row.refund_cents });
