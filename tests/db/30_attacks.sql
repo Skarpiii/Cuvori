@@ -761,3 +761,34 @@ select t.try('client','accepts a €0.30 increase after paying (can never be cha
 
 select t.try('client','accepts a discount after paying, so the freelancer would be paid more than the new price', t.u('107'), $$select t.f_discount_after_funding()$$,
   $$select split_part($1, '|', 1) = 'ok' or split_part($1, '|', 2)::int < split_part($1, '|', 3)::int$$);
+
+-- v26: an Order where the payment provider took more in card fees than the client paid for processing shows up for the admin
+create or replace function t.set_provider_fee(oid uuid, extra int) returns void language sql security definer as $$
+  update public.order_payments set provider_fee_cents = fee_cents + extra where order_id = oid and kind = 'fund';
+$$;
+create or replace function t.close_order(oid uuid) returns void language sql security definer as $$
+  update public.contracts set status = 'completed', completed_at = now() where id = oid;
+$$;
+grant execute on function t.set_provider_fee(uuid, int), t.close_order(uuid) to authenticated;
+create or replace function t.f_fee_short(extra int) returns text language plpgsql as $$
+declare oid uuid; plain uuid; lst jsonb;
+begin
+  perform t.as_user('207'); plain := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(10000));
+  perform t.as_user('107'); perform public.order_accept(plain); perform t.fund(plain);
+  perform t.set_provider_fee(plain, 0);                                   -- an ordinary paid Order: the fee covered the card cost exactly
+  perform t.close_order(plain);                                           -- (done, so the next Order can be made in the same conversation)
+  perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(20000));
+  perform t.as_user('107'); perform public.order_accept(oid); perform t.fund(oid);
+  perform t.set_provider_fee(oid, extra);                                 -- the provider took `extra` cents more than the client paid for processing
+  perform t.as_user('401');
+  select jsonb_agg(to_jsonb(r)) into lst from public.admin_list_contracts() r;
+  return jsonb_build_object('short', oid, 'plain', plain, 'list', lst)::text;
+end $$;
+grant execute on function t.f_fee_short(int) to authenticated;
+select t.try('admin','sees an Order where the card cost came out higher than the client paid, with the amount, above the ordinary Orders (normal)', t.u('401'),
+  $$select t.f_fee_short(40)$$,
+  $$select (select (x->>'fee_short_cents')::int from jsonb_array_elements($1::jsonb->'list') x where x->>'id' = $1::jsonb->>'short') = 40
+       and (select (x->>'fee_short_cents')::int from jsonb_array_elements($1::jsonb->'list') x where x->>'id' = $1::jsonb->>'plain') = 0
+       and (select o from jsonb_array_elements($1::jsonb->'list') with ordinality a(x, o) where x->>'id' = $1::jsonb->>'short')
+         < (select o from jsonb_array_elements($1::jsonb->'list') with ordinality a(x, o) where x->>'id' = $1::jsonb->>'plain')$$, 'allow');
+select t.try('client','reads the admin Orders list with the card-cost shortfalls', t.u('101'), $$select count(*) from public.admin_list_contracts()$$, $$select $1::int > 0$$);
