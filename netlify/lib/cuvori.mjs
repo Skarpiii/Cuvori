@@ -193,6 +193,13 @@ export async function quoteFor(priceCents, currency = "EUR", country = null, cus
   if (!Number.isSafeInteger(priceCents) || priceCents < MIN_TOPUP_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400);
   const qte = await db.rpc("order_quote", { p_price_cents: priceCents, p_currency: currency, p_country: country, p_customer: customer, p_method: method });
   if (!qte || !Number.isSafeInteger(qte.total_cents) || qte.total_cents < priceCents) throw new Error("bad quote");
+  // Cuvori never pays the card cost: the client pays it on top of the price. A quote in which the client pays no fee
+  // (no active fee row matched, the row is set to "payer = platform", or its rate is zero) would leave the provider's
+  // whole fee to Cuvori, so no payment is taken until the fee table is fixed.
+  if (qte.payer !== "client" || !Number.isSafeInteger(qte.processing_cents) || qte.processing_cents <= 0) {
+    console.error("fee table: no client-paid processing fee for this payment — payments paused", JSON.stringify({ payer: qte.payer, schedule_id: qte.schedule_id, processing_cents: qte.processing_cents, region: qte.region }));
+    throw fail("Payments through Cuvori are paused: the processing fee is not set up. Please contact Cuvori support.", 503);
+  }
   if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400);
   return qte;
 }
