@@ -51,7 +51,10 @@ export default safe(async (req) => {
   const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card");
   const fee = quote.processing_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
-  const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: `Order: ${String(c.title || "").slice(0, 180) || "Cuvori order"}` } } }];
+  // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to. The title is
+  // cut by whole characters, never through the middle of an emoji: half an emoji cannot be sent and would stop the payment.
+  const title = Array.from(String(c.title || "")).slice(0, 180).join("") || "Cuvori order";
+  const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: kind === "topup" ? `Agreed price increase — ${title}` : `Order: ${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing — the payment provider's highest card rate, charged now; anything above its real cost is refunded to your card automatically. Cuvori keeps none of it." } } });
   // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
   // replays the answer for the same idempotency key). That needs the same request each time, so the expiry
