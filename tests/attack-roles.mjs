@@ -2,7 +2,7 @@
 // inputs, and prove nothing moves. Roles: anonymous (no token), the order's client (tok_cl), the order's
 // professional/editor (tok_ed), an admin (tok_adm), a stranger client (tok_cl2), a second professional not
 // on the order (tok_ed2). "safe" = the attempt was refused and no money moved; "VULNERABLE" = it got through.
-import { DB, STRIPE, users, req, call, mk, moneyOut, reset, fns, fund, pay, uuid } from "./fn-harness.mjs";
+import { DB, STRIPE, users, req, call, mk, moneyOut, reset, fns, fund, pay, uuid, signed } from "./fn-harness.mjs";
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
 const info = (m) => out.push("info       " + m);
@@ -171,6 +171,51 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   const rel = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
   const cxl = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id } }));
   vuln(moneyOut(c).transferred > 0 || moneyOut(c).refunded > 0, `R-O release/cancel on an unfunded order moved money -> transferred=${moneyOut(c).transferred}, refunded=${moneyOut(c).refunded} (release ${rel.status}, cancel ${cxl.status})`);
+  reset();
+}
+
+// ---------- R-P: the Order title on Stripe's page — a title can never stop the client from paying ----------
+{
+  const nameOf = (c) => { const s = STRIPE.sessions[c.stripe_checkout_id]; return (s && s.params && s.params["line_items[0][price_data][product_data][name]"]) || ""; };
+  // an emoji exactly where the title is cut (the database allows titles up to 200 characters)
+  const long = mk({ title: "a".repeat(179) + "🎬 final cut" });
+  const r1 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: long.id } }));
+  const n1 = nameOf(long);
+  vuln(r1.status !== 200 || !n1.isWellFormed() || !n1.startsWith("Order: ") || !n1.endsWith("a🎬"), `R-P a 191-character title with an emoji where it is cut -> HTTP ${r1.status} ${r1.json && r1.json.error || ""}, the line on Stripe's page ends ${JSON.stringify(n1.slice(-4))}`);
+  // a first payment is named after the Order; a top-up says it is the price increase both sides agreed to
+  const first = mk({ title: "Logo animation" });
+  await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: first.id } }));
+  vuln(nameOf(first) !== "Order: Logo animation", `R-P first payment, the line on Stripe's page -> ${JSON.stringify(nameOf(first))}`);
+  const top = mk({ title: "Logo animation", status: "funded", amount_cents: 13000, price: 130, funded_cents: 10000 });
+  const r3 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: top.id } }));
+  vuln(r3.status !== 200 || nameOf(top) !== "Agreed price increase — Logo animation", `R-P top-up of the agreed €30, the line on Stripe's page -> HTTP ${r3.status}, ${JSON.stringify(nameOf(top))}`);
+  const blank = mk({ title: "" });
+  await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: blank.id } }));
+  vuln(nameOf(blank) !== "Order: Cuvori order", `R-P an Order with no title -> ${JSON.stringify(nameOf(blank))}`);
+  reset();
+}
+
+// ---------- R-Q: notes and titles are cut by whole characters — half an emoji is refused by the database ----------
+{
+  const whole = (t) => typeof t === "string" && t.isWellFormed();
+  // the freelancer cancels with a long note that has an emoji where it is cut (500)
+  const a = mk(); await fund(fx, a);
+  const ra = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: a.id, note: "a".repeat(499) + "🎬 sorry" } }));
+  const ev = DB.order_events.find(e => e.order_id === a.id && e.event === "cancelled");
+  vuln(ra.status !== 200 || a.status !== "refunded" || !ev || !whole(ev.data.note), `R-Q freelancer cancels with an emoji where the note is cut -> HTTP ${ra.status}, status=${a.status}, history line ${ev ? "kept" : "LOST"}`);
+  reset();
+  // the admin decides a dispute with a long note that has an emoji where it is cut (2000); the title has one where it is cut (200)
+  const b = mk({ title: "a".repeat(199) + "🎬" }); await fund(fx, b); b.status = "disputed"; b.dispute_by = users.cl.id; b.disputed_at = new Date().toISOString();
+  const rb = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: b.id, decision: "release", note: "n".repeat(1999) + "🎬 decided" } }));
+  const flag = DB.user_flags.find(f => f.contract_id === b.id && f.kind === "dispute_lost");
+  const msg = DB.messages.find(m => typeof m.body === "string" && m.body.startsWith("Cuvori decision:") && m.body.length > 1900);
+  vuln(rb.status !== 200 || b.status !== "completed" || !flag || !whole(flag.reason) || !msg || !whole(msg.body), `R-Q admin decides with an emoji where the note and the title are cut -> HTTP ${rb.status} ${rb.json && rb.json.error || ""}, status=${b.status}, flag ${flag ? "kept" : "LOST"}, chat note ${msg ? "kept" : "LOST"}`);
+  reset();
+  // a chargeback on an Order whose title has an emoji where it is cut (120): the client is still flagged
+  const c = mk({ title: "a".repeat(119) + "🎬 end" }); const f = await fund(fx, c); const pi = f.session.payment_intent; const ch = STRIPE.charges[STRIPE.intents[pi].latest_charge];
+  const rc = await call(fx.webhook, req("POST", "x", signed({ type: "charge.dispute.created", data: { object: { id: "dp_RQ", charge: ch.id, payment_intent: pi, amount: ch.amount - ch.amount_refunded, currency: "eur", status: "needs_response", reason: "fraudulent" } } })));
+  const cf = DB.user_flags.find(x => x.contract_id === c.id && x.kind === "chargeback");
+  vuln(rc.status !== 200 || c.chargeback_status !== "open" || !cf || !whole(cf.reason), `R-Q chargeback on an Order with an emoji where the title is cut -> webhook ${rc.status}, chargeback=${c.chargeback_status}, client flag ${cf ? "kept" : "LOST"}`);
   reset();
 }
 

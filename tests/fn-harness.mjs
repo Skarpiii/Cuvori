@@ -107,6 +107,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname.startsWith("/rest/v1/")) {
     const table = u.pathname.split("/")[3]; const f = parseFilter(u.search.slice(1)); const rows = DB[table]; if (!rows) return res(404, { message: `relation "${table}" does not exist` });
     if (hooks.db) { const h = await hooks.db(method, table, u.search, body); if (h) return h; }
+    // like the real database: text holding half an emoji (a lone surrogate) is refused, never stored
+    if ((method === "POST" || method === "PATCH") && body) { const bad = (v) => typeof v === "string" ? !v.isWellFormed() : v && typeof v === "object" ? Object.values(v).some(bad) : false; if (bad(JSON.parse(body))) return res(400, { code: "22P05", message: "unsupported Unicode escape sequence" }); }
     if (method === "GET") return res(200, rows.filter(r => match(r, f)));
     if (method === "PATCH") { const patch = JSON.parse(body); const o = rows.filter(r => match(r, f)); o.forEach(r => Object.assign(r, patch)); return res(200, o); }
     if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); rows.push(row); return res(201, [row]); }
