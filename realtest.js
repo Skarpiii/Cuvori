@@ -540,6 +540,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok((await modal()).includes('Refunded'),'the Order says refunded');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   await p.goto(url+'#account'); await p.waitForTimeout(400); await p.click('#adminBtn'); await p.waitForTimeout(600); await p.click('.admin-tab[data-atab="contracts"]'); await p.waitForTimeout(600);
+  // a payment where the card cost came out higher than the client paid for processing: the admin sees it, with the amount and what to do
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.find(x=>x.payment_mode==='escrow'&&x.status==='completed')||window.__mockdb.contracts.find(x=>x.payment_mode==='escrow'); c.fee_short_cents=40; });
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(300); await p.click('.admin-tab[data-atab="contracts"]'); await p.waitForTimeout(600);
+  ok((await p.textContent('#adminBody')).includes('Card cost not covered: Stripe took €0.40 more in card fees') && (await p.textContent('#adminBody .admin-stats')).includes('€0.40 card cost paid by Cuvori (1 order)'),'admin sees a card cost that was not covered, with the amount and what to do');
+  if(process.env.SHOT){ await p.locator('#adminBody .admin-stats').screenshot({path:process.env.SHOT+'-stats.png'}); await p.locator('.admin-row',{hasText:'Card cost not covered'}).screenshot({path:process.env.SHOT+'-row.png'}); }
+  await p.evaluate(()=>{ window.__mockdb.contracts.forEach(c=>{ delete c.fee_short_cents; }); });
   // ---------- bad actors ----------
   await p.click('.admin-tab[data-atab="bad"]'); await p.waitForTimeout(600);
   ok((await p.textContent('#adminBody')).includes('Nobody on the list'),'bad actors list empty after a split');
