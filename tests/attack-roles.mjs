@@ -251,6 +251,42 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-T: Stripe's page speaks the client's language; nothing else changes with it ----------
+{
+  const P = (c) => (STRIPE.sessions[c.stripe_checkout_id] || {}).params || {};
+  const pay = async (c, lang) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: lang === undefined ? { contract_id: c.id } : { contract_id: c.id, lang } }));
+  // Lithuanian, first payment
+  const a = mk({ title: "Logo animation" }); const ra = await pay(a, "lt"); const pa = P(a);
+  vuln(ra.status !== 200 || pa["line_items[0][price_data][product_data][name]"] !== "Užsakymas: Logo animation" || pa["line_items[1][price_data][product_data][name]"] !== "Kortelės mokestis"
+    || !String(pa["line_items[1][price_data][product_data][description]"]).includes("Cuvori iš to nieko nepasilieka") || pa.locale !== "lt",
+    `R-T Lithuanian client -> ${ra.status}, ${JSON.stringify(pa["line_items[0][price_data][product_data][name]"])} / ${JSON.stringify(pa["line_items[1][price_data][product_data][name]"])} / locale ${pa.locale}`);
+  // German, top-up
+  const b = mk({ title: "Logo animation", status: "funded", amount_cents: 13000, price: 130, funded_cents: 10000 }); const rb = await pay(b, "de"); const pb = P(b);
+  vuln(rb.status !== 200 || pb["line_items[0][price_data][product_data][name]"] !== "Vereinbarte Preiserhöhung — Logo animation" || pb["line_items[1][price_data][product_data][name]"] !== "Kartengebühr" || pb.locale !== "de",
+    `R-T German client, top-up -> ${rb.status}, ${JSON.stringify(pb["line_items[0][price_data][product_data][name]"])} / locale ${pb.locale}`);
+  // Ukrainian: our lines in Ukrainian, Stripe's own page follows the browser (Stripe has no Ukrainian page)
+  const u = mk({ title: "" }); const ru = await pay(u, "uk"); const pu = P(u);
+  vuln(ru.status !== 200 || pu["line_items[0][price_data][product_data][name]"] !== "Замовлення: Замовлення Cuvori" || pu["line_items[1][price_data][product_data][name]"] !== "Комісія за картку" || "locale" in pu,
+    `R-T Ukrainian client, no title -> ${ru.status}, ${JSON.stringify(pu["line_items[0][price_data][product_data][name]"])} / locale ${pu.locale}`);
+  // anything else is English, never an error
+  for (const lang of [undefined, "xx", "__proto__", "constructor", "EN", 5, { a: 1 }, ["lt"]]) {
+    const c = mk({ title: "Logo animation" }); const r = await pay(c, lang); const pc = P(c);
+    vuln(r.status !== 200 || pc["line_items[0][price_data][product_data][name]"] !== "Order: Logo animation" || pc["line_items[1][price_data][product_data][name]"] !== "Card fee" || pc.locale !== "en",
+      `R-T language ${JSON.stringify(lang)} -> ${r.status} ${r.json && r.json.error || ""}, ${JSON.stringify(pc["line_items[0][price_data][product_data][name]"])} / locale ${pc.locale}`);
+  }
+  // switching language between two clicks still works: a new Stripe page, and the old one can no longer be paid
+  const d = mk({ title: "Logo animation" }); const r1 = await pay(d, "en"); const first = d.stripe_checkout_id;
+  const r2 = await pay(d, "lt"); const second = d.stripe_checkout_id;
+  vuln(r1.status !== 200 || r2.status !== 200 || first === second || STRIPE.sessions[first].status !== "expired" || P(d)["line_items[1][price_data][product_data][name]"] !== "Kortelės mokestis",
+    `R-T English click, then Lithuanian click -> ${r1.status}, ${r2.status} ${r2.json && r2.json.error || ""}, new page ${first !== second}, old page ${STRIPE.sessions[first] && STRIPE.sessions[first].status}`);
+  // the same language clicked twice gets the same page back
+  const r3 = await pay(d, "lt");
+  vuln(r3.status !== 200 || d.stripe_checkout_id !== second, `R-T same language clicked again -> ${r3.status}, same page ${d.stripe_checkout_id === second}`);
+  // the amounts never depend on the language
+  vuln(STRIPE.sessions[first].amount_total !== STRIPE.sessions[second].amount_total, `R-T English and Lithuanian pages charge the same -> ${STRIPE.sessions[first].amount_total} vs ${STRIPE.sessions[second].amount_total}`);
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
