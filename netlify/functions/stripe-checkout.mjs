@@ -1,7 +1,7 @@
 // POST { contract_id } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, payoutAccount, accountReady, isBanned, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, payoutAccount, accountReady, isBanned, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -52,8 +52,9 @@ export default safe(async (req) => {
   const fee = quote.processing_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
   // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to. The title is
-  // cut by whole characters, never through the middle of an emoji: half an emoji cannot be sent and would stop the payment.
-  const title = Array.from(String(c.title || "")).slice(0, 180).join("") || "Cuvori order";
+  // cut by whole characters as people see them (cut): never half an emoji, which would stop the payment, and never part of
+  // a flag or a family emoji, which would show as a stray symbol.
+  const title = cut(c.title, 180) || "Cuvori order";
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: kind === "topup" ? `Agreed price increase — ${title}` : `Order: ${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: "Payment processing — the payment provider's highest card rate, charged now; anything above its real cost is refunded to your card automatically. Cuvori keeps none of it." } } });
   // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
