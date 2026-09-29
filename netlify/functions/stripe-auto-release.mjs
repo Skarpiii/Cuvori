@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, payoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, payoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -27,8 +27,13 @@ export default async () => {
         if (await isBanned(c.editor)) { failed.push({ id: c.id, why: "freelancer banned" }); continue; }
         const acct = await payoutAccount(c.editor);
         if (!accountReady(acct)) { failed.push({ id: c.id, why: "freelancer account not ready" }); continue; }
-        row = await db.claim(c.id, ["delivered"], { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_at: now, auto_release_at: null });
-        if (!row) continue;                                               // disputed / sent back meanwhile
+        // Nothing can be paid into the Order once it is closed: its Stripe payment page is closed first. What is held is
+        // paid out even when an accepted price increase was never paid in, so a client who goes silent cannot hold back
+        // the freelancer's money.
+        if ((await closeCheckout(c)) === "paid") { skipped.push({ id: c.id, why: "a payment has just come in; released on the next run" }); continue; }
+        const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.delivered&${moneyUnchanged(c)}`, { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_at: now, auto_release_at: null });
+        row = rows && rows[0] || null;
+        if (!row) continue;                                               // disputed / sent back / paid into meanwhile
         await settle(row, null, "auto_release");
       } else {
         const ev = c.status === "releasing" ? (c.resolved_by ? "approve" : "auto_release") : (c.resolution === "refund" && c.resolved_by === c.editor ? "cancel_refund" : `resolved_${c.resolution}`);
