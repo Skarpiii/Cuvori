@@ -33,7 +33,7 @@ export function pay(sessionId, opts = {}) {
   STRIPE.intents[pi] = { id: pi, amount: total, latest_charge: ch };
   STRIPE.charges[ch] = { id: ch, currency: "eur", amount: total, amount_refunded: 0, sourced: 0, payment_intent: pi, balance_transaction: { id: rid("txn"), fee, net: total - fee, status: STRIPE.settleDelay ? "pending" : "available" }, payment_method_details: { card: { fingerprint: "fp_" + (opts.card || "one"), brand: "visa", last4: "4242" } } };
   if (!STRIPE.settleDelay) STRIPE.balance += total - fee;
-  s.payment_status = "paid"; s.payment_intent = pi;
+  s.status = "complete"; s.payment_status = "paid"; s.payment_intent = pi;
   return { ...s };
 }
 
@@ -44,7 +44,7 @@ export function stripeHandle(path, method, p) {
   if (seg[1] === "accounts" && method === "GET") return STRIPE.accounts[seg[2]] ? [200, STRIPE.accounts[seg[2]]] : err(404, "No such account: " + seg[2], "resource_missing");
   if (path === "/transfers" && method === "GET") return [200, { data: STRIPE.transfers.filter(t => t.transfer_group === p.get("transfer_group")) }];
   if (path === "/refunds" && method === "GET") return [200, { data: STRIPE.refunds.filter(r => r.payment_intent === p.get("payment_intent")) }];
-  if (seg[1] === "checkout" && seg[2] === "sessions" && seg[4] === "expire") { const s = STRIPE.sessions[seg[3]]; if (s) s.status = "expired"; return [200, s || {}]; }
+  if (seg[1] === "checkout" && seg[2] === "sessions" && seg[4] === "expire") { const s = STRIPE.sessions[seg[3]]; if (!s) return err(404, "No such checkout.session", "resource_missing"); if (s.status !== "open") return err(400, "Only Checkout Sessions with a status in [\"open\"] can be expired."); s.status = "expired"; return [200, s]; }   // like Stripe: a paid page cannot be expired
   if (seg[1] === "checkout" && seg[2] === "sessions" && seg[3] && method === "GET") return STRIPE.sessions[seg[3]] ? [200, STRIPE.sessions[seg[3]]] : err(404, "No such checkout.session", "resource_missing");
   if (path === "/checkout/sessions") {
     const id = rid("cs"); const a0 = +p.get("line_items[0][price_data][unit_amount]"), a1 = +(p.get("line_items[1][price_data][unit_amount]") || 0);

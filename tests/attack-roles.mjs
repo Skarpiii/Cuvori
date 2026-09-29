@@ -2,7 +2,7 @@
 // inputs, and prove nothing moves. Roles: anonymous (no token), the order's client (tok_cl), the order's
 // professional/editor (tok_ed), an admin (tok_adm), a stranger client (tok_cl2), a second professional not
 // on the order (tok_ed2). "safe" = the attempt was refused and no money moved; "VULNERABLE" = it got through.
-import { DB, STRIPE, users, req, call, mk, moneyOut, reset, fns, fund, pay, uuid, signed } from "./fn-harness.mjs";
+import { DB, STRIPE, users, hooks, req, call, mk, moneyOut, reset, fns, fund, pay, uuid, signed, onlyDue, past } from "./fn-harness.mjs";
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
 const info = (m) => out.push("info       " + m);
@@ -284,6 +284,74 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   vuln(r3.status !== 200 || d.stripe_checkout_id !== second, `R-T same language clicked again -> ${r3.status}, same page ${d.stripe_checkout_id === second}`);
   // the amounts never depend on the language
   vuln(STRIPE.sessions[first].amount_total !== STRIPE.sessions[second].amount_total, `R-T English and Lithuanian pages charge the same -> ${STRIPE.sessions[first].amount_total} vs ${STRIPE.sessions[second].amount_total}`);
+  reset();
+}
+
+// ---------- R-U: an accepted price increase that is not paid yet, and nothing paid into an Order once it is closed ----------
+{
+  const soon = () => new Date(Date.now() + 7 * 864e5).toISOString();
+  const raised = async (status = "delivered") => { const c = mk({ amount_cents: 10000 }); await fund(fx, c); Object.assign(c, { amount_cents: 15000, price: 150, status, delivered_at: new Date().toISOString(), auto_release_at: soon() }); return c; };   // €100 paid, then both agree to +€50
+  const release = (c) => call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const checkout = (c, lang) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: lang ? { contract_id: c.id, lang } : { contract_id: c.id } }));
+  const webhook = (s) => call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
+  const backToCard = (c) => STRIPE.refunds.filter(r => r.contract === c.id && r.metadata.kind !== "fee_surplus").length;
+  const auto = () => call(fx.autoRelease, req("POST", "x", {}));
+  // U1: the client cannot approve and close the Order while the €50 is unpaid — delivered, or early release before delivery
+  for (const status of ["delivered", "funded"]) {
+    const c = await raised(status); const r = await release(c);
+    vuln(r.status === 200 || c.status !== status || moneyOut(c).transferred !== 0 || !/increase/.test(r.json && r.json.error || ""),
+      `R-U1 ${status}: Approve & release while the agreed +€50 is unpaid -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, transferred ${moneyOut(c).transferred}`);
+  }
+  // U2: once the €50 is paid in, the release pays out all €150
+  {
+    const c = await raised(); const r0 = await checkout(c); await webhook(pay(c.stripe_checkout_id)); const r = await release(c);
+    vuln(r0.status !== 200 || r.status !== 200 || c.status !== "completed" || moneyOut(c).transferred !== 15000,
+      `R-U2 +€50 paid, then released -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, transferred ${moneyOut(c).transferred} (must be 15000)`);
+  }
+  // U3: the client left the €50 payment page open and went silent. The automatic release pays out the €100 held,
+  // closes the Order — and the page, so nothing can be paid into the closed Order (it would go back to the card, fee on Cuvori)
+  {
+    const c = await raised(); await checkout(c); const page = c.stripe_checkout_id; c.auto_release_at = past(1); onlyDue(c);
+    await auto();
+    vuln(c.status !== "completed" || moneyOut(c).transferred !== 10000 || STRIPE.sessions[page].status !== "expired" || backToCard(c),
+      `R-U3 automatic release with the €50 page open -> status ${c.status}, transferred ${moneyOut(c).transferred} (must be 10000), €50 page ${STRIPE.sessions[page].status} (must be expired), refunds ${backToCard(c)}`);
+    const late = await checkout(c);
+    vuln(late.status === 200, `R-U3 a new €50 page after the close -> ${late.status} ${late.json && late.json.error || ""}`);
+  }
+  // U4: the €50 was paid a moment before the automatic release, Stripe's message not in yet. The payment is added to
+  // the Order (not sent back), the release waits one run, then pays out all €150; the late message changes nothing
+  {
+    const c = await raised(); await checkout(c); const s = pay(c.stripe_checkout_id); c.auto_release_at = past(1); onlyDue(c);
+    await auto(); const mid = { status: c.status, funded: c.funded_cents, transferred: moneyOut(c).transferred };
+    await auto(); await webhook(s);
+    vuln(mid.status !== "delivered" || mid.funded !== 15000 || mid.transferred !== 0 || c.status !== "completed" || moneyOut(c).transferred !== 15000 || backToCard(c),
+      `R-U4 €50 paid just before the automatic release -> first run ${JSON.stringify(mid)}; next run: status ${c.status}, transferred ${moneyOut(c).transferred} (must be 15000), refunds ${backToCard(c)} (must be 0)`);
+  }
+  // U5: the client's release closes a payment page still open from an old tab (nothing owed)
+  {
+    const c = await raised(); await checkout(c); await webhook(pay(c.stripe_checkout_id));
+    const id = "cs_oldtab" + uuid().slice(0, 8); STRIPE.sessions[id] = { ...STRIPE.sessions[c.stripe_checkout_id], id, status: "open", payment_status: "unpaid", payment_intent: null }; c.stripe_checkout_id = id;
+    const r = await release(c);
+    vuln(r.status !== 200 || c.status !== "completed" || STRIPE.sessions[id].status !== "expired" || moneyOut(c).transferred !== 15000,
+      `R-U5 release with an old payment page open -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, old page ${STRIPE.sessions[id].status} (must be expired), transferred ${moneyOut(c).transferred}`);
+  }
+  // U6: the freelancer's +€10 is accepted at the very moment the client presses release: the release does not go through on the old numbers
+  {
+    const c = await raised(); await checkout(c); await webhook(pay(c.stripe_checkout_id));
+    hooks.db = async (method, table, search) => { if (method === "PATCH" && table === "contracts" && search.includes("status=in.(funded,delivered)")) { hooks.db = null; c.amount_cents = 16000; c.price = 160; } return null; };
+    const r = await release(c); hooks.db = null;
+    vuln(r.status === 200 || c.status !== "delivered" || moneyOut(c).transferred !== 0,
+      `R-U6 +€10 accepted at the moment of release -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, transferred ${moneyOut(c).transferred} (must be 0)`);
+  }
+  // U7: an old page paid twice (the second payment went back to the card) does not block the release, and is not refunded twice
+  {
+    const c = await raised(); await checkout(c, "en"); const p1 = c.stripe_checkout_id; await checkout(c, "lt"); const p2 = c.stripe_checkout_id;
+    STRIPE.sessions[p1].status = "open";                                     // both opened at the same instant: the first was not closed
+    await webhook(pay(p1)); await webhook(pay(p2));
+    const back = backToCard(c); const r = await release(c);
+    vuln(back !== 1 || r.status !== 200 || c.status !== "completed" || moneyOut(c).transferred !== 15000 || backToCard(c) !== back,
+      `R-U7 paid twice, then released -> refunds before ${back} (must be 1), release ${r.status} ${r.json && r.json.error || ""}, transferred ${moneyOut(c).transferred}, refunds after ${backToCard(c)}`);
+  }
   reset();
 }
 
