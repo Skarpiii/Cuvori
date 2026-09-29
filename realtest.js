@@ -471,6 +471,23 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('#omGo'); await p.waitForTimeout(1200);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='completed' && c.released_cents===50000 && window.__fakeStripe.transfers.at(-1).amount===50000 && window.__mockdb.order_events.some(e=>e.order_id===c.id&&e.event==='released'); }),'€500 released to the freelancer, Order complete, history says so');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
+  // scenario: a price increase accepted on a delivered Order is funded before the client can approve and release
+  await signin('maya@test.com');
+  await newOrder('Promo cut',200);
+  await signin('jonas@test.com'); await openOrders(); await p.click('[data-caction="accept"]'); await p.waitForTimeout(900);
+  await p.click('[data-caction="fund"]'); await p.waitForTimeout(2500);
+  await signin('maya@test.com'); await openOrders();
+  await p.click('[data-caction="deliver"]'); await p.waitForTimeout(400); await p.fill('#onUrl','https://drive.test/promo'); await p.click('#onGo'); await p.waitForTimeout(900);
+  await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.fill('#amNote','Add a vertical version'); await p.fill('#amDelta','50'); await p.click('#amGo'); await p.waitForTimeout(900);
+  await signin('jonas@test.com'); await openOrders(); await p.click('[data-amact="accept"]'); await p.waitForTimeout(900);
+  const inc=await modal();
+  if(process.env.SHOT){ await p.locator('#modalRoot .modal').first().screenshot({path:process.env.SHOT+'-increase.png',timeout:5000}).catch(e=>console.log('screenshot skipped: '+e.message.split('\n')[0])); await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(400); await p.screenshot({path:process.env.SHOT+'-increase-phone.png',fullPage:false}).catch(()=>{}); await p.setViewportSize({width:1400,height:900}); await p.waitForTimeout(300); }
+  ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='delivered' && c.amount_cents===25000 && c.funded_cents===20000; }) && await p.locator('[data-caction="release"]').count()===0 && (await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50') && inc.includes('Fund the extra €50 first, then you can approve it and pay the editor'),'an accepted +€50 not paid yet: no Approve & release, the client is told to fund the extra first');
+  await p.click('[data-caction="topup"]'); await p.waitForTimeout(2500); await openOrders();
+  ok(await db(()=>window.__mockdb.contracts.at(-1).funded_cents===25000) && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €250'),'once the €50 is funded, the client can approve and release all €250');
+  await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo'); await p.waitForTimeout(1200);
+  ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='completed' && c.released_cents===25000 && window.__fakeStripe.transfers.at(-1).amount===25000; }),'€250 released, including the agreed increase');
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   // scenario: €1,000 in three milestones — partial release, the rest stays secured
   await signin('maya@test.com');
   await newOrder('Documentary edit',1000, async()=>{ await p.check('#oMsOn'); await p.waitForTimeout(200); await p.click('#oMsAdd'); await p.waitForTimeout(100);
@@ -497,7 +514,7 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="amend"]'); await p.waitForTimeout(400);
   await p.fill('#amNote','Add a 30-second teaser'); await p.fill('#amDelta','100'); await p.fill('#amMs','Teaser'); await p.click('#amGo'); await p.waitForTimeout(900);
-  ok(await db(()=>window.__mockdb.order_amendments.length===1 && window.__mockdb.order_amendments[0].status==='proposed'),'amendment proposed');
+  ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1), a=window.__mockdb.order_amendments.filter(x=>x.order_id===c.id); return a.length===1 && a[0].status==='proposed'; }),'amendment proposed');
   ok((await modal()).includes('Amendment proposed by') && await p.locator('[data-amact="withdraw"]').count()===1 && await p.locator('[data-amact="accept"]').count()===0,'the proposer can only withdraw it');
   await signin('jonas@test.com'); await openOrders();
   ok((await modal()).includes('Amendment proposed by Maya') && (await modal()).includes('+€100'),'the client sees the amendment with the extra money');
