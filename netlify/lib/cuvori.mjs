@@ -67,6 +67,11 @@ export const cut = (text, n) => {
 };
 // what the provider is holding for this Order right now (Orders from before v18 carry no counters)
 export const heldCents = (c) => { const f = nz(c.funded_cents) || (holdsFunds(c) ? centsOf(c) || 0 : 0); return Math.max(f - nz(c.released_cents) - nz(c.refunded_cents), 0); };
+// the part of the price both sides agreed to that the client has not paid in yet (an accepted price increase not funded yet)
+export const owedCents = (c) => { const f = nz(c.funded_cents) || (holdsFunds(c) ? centsOf(c) || 0 : 0); return Math.max((centsOf(c) || 0) - f, 0); };
+// a database filter that matches the Order only while its price and what was paid in are what `c` says
+const eqOrNull = (col, v) => (v == null ? `${col}=is.null` : `${col}=eq.${Number(v)}`);
+export const moneyUnchanged = (c) => `${eqOrNull("funded_cents", c.funded_cents)}&${eqOrNull("amount_cents", c.amount_cents)}`;
 export const chargebackOpen = (c) => !!c && c.chargeback_status === "open";
 export async function readJson(req) { try { const b = await req.json(); return b && typeof b === "object" && !Array.isArray(b) ? b : {}; } catch { return {}; } }
 // Never let an exception (Stripe/Supabase message, stack) reach the browser
@@ -600,6 +605,31 @@ export async function applyPaidSession(s) {
   // the fee surplus goes back to the card now; if this fails the hourly job settles it later
   try { const row = await fundRowOf(u, s.payment_intent); if (row) await settleFee(u, row); } catch (e) { console.error("fee settle", s.payment_intent, e.message); }
   return "funded";
+}
+
+// Before an Order is paid out and closed, its Stripe payment page is closed, so nothing can be paid into it afterwards: a
+// payment into a closed Order goes back to the card in full, and Stripe keeps its card fee — from Cuvori's balance.
+// "closed": the page was open and can no longer be paid. "none": nothing can come in (no page, expired, or its payment is
+// on the Order already or went back to the card). "paid": it was paid a moment ago and has just been added to the Order
+// (the same step as the webhook) — the payout must start again from the new amounts.
+export async function closeCheckout(c) {
+  const id = c && c.stripe_checkout_id;
+  if (!isSession(id)) return "none";
+  const look = async () => { try { return await stripe("GET", `/checkout/sessions/${id}`); } catch (e) { if (e.status === 404) return null; throw e; } };
+  let s = await look();
+  if (!s) return "none";
+  if (s.status === "open") {
+    try { await stripe("POST", `/checkout/sessions/${id}/expire`); return "closed"; }
+    catch (e) { s = await look(); if (!s || s.status === "open") throw e; }            // paid or expired in between: go by what it is now
+  }
+  if (s.status !== "complete" || s.payment_status !== "paid" || !isPi(s.payment_intent) || s.client_reference_id !== c.id) return "none";
+  if (s.payment_intent === c.stripe_payment_intent) return "none";                                    // the first payment, on the Order already
+  if (await db.one("order_payments", `order_id=eq.${c.id}&provider_ref=eq.${q(s.payment_intent)}&select=id`)) return "none";   // a top-up, on the Order already
+  const pi = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge" });
+  const ch = pi && pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge : null;
+  if (ch && (ch.refunded === true || (Number.isInteger(ch.amount_refunded) && ch.amount_refunded >= ch.amount))) return "none";   // it went back to the card
+  const r = await applyPaidSession(s);
+  return r === "funded" || r === "pending" ? "paid" : "none";
 }
 
 // ---- the processing fee: the highest card rate is charged up front, the surplus over the provider's real fee goes back ----
