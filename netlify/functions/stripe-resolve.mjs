@@ -25,7 +25,7 @@ export default safe(async (req) => {
     row = c;
   } else {
     // Nothing can be paid into the Order once it is decided: its Stripe payment page is closed first.
-    if ((await closeCheckout(c)) === "paid") return bad("A payment for this order has just come in. Reload the page and decide again.", 409);
+    if ((await closeCheckout(c, false)) === "paid") return bad("A payment for this order has just come in. Reload the page and decide again.", 409);
     let editorCents;
     if (decision === "release") editorCents = total;
     else if (decision === "refund") editorCents = 0;

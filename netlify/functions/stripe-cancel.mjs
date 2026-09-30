@@ -20,7 +20,7 @@ export default safe(async (req) => {
   if (!row) {
     if (!["funded", "delivered"].includes(c.status)) return bad("This order cannot be cancelled right now", 409);
     // Nothing can be paid into the Order once it is given back: its Stripe payment page is closed first.
-    if ((await closeCheckout(c)) === "paid") return bad("A payment for this order has just come in. Reload the page and try again.", 409);
+    if ((await closeCheckout(c, false)) === "paid") return bad("A payment for this order has just come in. Reload the page and try again.", 409);
     const now = new Date().toISOString();
     // only while the price and what was paid in are still the ones read above: a payment recorded a moment ago is part of the refund
     const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(funded,delivered)&${moneyUnchanged(c)}`, { status: "resolving", resolution: "refund", split_editor_cents: 0, refund_cents: held, resolved_by: me.id, resolved_at: now, auto_release_at: null });

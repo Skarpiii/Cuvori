@@ -13,11 +13,9 @@ export default safe(async (req) => {
   const c = await db.contract(id);
   if (!c || (c.client !== me.id && c.editor !== me.id)) return bad("Not your order", 403);
   if (c.payment_mode !== "escrow" || !c.stripe_checkout_id || !isSession(c.stripe_checkout_id)) return json(200, { status: c.status, funded_cents: c.funded_cents || 0, checked: false });
-  let result = "unpaid";
-  if (c.status === "accepted" || ["funded", "delivered"].includes(c.status)) {
-    const s = await stripe("GET", `/checkout/sessions/${c.stripe_checkout_id}`);
-    result = await applyPaidSession(s);
-  }
+  // whatever the Order's state: a hold for an Order that can no longer take it is released right away (and the page says so)
+  const s = await stripe("GET", `/checkout/sessions/${c.stripe_checkout_id}`);
+  const result = await applyPaidSession(s);
   const now = await db.contract(id);
   return json(200, { status: now.status, funded_cents: now.funded_cents || 0, checked: true, result });
 });

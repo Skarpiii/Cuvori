@@ -81,6 +81,9 @@ export default safe(async (req) => {
   // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
   // replays the answer for the same idempotency key). That needs the same request each time, so the expiry
   // is a fixed point 60–90 min ahead rather than "now + 30 min".
+  // Hold first, charge after: the page only places a hold on the card (capture_method manual). The money is charged
+  // a moment later by applyPaidSession, and only if the Order can still take it; otherwise the hold is released and
+  // nothing is charged, so nobody pays a card fee on money that has to go back.
   const slot = Math.floor(Date.now() / 1800e3);
   const session = await stripe("POST", "/checkout/sessions", {
     mode: "payment",
@@ -92,9 +95,9 @@ export default safe(async (req) => {
     success_url: `${SITE_URL}/#orders?paid=${c.id}`,
     cancel_url: `${SITE_URL}/#orders?cancelled=${c.id}`,
     line_items: items,
-    payment_intent_data: { transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
+    payment_intent_data: { capture_method: "manual", transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
     metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind },
-  }, { idempotency: `checkout_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}` });
+  }, { idempotency: `checkout_hold_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}` });
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
   const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&amount_cents=eq.${price}`, patch);
