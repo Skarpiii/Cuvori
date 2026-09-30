@@ -1,7 +1,7 @@
 // POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
 // Decides a dispute (release / refund / split), and can take over a release that got stuck before any
 // transfer was made (freelancer's account closed, for example) so the client is not left waiting for ever.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf, lockOrder, cut } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf, lockOrder, cut, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -24,6 +24,8 @@ export default safe(async (req) => {
     if (c.resolution !== decision) return bad(`A '${c.resolution}' decision is already in progress for this order`, 409);
     row = c;
   } else {
+    // Nothing can be paid into the Order once it is decided: its Stripe payment page is closed first.
+    if ((await closeCheckout(c)) === "paid") return bad("A payment for this order has just come in. Reload the page and decide again.", 409);
     let editorCents;
     if (decision === "release") editorCents = total;
     else if (decision === "refund") editorCents = 0;
@@ -47,9 +49,11 @@ export default safe(async (req) => {
       }
       // a fresh decision: ids left by an interrupted earlier settlement must not make this one skip a move (what they
       // moved is already in the counters; the provider is asked before any transfer or refund is made anyway)
-      row = await db.claim(c.id, from, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, money_error: null, stripe_transfer_id: null, stripe_refund_id: null });
+      // only while the price and what was paid in are still the ones the decision was worked out from
+      const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(${from.join(",")})&${moneyUnchanged(c)}`, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, money_error: null, stripe_transfer_id: null, stripe_refund_id: null });
+      row = rows && rows[0] || null;
     } finally { await unlock(); }
-    if (!row) return bad("This order is not holding money", 409);
+    if (!row) return bad("The order changed a moment ago. Reload the page and decide again.", 409);
     row.was_disputed = c.status === "disputed";
   }
   const u = await settle(row, me.id, `resolved_${decision}`);
