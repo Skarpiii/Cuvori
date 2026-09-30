@@ -532,9 +532,75 @@ async function refundOrphan(s, why) {
     await orderEvent(c, "late_payment_refunded", { amount_cents: back, card_fee_cents: bt.fee, total_cents: ch.amount }, null);
   return "refunded";
 }
+// ---- hold first, charge after ----
+// On Stripe's page the card is only authorized (a hold, capture_method manual). The money is charged here, and only when the
+// Order can still take it. When it cannot — cancelled, changed, disputed or closed while the client was on the page — the
+// hold is released instead: nothing is charged, the client keeps every cent, and nobody pays a card fee.
+// Why a payment cannot go into its Order (null = it can). The same rules as the checkout and applyPaidSession.
+async function holdRefusal(s) {
+  const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id) : null;
+  if (!c) return "unknown order";
+  if (c.payment_mode !== "escrow") return "not a protected-payment order";
+  if (String(s.currency || "").toLowerCase() !== String(c.currency || "EUR").toLowerCase()) return "currency changed";
+  const md = s.metadata || {}, kind = md.kind === "topup" ? "topup" : "fund";
+  const amount = Number(md.amount_cents), fee = Number(md.fee_cents);
+  if (!Number.isInteger(amount) || amount <= 0 || !Number.isInteger(fee) || fee < 0 || s.amount_total !== amount + fee) return "amounts do not match";
+  if (chargebackOpen(c)) return "a chargeback is open";
+  if (await isBanned(c.editor)) return "the freelancer cannot receive payments";
+  if (kind === "fund") {
+    if (c.status !== "accepted" || c.stripe_payment_intent) return `order is ${c.status}`;
+    if (amount !== centsOf(c)) return "the price changed";
+  } else {
+    if (!["funded", "delivered"].includes(c.status)) return `order is ${c.status}`;
+    if (amount > owedCents(c)) return "no longer owed";
+  }
+  return null;
+}
+// what Stripe says the hold is now: "charged", "released", or null (still a hold / something else)
+const holdState = async (pi) => { const p = await stripe("GET", `/payment_intents/${pi}`); return p.status === "succeeded" ? "charged" : p.status === "canceled" ? "released" : null; };
+// The history says once that a payment could not go in and was not charged.
+async function holdReleasedEvent(s) {
+  const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id).catch(() => null) : null;
+  if (c && (await claimScope(`late:${s.payment_intent}`).catch(() => false))) await orderEvent(c, "late_payment_released", { total_cents: s.amount_total }, null);
+}
+async function releaseHold(s, why) {
+  console.error("releasing a hold that cannot fund an order", s.id, why);
+  try { await moneyPost(`release:${s.payment_intent}`, `/payment_intents/${s.payment_intent}/cancel`, { cancellation_reason: "abandoned" }); }
+  catch (e) { const now = await holdState(s.payment_intent); if (now === "charged") return "charged"; if (now !== "released") throw e; }
+  await holdReleasedEvent(s);
+  return "released";
+}
+// "charged": the money is taken (now, or earlier); "released": the hold is gone and nothing was charged;
+// "unpaid": nothing to do (not a hold); "pending": the card payment is still being processed — ask again later.
+async function chargeHold(s) {
+  const p = await stripe("GET", `/payment_intents/${s.payment_intent}`);
+  if (p.status === "succeeded") return "charged";
+  if (p.status === "canceled") return "released";
+  if (p.status === "processing") return "pending";
+  if (p.status !== "requires_capture") return "unpaid";
+  const why = await holdRefusal(s);
+  if (why) return releaseHold(s, why);
+  try { await moneyPost(`capture:${s.payment_intent}`, `/payment_intents/${s.payment_intent}/capture`, {}); }
+  catch (e) { const now = await holdState(s.payment_intent); if (now) return now; throw e; }
+  return "charged";
+}
+// Cancel, refund and decisions close the Order: a hold still waiting on its page is released, never charged.
+export async function dropHold(s) {
+  if (!s || !isPi(s.payment_intent)) return "none";
+  const p = await stripe("GET", `/payment_intents/${s.payment_intent}`);
+  if (p.status !== "requires_capture") return p.status === "succeeded" ? "charged" : "none";
+  const r = await releaseHold(s, "the order is being closed");
+  return r === "charged" ? "charged" : "none";
+}
+
 export async function applyPaidSession(s) {
   if (!s || (s.mode !== undefined && s.mode !== "payment")) return "ignored";
-  if (s.payment_status !== "paid") return "unpaid";                              // async methods: wait for async_payment_succeeded
+  if (s.payment_status !== "paid") {
+    // a hold (or a page not paid yet): charged only if the Order can still take it, otherwise released
+    if (s.status !== "complete" || !isPi(s.payment_intent)) return "unpaid";     // async methods: wait for async_payment_succeeded
+    const h = await chargeHold(s);
+    if (h !== "charged") return h;
+  }
   const id = s.client_reference_id;
   if (!isUuid(id) || !isPi(s.payment_intent)) return "ignored";
   const c = await db.contract(id);
@@ -621,12 +687,13 @@ export async function applyPaidSession(s) {
   return "funded";
 }
 
-// Before an Order is paid out and closed, its Stripe payment page is closed, so nothing can be paid into it afterwards: a
-// payment into a closed Order goes back to the card in full, and Stripe keeps its card fee — from Cuvori's balance.
-// "closed": the page was open and can no longer be paid. "none": nothing can come in (no page, expired, or its payment is
-// on the Order already or went back to the card). "paid": it was paid a moment ago and has just been added to the Order
+// Before an Order is paid out or closed, its Stripe payment page is closed, so nothing can be paid into it afterwards.
+// "closed": the page was open and can no longer be paid. "none": nothing can come in (no page, expired, its payment is on
+// the Order already, released, or back on the card). "paid": it was paid a moment ago and has just been added to the Order
 // (the same step as the webhook) — the payout must start again from the new amounts.
-export async function closeCheckout(c) {
+// keep: a release keeps a hold the Order can still take (it is charged and added); a cancel or a decision (keep = false)
+// releases it instead — nothing is charged for an Order that is being closed.
+export async function closeCheckout(c, keep = true) {
   const id = c && c.stripe_checkout_id;
   if (!isSession(id)) return "none";
   const look = async () => { try { return await stripe("GET", `/checkout/sessions/${id}`); } catch (e) { if (e.status === 404) return null; throw e; } };
@@ -636,9 +703,10 @@ export async function closeCheckout(c) {
     try { await stripe("POST", `/checkout/sessions/${id}/expire`); return "closed"; }
     catch (e) { s = await look(); if (!s || s.status === "open") throw e; }            // paid or expired in between: go by what it is now
   }
-  if (s.status !== "complete" || s.payment_status !== "paid" || !isPi(s.payment_intent) || s.client_reference_id !== c.id) return "none";
+  if (s.status !== "complete" || !isPi(s.payment_intent) || s.client_reference_id !== c.id) return "none";
   if (s.payment_intent === c.stripe_payment_intent) return "none";                                    // the first payment, on the Order already
   if (await db.one("order_payments", `order_id=eq.${c.id}&provider_ref=eq.${q(s.payment_intent)}&select=id`)) return "none";   // a top-up, on the Order already
+  if (!keep && (await dropHold(s)) === "none") return "none";                                         // a hold on its way in: released, not charged
   const pi = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge" });
   const ch = pi && pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge : null;
   if (ch && (ch.refunded === true || nz(ch.amount_refunded) > 0)) return "none";   // not on the Order and (partly) back on the card: it is not Order money
