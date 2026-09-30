@@ -67,7 +67,7 @@ const reversalsOf = (c) => { const ids = new Set(STRIPE.transfers.filter(t => t.
   const pB = pay(sB); await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: pB } })));
   STRIPE.sessions[sA].status = "open"; const pA = pay(sA); await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: pA } })));
   const chA = chargeOf(pA.payment_intent);
-  vuln(c.funded_cents !== 12000 || chA.amount_refunded !== pA.amount_total, `C3a a second top-up paid by mistake -> funded=${c.funded_cents}, the extra payment went back=${chA.amount_refunded === pA.amount_total}`);
+  vuln(c.funded_cents !== 12000 || chA.amount_refunded !== pA.amount_total - chA.balance_transaction.fee, `C3a a second top-up paid by mistake -> funded=${c.funded_cents}, the extra payment went back except Stripe's card fee=${chA.amount_refunded === pA.amount_total - chA.balance_transaction.fee}`);
   const rw = await call(fx.webhook, req("POST", "x", chargeEvent(chA)));
   vuln(c.status !== "funded" || (c.refunded_cents || 0) !== 0 || ledger(c, "refund").length !== 0, `C3b the refund's webhook (Cuvori's own refund) -> ${rw.status}, status=${c.status} (must stay funded), refunded_cents=${c.refunded_cents || 0}, refund rows=${ledger(c, "refund").length}`);
   // C3c: someone refunds the TOP-UP charge in the Stripe dashboard: the order is short of money — flag it, do not call the whole order refunded

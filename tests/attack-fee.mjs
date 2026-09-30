@@ -139,12 +139,14 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   vuln(rows.length !== 2 || rows.some(p => !Number.isInteger(p.fee_refund_cents)) || feeRefunds(paid.payment_intent).length !== 1 || c.funded_cents !== 13000, `F10b both payments have their fee settled -> ${JSON.stringify(rows.map(p => [p.amount_cents, p.fee_cents, p.fee_refund_cents]))}, top-up refunds=${feeRefunds(paid.payment_intent).length}, funded=${c.funded_cents}`);
   reset();
 }
-// ---------- F11: a stray payment (orphan) is refunded in full; no fee settlement is attempted on it ----------
+// ---------- F11: a stray payment (orphan) goes back to the card except the card fee Stripe kept (Cuvori pays no fees); no fee settlement is attempted on it ----------
 {
   const c = mk({ amount_cents: 10000 }); await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  const s = pay(c.stripe_checkout_id); c.status = "cancelled";
+  const before = STRIPE.balance; const s = pay(c.stripe_checkout_id); c.status = "cancelled";
   const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
-  vuln(w.status !== 200 || moneyOut(c).orphans !== s.amount_total || feeRefunds(s.payment_intent).length, `F11 orphan -> ${w.status}, refunded in full=${moneyOut(c).orphans} of ${s.amount_total}, fee refunds=${feeRefunds(s.payment_intent).length}`);
+  const kept = chargeOf(s.payment_intent).balance_transaction.fee;
+  vuln(w.status !== 200 || moneyOut(c).orphans !== s.amount_total - kept || feeRefunds(s.payment_intent).length || STRIPE.balance !== before,
+    `F11 orphan -> ${w.status}, back to the card ${moneyOut(c).orphans} of ${s.amount_total} (must be all but Stripe's fee ${kept}), fee refunds=${feeRefunds(s.payment_intent).length}, Cuvori's balance ${STRIPE.balance - before} (must be 0)`);
   reset();
 }
 
@@ -165,6 +167,50 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   }
   const ok = mk({ amount_cents: 10000 }); const f = await fund(fx, ok);
   vuln(!f.checkout || f.checkout.status !== 200 || ok.status !== "funded", `F12 with a proper client-paid fee row, payment works as before -> HTTP ${f.checkout && f.checkout.status}, status=${ok.status}`);
+  reset();
+}
+
+// ---------- F13: a payment that comes in after its Order changed never costs Cuvori a fee ----------
+// It goes back to the card except the card fee Stripe kept, once, however often Stripe sends it; the history says so once.
+{
+  const checkout = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const webhook = (s) => call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
+  const backOf = (s) => STRIPE.refunds.filter(r => r.payment_intent === s.payment_intent);
+  const check = async (name, c) => {
+    const before = STRIPE.balance; const s = pay(c.stripe_checkout_id); const w = await webhook(s); await webhook(s);   // Stripe sends it twice
+    const kept = chargeOf(s.payment_intent).balance_transaction.fee, back = backOf(s), ev = events(c, "late_payment_refunded");
+    vuln(w.status !== 200 || STRIPE.balance !== before || back.length !== 1 || back[0].amount !== s.amount_total - kept || ev.length !== 1 || ev[0].data.amount_cents !== s.amount_total - kept || ev[0].data.card_fee_cents !== kept || ev[0].data.total_cents !== s.amount_total,
+      `F13 ${name} -> ${w.status}; paid ${s.amount_total}, back to the card ${JSON.stringify(back.map(r => r.amount))} (must be one refund of ${s.amount_total - kept}), Stripe kept ${kept}, Cuvori's balance ${STRIPE.balance - before} (must be 0), history lines ${ev.length} (must be 1)`);
+  };
+  { const c = mk({ amount_cents: 100000, price: 1000 }); await checkout(c); c.status = "cancelled"; await check("the client cancels, then pays the open €1,000 page", c); }
+  { const c = mk({ amount_cents: 100000, price: 1000 }); await checkout(c); c.amount_cents = 90000; c.price = 900; await check("the price is changed to €900, then the €1,000 page is paid", c); }
+  { const c = mk({ amount_cents: 10000 }); await fund(fx, c); Object.assign(c, { amount_cents: 15000, price: 150, status: "delivered" }); await checkout(c); c.status = "disputed"; await check("a dispute starts, then the page for the agreed +€50 is paid", c); }
+  // Stripe's fee not known yet: nothing goes back for now and Stripe is told to send it again; then all but the fee goes back
+  { const c = mk({ amount_cents: 10000 }); await checkout(c); c.status = "cancelled"; const s = pay(c.stripe_checkout_id); const ch = chargeOf(s.payment_intent), bt = ch.balance_transaction; ch.balance_transaction = null;
+    const w1 = await webhook(s); const early = backOf(s).length;
+    ch.balance_transaction = bt; const w2 = await webhook(s); const back = backOf(s);
+    vuln(w1.status === 200 || early || w2.status !== 200 || back.length !== 1 || back[0].amount !== s.amount_total - bt.fee,
+      `F13 Stripe's fee not known yet -> first ${w1.status} with ${early} refunds (must fail with none), then ${w2.status}: ${JSON.stringify(back.map(r => r.amount))} back (must be ${s.amount_total - bt.fee})`); }
+  reset();
+}
+// ---------- F14: the freelancer's Cancel & refund and the admin's decision close the Order's payment page first ----------
+{
+  const checkout = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const raised = async () => { const c = mk({ amount_cents: 10000 }); await fund(fx, c); Object.assign(c, { amount_cents: 15000, price: 150, status: "delivered" }); await checkout(c); return c; };   // €100 paid, +€50 agreed, its page open
+  { const c = await raised(); const page = c.stripe_checkout_id;
+    const r = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id } }));
+    vuln(r.status !== 200 || c.status !== "refunded" || STRIPE.sessions[page].status !== "expired",
+      `F14 the freelancer cancels while the €50 page is open -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, page ${STRIPE.sessions[page].status} (must be expired)`); }
+  { const c = await raised(); const s = pay(c.stripe_checkout_id);                                   // paid a moment before; Stripe's message not in yet
+    const r1 = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id } })); const mid = { status: c.status, funded: c.funded_cents };
+    const r2 = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id } }));
+    await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
+    vuln(r1.status !== 409 || mid.status !== "delivered" || mid.funded !== 15000 || r2.status !== 200 || c.status !== "refunded" || moneyOut(c).refunded !== 15000 || moneyOut(c).orphans,
+      `F14 the €50 is paid just before the freelancer cancels -> first ${r1.status} ${r1.json && r1.json.error || ""} ${JSON.stringify(mid)}, then ${r2.status}: status ${c.status}, refunded ${moneyOut(c).refunded} (must be all 15000), stray refunds ${moneyOut(c).orphans}`); }
+  { const c = await raised(); const page = c.stripe_checkout_id; c.status = "disputed";
+    const r = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: c.id, decision: "split", editor_percent: 50 } }));
+    vuln(r.status !== 200 || c.status !== "completed" || STRIPE.sessions[page].status !== "expired",
+      `F14 the admin decides a dispute while a €50 page is still open -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, page ${STRIPE.sessions[page].status} (must be expired)`); }
   reset();
 }
 

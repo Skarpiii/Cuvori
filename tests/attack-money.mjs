@@ -134,7 +134,8 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   // even if both were somehow paid, the second payment goes straight back
   const p2 = pay(s2); await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: p2 } })));
   STRIPE.sessions[s1].status = "open"; const p1 = pay(s1); const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: p1 } })));
-  vuln(c.funded_cents !== 10000 || moneyOut(c).refunded !== p1.amount_total, `B8b both paid anyway -> webhook ${w.status}, funded=${c.funded_cents}, refunded back=${moneyOut(c).refunded} (the second payment incl. its fee, ${p1.amount_total})`);
+  const kept1 = STRIPE.charges[STRIPE.intents[p1.payment_intent].latest_charge].balance_transaction.fee;   // Stripe's card fee stays with Stripe: Cuvori pays no fees
+  vuln(c.funded_cents !== 10000 || moneyOut(c).refunded !== p1.amount_total - kept1, `B8b both paid anyway -> webhook ${w.status}, funded=${c.funded_cents}, refunded back=${moneyOut(c).refunded} (the second payment except the card fee Stripe kept: ${p1.amount_total - kept1})`);
   reset();
 }
 // ---------- B9: the price grows again while a top-up checkout is open: keep the money, ask for the rest
@@ -436,7 +437,8 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const d = mk({ payment_mode: "direct" }); d.stripe_checkout_id = "cs_direct1234";
   STRIPE.sessions.cs_direct1234 = { id: "cs_direct1234", object: "checkout.session", mode: "payment", status: "open", payment_status: "unpaid", client_reference_id: d.id, amount_total: 10178, currency: "eur", metadata: { contract_id: d.id, amount_cents: "10000", fee_cents: "178", kind: "fund" } };
   const s = pay("cs_direct1234"); const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
-  vuln(w.status !== 200 || d.status !== "accepted" || moneyOut(d).orphans !== 10178, `B29a a card payment arrives for a direct-payment Order -> ${w.status}, status=${d.status}, sent back=${moneyOut(d).orphans}`);
+  const keptD = STRIPE.charges[STRIPE.intents[s.payment_intent].latest_charge].balance_transaction.fee;   // Stripe's card fee stays with Stripe: Cuvori pays no fees
+  vuln(w.status !== 200 || d.status !== "accepted" || moneyOut(d).orphans !== 10178 - keptD, `B29a a card payment arrives for a direct-payment Order -> ${w.status}, status=${d.status}, sent back=${moneyOut(d).orphans} (all but Stripe's fee ${keptD})`);
   const c = mk({ amount_cents: 20000, has_milestones: true }); await fund(fx, c); c.status = "funded";
   const ms = [{ id: uuid(), order_id: c.id, title: "a", amount_cents: 8000, status: "submitted" }, { id: uuid(), order_id: c.id, title: "b", amount_cents: 12000, status: "pending" }]; DB.order_milestones.push(...ms);
   const rs = await Promise.all([1, 2, 3].map(() => call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, milestone_id: ms[0].id } }))));
