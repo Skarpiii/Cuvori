@@ -247,8 +247,8 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
 {
   const c = mk(); await fund(fx, c); c.amount_cents = 12000;
   await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  const s = pay(c.stripe_checkout_id);
-  c.funded_cents = 12000;                                                                                          // the dead function moved the counter...
+  const s = pay(c.stripe_checkout_id); stripeHandle(`/payment_intents/${s.payment_intent}/capture`, "POST", new URLSearchParams());   // the dead function charged the hold,
+  c.funded_cents = 12000;                                                                                          // ...moved the counter...
   DB.money_keys.push({ scope: `apply:${s.payment_intent}`, key: "claim:dead", created_at: past(2) });               // ...and left its claim
   const [w, k] = await Promise.all([
     call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } }))),
@@ -324,7 +324,7 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
 {
   const c = mk(); await fund(fx, c); c.amount_cents = 12000;
   await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  const s = pay(c.stripe_checkout_id);
+  const s = pay(c.stripe_checkout_id); stripeHandle(`/payment_intents/${s.payment_intent}/capture`, "POST", new URLSearchParams());   // the dead function charged the hold first
   c.funded_cents = 12000; DB.money_keys.push({ scope: `apply:${s.payment_intent}`, key: "claim:dead", created_at: past(2) });
   const n0 = urls.length;
   const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));

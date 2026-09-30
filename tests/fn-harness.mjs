@@ -25,15 +25,20 @@ const match = (row, f) => f.every(x => x.op === "eq" ? String(row[x.k]) === x.v 
 const res = (status, data) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 const err = (status, message, code) => [status, { error: { message, code, type: "invalid_request_error" } }];
 
-// a client "pays" a checkout session: creates the payment intent + charge and returns the session object Stripe would send
+// a client "pays" a checkout session: creates the payment intent + charge and returns the session object Stripe would send.
+// A page made with capture_method=manual (hold first, charge after) only places a hold: the PaymentIntent waits in
+// requires_capture, nothing is charged and there is no fee until it is captured (and none at all if it is cancelled).
+// opts.feeLater: Stripe's fee is not known yet when the card is charged (the test sets charge.balance_transaction later).
 export function pay(sessionId, opts = {}) {
   const s = STRIPE.sessions[sessionId]; if (!s) throw new Error("no session " + sessionId);
   const pi = rid("pi"), ch = rid("ch"); const total = s.amount_total;
   const fee = opts.fee != null ? opts.fee : Math.round(total * 0.015 + 25);
-  STRIPE.intents[pi] = { id: pi, amount: total, latest_charge: ch };
-  STRIPE.charges[ch] = { id: ch, currency: "eur", amount: total, amount_refunded: 0, sourced: 0, payment_intent: pi, balance_transaction: { id: rid("txn"), fee, net: total - fee, status: STRIPE.settleDelay ? "pending" : "available" }, payment_method_details: { card: { fingerprint: "fp_" + (opts.card || "one"), brand: "visa", last4: "4242" } } };
-  if (!STRIPE.settleDelay) STRIPE.balance += total - fee;
-  s.status = "complete"; s.payment_status = "paid"; s.payment_intent = pi;
+  const hold = ((s.params || {})["payment_intent_data[capture_method]"]) === "manual";
+  const bt = { id: rid("txn"), fee, net: total - fee, status: STRIPE.settleDelay ? "pending" : "available" };
+  STRIPE.intents[pi] = { id: pi, amount: total, latest_charge: ch, status: hold ? "requires_capture" : "succeeded", capture_method: hold ? "manual" : "automatic" };
+  STRIPE.charges[ch] = { id: ch, currency: "eur", amount: total, amount_refunded: 0, sourced: 0, payment_intent: pi, captured: !hold, balance_transaction: hold || opts.feeLater ? null : bt, _bt: bt, _btLater: !!opts.feeLater, payment_method_details: { card: { fingerprint: "fp_" + (opts.card || "one"), brand: "visa", last4: "4242" } } };
+  if (!hold && !STRIPE.settleDelay) STRIPE.balance += total - fee;
+  s.status = "complete"; s.payment_status = hold ? "unpaid" : "paid"; s.payment_intent = pi;
   return { ...s };
 }
 
@@ -59,7 +64,7 @@ export function stripeHandle(path, method, p) {
     const amount = +p.get("amount"), src = p.get("source_transaction"), dest = p.get("destination");
     if (!STRIPE.accounts[dest]) return err(400, "No such destination: " + dest, "resource_missing");
     if (!STRIPE.accounts[dest].payouts_enabled) return err(400, "Your destination account needs to have at least one of the following capabilities enabled: transfers", "insufficient_capabilities_for_transfer");
-    if (src) { const c = STRIPE.charges[src]; if (!c) return err(400, "No such charge: " + src, "resource_missing"); if (c.sourced + amount > c.amount - c.amount_refunded) return err(400, "The amount of this transfer exceeds the amount available on the source charge", "invalid_request_error"); c.sourced += amount; }
+    if (src) { const c = STRIPE.charges[src]; if (!c) return err(400, "No such charge: " + src, "resource_missing"); if (c.captured === false) return err(400, "The source charge has not been captured."); if (c.sourced + amount > c.amount - c.amount_refunded) return err(400, "The amount of this transfer exceeds the amount available on the source charge", "invalid_request_error"); c.sourced += amount; }
     else { if (STRIPE.balance < amount) return err(400, "You have insufficient funds in your Stripe account. One likely reason is that your balance is pending settlement.", "balance_insufficient"); STRIPE.balance -= amount; }
     const t = { id: rid("tr"), object: "transfer", created: Date.now() + STRIPE.transfers.length, amount, currency: p.get("currency"), destination: dest, reversed: false, amount_reversed: 0, contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]"), milestone_id: p.get("metadata[milestone_id]") || "", purpose: p.get("metadata[purpose]") || "release", attempt: p.get("metadata[attempt]") || "" }, transfer_group: p.get("transfer_group"), source_transaction: src || null };
     STRIPE.transfers.push(t); return [200, t];
@@ -67,11 +72,25 @@ export function stripeHandle(path, method, p) {
   if (seg[1] === "transfers" && seg[3] === "reversals" && method === "POST") { const t = STRIPE.transfers.find(x => x.id === seg[2]); if (!t) return err(404, "No such transfer", "resource_missing"); const amount = +(p.get("amount") || (t.amount - t.amount_reversed)); if (amount + t.amount_reversed > t.amount) return err(400, "Reversal amount exceeds the transfer amount"); t.amount_reversed += amount; t.reversed = t.amount_reversed === t.amount; const r = { id: rid("trr"), amount, transfer: t.id }; STRIPE.reversals.push(r); STRIPE.balance += amount; return [200, r]; }
   if (path === "/refunds" && method === "POST") {
     const pi = p.get("payment_intent"), amount = +p.get("amount"); const intent = STRIPE.intents[pi]; if (!intent) return err(404, "No such payment_intent: " + pi, "resource_missing");
-    const ch = STRIPE.charges[intent.latest_charge]; if (STRIPE.disputes[ch.id] && STRIPE.disputes[ch.id].status !== "won") return err(400, "Charge " + ch.id + " has been charged back; cannot issue a refund.", "charge_disputed");
+    const ch = STRIPE.charges[intent.latest_charge]; if (ch.captured === false) return err(400, "This PaymentIntent has not been captured: cancel it instead of refunding it.", "charge_not_captured"); if (STRIPE.disputes[ch.id] && STRIPE.disputes[ch.id].status !== "won") return err(400, "Charge " + ch.id + " has been charged back; cannot issue a refund.", "charge_disputed");
     if (amount > ch.amount - ch.amount_refunded) return err(400, "Refund amount (€" + (amount / 100).toFixed(2) + ") is greater than unrefunded amount on charge (€" + ((ch.amount - ch.amount_refunded) / 100).toFixed(2) + ")", "amount_too_large");
     if (ch.sourced > ch.amount - ch.amount_refunded - amount) return err(400, "Cannot refund more than the amount not yet transferred from this charge");
     ch.amount_refunded += amount; STRIPE.balance -= amount;
     const r = { id: rid("re"), amount, contract: p.get("metadata[contract_id]"), metadata: { contract_id: p.get("metadata[contract_id]"), reason: p.get("metadata[reason]") || "", ...(p.get("metadata[kind]") ? { kind: p.get("metadata[kind]") } : {}) }, payment_intent: pi, charge: ch.id, status: "succeeded" }; STRIPE.refunds.push(r); return [200, r];
+  }
+  if (seg[1] === "payment_intents" && seg[3] === "capture" && method === "POST") {
+    const p = STRIPE.intents[seg[2]]; if (!p) return err(404, "No such payment_intent: " + seg[2], "resource_missing");
+    if (p.status !== "requires_capture") return err(400, `This PaymentIntent could not be captured because it has a status of ${p.status}.`, "payment_intent_unexpected_state");
+    const ch = STRIPE.charges[p.latest_charge]; p.status = "succeeded"; ch.captured = true; ch.balance_transaction = ch._btLater ? null : ch._bt;
+    if (!STRIPE.settleDelay) STRIPE.balance += ch.amount - ch._bt.fee;
+    return [200, { ...p }];
+  }
+  if (seg[1] === "payment_intents" && seg[3] === "cancel" && method === "POST") {
+    const p = STRIPE.intents[seg[2]]; if (!p) return err(404, "No such payment_intent: " + seg[2], "resource_missing");
+    if (!["requires_capture", "requires_payment_method", "requires_confirmation", "requires_action"].includes(p.status)) return err(400, `You cannot cancel this PaymentIntent because it has a status of ${p.status}.`, "payment_intent_unexpected_state");
+    const ch = STRIPE.charges[p.latest_charge]; p.status = "canceled"; p.cancellation_reason = p.cancellation_reason || null;
+    if (ch && !ch.captured) { ch.amount_refunded = ch.amount; ch.refunded = true; }                  // the hold is released: nothing was ever charged, no fee
+    return [200, { ...p }];
   }
   return err(404, "unknown " + path);
 }

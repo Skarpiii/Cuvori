@@ -343,14 +343,14 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
     vuln(r.status === 200 || c.status !== "delivered" || moneyOut(c).transferred !== 0,
       `R-U6 +€10 accepted at the moment of release -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, transferred ${moneyOut(c).transferred} (must be 0)`);
   }
-  // U7: an old page paid twice (the second payment went back to the card) does not block the release, and is not refunded twice
+  // U7: an old page paid twice: the second payment is never charged (its hold is released); it does not block the release
   {
     const c = await raised(); await checkout(c, "en"); const p1 = c.stripe_checkout_id; await checkout(c, "lt"); const p2 = c.stripe_checkout_id;
     STRIPE.sessions[p1].status = "open";                                     // both opened at the same instant: the first was not closed
-    await webhook(pay(p1)); await webhook(pay(p2));
-    const back = backToCard(c); const r = await release(c);
-    vuln(back !== 1 || r.status !== 200 || c.status !== "completed" || moneyOut(c).transferred !== 15000 || backToCard(c) !== back,
-      `R-U7 paid twice, then released -> refunds before ${back} (must be 1), release ${r.status} ${r.json && r.json.error || ""}, transferred ${moneyOut(c).transferred}, refunds after ${backToCard(c)}`);
+    await webhook(pay(p1)); const s2 = pay(p2); await webhook(s2);
+    const second = STRIPE.intents[s2.payment_intent].status; const r = await release(c);
+    vuln(second !== "canceled" || backToCard(c) || r.status !== 200 || c.status !== "completed" || moneyOut(c).transferred !== 15000,
+      `R-U7 paid twice, then released -> second payment ${second} (must be canceled: never charged), refunds ${backToCard(c)} (must be 0), release ${r.status} ${r.json && r.json.error || ""}, transferred ${moneyOut(c).transferred}`);
   }
   reset();
 }

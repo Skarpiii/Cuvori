@@ -131,11 +131,11 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   STRIPE.idem.clear();                                                   // 30 minutes later: a new key, a new session
   const r2 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } })); const s2 = c.stripe_checkout_id;
   vuln(s1 === s2 || STRIPE.sessions[s1].status !== "expired", `B8a second checkout (${r1.status}/${r2.status}) -> first session ${s1} is ${STRIPE.sessions[s1].status} (must be expired), second=${s2}`);
-  // even if both were somehow paid, the second payment goes straight back
+  // even if both were somehow paid, the second payment is never charged: its hold is released (hold first, charge after)
   const p2 = pay(s2); await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: p2 } })));
-  STRIPE.sessions[s1].status = "open"; const p1 = pay(s1); const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: p1 } })));
-  const kept1 = STRIPE.charges[STRIPE.intents[p1.payment_intent].latest_charge].balance_transaction.fee;   // Stripe's card fee stays with Stripe: Cuvori pays no fees
-  vuln(c.funded_cents !== 10000 || moneyOut(c).refunded !== p1.amount_total - kept1, `B8b both paid anyway -> webhook ${w.status}, funded=${c.funded_cents}, refunded back=${moneyOut(c).refunded} (the second payment except the card fee Stripe kept: ${p1.amount_total - kept1})`);
+  STRIPE.sessions[s1].status = "open"; const before = STRIPE.balance; const p1 = pay(s1); const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: p1 } })));
+  const pi1 = STRIPE.intents[p1.payment_intent], ch1 = STRIPE.charges[pi1.latest_charge];
+  vuln(c.funded_cents !== 10000 || pi1.status !== "canceled" || ch1.captured || moneyOut(c).refunded || STRIPE.balance !== before, `B8b both paid anyway -> webhook ${w.status}, funded=${c.funded_cents}, second payment ${pi1.status} (must be canceled: never charged), captured=${ch1.captured}, refunds=${moneyOut(c).refunded}, Cuvori's balance ${STRIPE.balance - before}`);
   reset();
 }
 // ---------- B9: the price grows again while a top-up checkout is open: keep the money, ask for the rest
