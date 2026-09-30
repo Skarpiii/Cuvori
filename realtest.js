@@ -487,6 +487,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await db(()=>window.__mockdb.contracts.at(-1).funded_cents===25000) && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €250'),'once the €50 is funded, the client can approve and release all €250');
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo'); await p.waitForTimeout(1200);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='completed' && c.released_cents===25000 && window.__fakeStripe.transfers.at(-1).amount===25000; }),'€250 released, including the agreed increase');
+  // a payment that came in after the Order could no longer take it is explained in the Order's history
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.order_events.push({id:'ev-late-1',order_id:c.id,actor:null,event:'late_payment_refunded',data:{amount_cents:5091,card_fee_cents:103,total_cents:5194},created_at:new Date().toISOString()}); });
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#orders'); await p.waitForTimeout(900);
+  await p.locator('#contractsList .c-row',{hasText:'Promo cut'}).first().click(); await p.waitForTimeout(700);
+  ok((await modal()).includes('A payment of €51.94 came in after the Order could no longer take it: €50.91 went back to the card. Stripe kept its card fee of €1.03.'),'a late payment is explained in the history: what went back to the card, and the card fee Stripe kept');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   // scenario: €1,000 in three milestones — partial release, the rest stays secured
   await signin('maya@test.com');
