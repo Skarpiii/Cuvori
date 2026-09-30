@@ -513,9 +513,23 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
 }
 
 // ---- a paid Checkout session becomes a funded Order (webhook and reconciliation share this) ----
+// A payment that can no longer go into its Order (cancelled, changed, disputed or closed while the client was on the
+// payment page) goes back to the card — all of it except the card fee Stripe kept on it. Stripe does not return its fee on
+// a refund, and Cuvori pays no fees. When Stripe's fee is not known yet (or is in another currency) nothing is refunded
+// now: the error makes Stripe send the payment again later. The Order's history says what happened, once.
 async function refundOrphan(s, why) {
-  console.error("refunding payment that cannot fund an order", s.id, why);
-  await moneyPost(`orphan:${s.payment_intent}`, "/refunds", { payment_intent: s.payment_intent, amount: s.amount_total, metadata: { contract_id: s.client_reference_id || "", reason: why.slice(0, 200) } });
+  const p = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge.balance_transaction" });
+  const ch = p && p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
+  const bt = ch && ch.balance_transaction && typeof ch.balance_transaction === "object" ? ch.balance_transaction : null;
+  if (!ch || !Number.isInteger(ch.amount) || !bt || !Number.isInteger(bt.fee) || bt.fee < 0 || (bt.currency && String(bt.currency).toLowerCase() !== String(s.currency || ch.currency || "").toLowerCase())) {
+    const e = new Error(`late payment ${s.payment_intent} not refunded yet: the card fee Stripe kept on it is not known (${why})`); e.outcomeUnknown = true; throw e;
+  }
+  const back = Math.max(ch.amount - bt.fee, 0), left = Math.max(back - nz(ch.amount_refunded), 0);   // what an earlier attempt refunded is not refunded twice
+  console.error("refunding payment that cannot fund an order", s.id, why, { paid: ch.amount, card_fee: bt.fee, back });
+  if (left > 0) await moneyPost(`orphan:${s.payment_intent}`, "/refunds", { payment_intent: s.payment_intent, amount: left, metadata: { contract_id: s.client_reference_id || "", reason: why.slice(0, 200), kind: "late_payment" } });
+  const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id).catch(() => null) : null;
+  if (c && (left > 0 || nz(ch.amount_refunded) === back) && (await claimScope(`late:${s.payment_intent}`).catch(() => false)))
+    await orderEvent(c, "late_payment_refunded", { amount_cents: back, card_fee_cents: bt.fee, total_cents: ch.amount }, null);
   return "refunded";
 }
 export async function applyPaidSession(s) {
@@ -627,7 +641,7 @@ export async function closeCheckout(c) {
   if (await db.one("order_payments", `order_id=eq.${c.id}&provider_ref=eq.${q(s.payment_intent)}&select=id`)) return "none";   // a top-up, on the Order already
   const pi = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge" });
   const ch = pi && pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge : null;
-  if (ch && (ch.refunded === true || (Number.isInteger(ch.amount_refunded) && ch.amount_refunded >= ch.amount))) return "none";   // it went back to the card
+  if (ch && (ch.refunded === true || nz(ch.amount_refunded) > 0)) return "none";   // not on the Order and (partly) back on the card: it is not Order money
   const r = await applyPaidSession(s);
   return r === "funded" || r === "pending" ? "paid" : "none";
 }
