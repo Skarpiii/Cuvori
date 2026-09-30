@@ -492,6 +492,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#orders'); await p.waitForTimeout(900);
   await p.locator('#contractsList .c-row',{hasText:'Promo cut'}).first().click(); await p.waitForTimeout(700);
   ok((await modal()).includes('A payment of €51.94 came in after the Order could no longer take it: €50.91 went back to the card. Stripe kept its card fee of €1.03.'),'a late payment is explained in the history: what went back to the card, and the card fee Stripe kept');
+  // hold first, charge after: back from Stripe to an Order that could no longer take the payment — the client is told nothing was charged
+  const promoId=await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__holdReleased=true; return c.id; });
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#orders?paid='+promoId);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order could no longer take the payment, so your card was not charged.'),4000),'back from Stripe after the Order could no longer take the payment: the client is told the card was not charged');
+  await p.evaluate(()=>{ delete window.__mockdb.contracts.at(-1).__holdReleased; document.querySelector('#modalRoot').innerHTML=''; });
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   // scenario: €1,000 in three milestones — partial release, the rest stays secured
   await signin('maya@test.com');
