@@ -355,6 +355,20 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-V: an Order that is not waiting for payment says so with a code the page shows in the client's language ----------
+{
+  for (const [status, extra] of [["funded", { funded_cents: 10000 }], ["completed", { funded_cents: 10000, released_cents: 10000 }], ["cancelled", {}]]) {
+    const c = mk({ status, ...extra }); const pages = Object.keys(STRIPE.sessions).length;
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status !== 409 || !r.json || r.json.code !== "not_payable" || r.json.error !== "This order is not waiting for payment" || Object.keys(STRIPE.sessions).length !== pages,
+      `R-V ${status}: Fund on a stale page -> ${r.status} ${JSON.stringify(r.json)} (must be 409 with code not_payable, no Stripe page)`);
+  }
+  // a stranger still learns nothing: the same "Not your order" as before, no code
+  const c = mk({ status: "funded", funded_cents: 10000 }); const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl2", body: { contract_id: c.id } }));
+  vuln(r.status !== 403 || (r.json && r.json.code), `R-V a stranger asks about someone else's paid Order -> ${r.status} ${JSON.stringify(r.json)} (must be 403 Not your order, no code)`);
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
