@@ -381,6 +381,21 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-X: a freelancer banned after the Order was accepted: no Stripe page, and a code the page shows in the client's language ----------
+{
+  for (const [name, extra] of [["first payment", {}], ["agreed increase", { status: "funded", amount_cents: 15000, price: 150, funded_cents: 10000 }]]) {
+    const c = mk(extra); const pages = Object.keys(STRIPE.sessions).length;
+    users.ed.banned = true;
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    users.ed.banned = false;
+    vuln(r.status !== 409 || !r.json || r.json.code !== "freelancer_unavailable" || Object.keys(STRIPE.sessions).length !== pages,
+      `R-X ${name} to a banned freelancer -> ${r.status} ${JSON.stringify(r.json)} (must be 409 with code freelancer_unavailable, no Stripe page)`);
+  }
+  const ok = mk(); const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: ok.id } }));
+  vuln(r.status !== 200, `R-X once the ban is lifted the client can pay again -> ${r.status} ${r.json && r.json.error || ""}`);
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
