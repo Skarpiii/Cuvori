@@ -475,6 +475,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await signin('maya@test.com');
   await newOrder('Promo cut',200);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-caction="accept"]'); await p.waitForTimeout(900);
+  // a stale page: the Order was paid meanwhile (another tab). Fund is refused in the page's language and the Order reloads without the button
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='funded'; c.funded_cents=c.amount_cents; });
+  await p.click('[data-caction="fund"]');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This Order isn't waiting for a payment right now — it may already be paid.")) && await until(async()=>await p.locator('[data-caction="fund"]').count()===0),'Fund on a stale page: the client is told the Order is not waiting for a payment, and the Order reloads without the Fund button');
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.status=c.__was.status; c.funded_cents=c.__was.funded_cents; delete c.__was; });
+  await openOrders();
   await p.click('[data-caction="fund"]'); await p.waitForTimeout(2500);
   await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="deliver"]'); await p.waitForTimeout(400); await p.fill('#onUrl','https://drive.test/promo'); await p.click('#onGo'); await p.waitForTimeout(900);
