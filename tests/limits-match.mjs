@@ -1,6 +1,7 @@
 // The smallest amounts Cuvori takes are written in several places: the payment code, the Order page, the page tests'
 // fake backend and the database. They must be the same everywhere, or a client sees a button that cannot work
-// (a Fund button the payment code refuses, or a release the page hides although the server would allow it).
+// (a Fund button the payment code refuses, or a release the page hides although the server would allow it), or
+// people are told the wrong rule.
 // This check reads the files themselves, so it fails as soon as one copy is changed without the others.
 import fs from "node:fs";
 const root = (process.env.ROOT || new URL("..", import.meta.url).pathname).replace(/\/?$/, "/");
@@ -8,35 +9,72 @@ const read = (f) => fs.readFileSync(root + f, "utf8");
 const out = [];
 const check = (ok, m) => out.push((ok ? "PASS " : "FAIL ") + m);
 const num = (text, re) => { const m = text && text.match(re); return m ? Number(m[1]) : null; };
+const euros = (text, re) => { const v = num(text, re); return v == null ? null : Math.round(v * 100); };   // a rule written in euros, as cents
+const schemaFiles = () => fs.readdirSync(root + "supabase").filter(f => /^schema_v\d+\.sql$/.test(f)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
 // the database uses the newest definition of a function: the highest schema_vNN.sql that (re)defines it
 function latestSql(fn) {
-  const files = fs.readdirSync(root + "supabase").filter(f => /^schema_v\d+\.sql$/.test(f)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
   let found = { file: null, body: null };
-  for (const f of files) {
+  for (const f of schemaFiles()) {
     const t = read("supabase/" + f), i = t.indexOf(`create or replace function public.${fn}(`);
     if (i >= 0) found = { file: f, body: t.slice(i, t.indexOf("$$;", i)) };
   }
   return found;
 }
+// and the newest version of a table rule: the last file that adds it, unless a later one drops it again
+function latestConstraint(name) {
+  let found = { file: null, body: null };
+  for (const f of schemaFiles()) {
+    const t = read("supabase/" + f), re = new RegExp(`(drop|add) constraint (if exists )?${name}\\b`, "g");
+    for (const m of t.matchAll(re)) found = m[1] === "add" ? { file: f, body: t.slice(m.index, t.indexOf(";", m.index)) } : { file: f + " (dropped)", body: null };
+  }
+  return found;
+}
 
-const lib = read("netlify/lib/cuvori.mjs"), page = read("index.html"), mock = read("mock-supabase.js");
-const amend = latestSql("order_amend"), decide = latestSql("order_amendment_decide");
+const lib = read("netlify/lib/cuvori.mjs"), checkout = read("netlify/functions/stripe-checkout.mjs"), page = read("index.html"), mock = read("mock-supabase.js");
 const topup = num(lib, /\bMIN_TOPUP_CENTS\s*=\s*(\d+)/), whole = num(lib, /\bMIN_CENTS\s*=\s*(\d+)/);
 check(Number.isInteger(topup) && Number.isInteger(whole), `the payment code sets the minimums: a top-up from ${topup} cents, an Order from ${whole} cents`);
+check(checkout.includes(`kind === "fund" ? MIN_CENTS : MIN_TOPUP_CENTS`), "the Stripe payment page takes its minimums from the payment code (stripe-checkout.mjs)");
 
-// the smallest increase that can be paid in (€0.50 today)
+// the page and the fake backend each write the two numbers once, and every check there uses them
+const pageTopup = num(page, /\bMIN_TOPUP_CENTS=(\d+)/), pageWhole = num(page, /\bMIN_ORDER_CENTS=(\d+)/);
+const mockTopup = num(mock, /\bMIN_TOPUP_CENTS=(\d+)/), mockWhole = num(mock, /\bMIN_ORDER_CENTS=(\d+)/);
+const uses = (text, file, list) => { for (const [what, code] of list) check(text.includes(code), `${file}: ${what} uses its own minimum (${code})`); };
+uses(page, "the Order page", [
+  ["the Fund button and the release", "topupRaw>=MIN_TOPUP_CENTS"],
+  ["the new Order form", "f.price_cents<MIN_ORDER_CENTS"],
+  ["a price change: the new price", "oCents(o)+delta<MIN_ORDER_CENTS"],
+  ["a price change: extra money on a paid Order", "delta>0&&delta<MIN_TOPUP_CENTS"],
+  ["accepting a price change", "open.price_delta_cents<MIN_TOPUP_CENTS"],
+]);
+uses(mock, "the page tests' fake backend", [
+  ["a new or edited Order", "pc<MIN_ORDER_CENTS"],
+  ["a price change: the new price", "c.amount_cents+delta<MIN_ORDER_CENTS"],
+  ["a price change: extra money on a paid Order", "delta>0&&delta<MIN_TOPUP_CENTS&&paidIn(c)"],
+  ["accepting a price change", "a.price_delta_cents<MIN_TOPUP_CENTS&&paidIn(c)"],
+  ["the release", "c.amount_cents-(c.funded_cents||0)>=MIN_TOPUP_CENTS"],
+  ["the Stripe payment page", "kind===\"fund\"?MIN_ORDER_CENTS:MIN_TOPUP_CENTS"],
+]);
+
+const amend = latestSql("order_amend"), decide = latestSql("order_amendment_decide"), input = latestSql("order_input_ok"), oldInput = latestSql("contract_input_ok");
+const sane = latestConstraint("contracts_sane");
+
+// the smallest extra money that can be paid in on an Order that is already paid (€0.50 today)
 const topupPlaces = [
-  ["the Order page (Fund button and release)", num(page, /topupRaw>=(\d+)/)],
-  ["the page tests' fake backend (release)", num(mock, /c\.amount_cents-\(c\.funded_cents\|\|0\)>=(\d+)/)],
-  [`the database: proposing an increase (order_amend, ${amend.file})`, num(amend.body, /delta > 0 and delta < (\d+)/)],
-  [`the database: accepting an increase (order_amendment_decide, ${decide.file})`, num(decide.body, /a\.price_delta_cents > 0 and a\.price_delta_cents < (\d+)/)],
+  ["the Order page", pageTopup],
+  ["the page tests' fake backend", mockTopup],
+  [`the database: proposing extra money (order_amend, ${amend.file})`, num(amend.body, /delta > 0 and delta < (\d+)/)],
+  [`the database: accepting extra money (order_amendment_decide, ${decide.file})`, num(decide.body, /a\.price_delta_cents > 0 and a\.price_delta_cents < (\d+)/)],
 ];
-for (const [where, v] of topupPlaces) check(v === topup, `smallest increase that can be paid: ${where} says ${v}, the payment code ${topup}`);
+for (const [where, v] of topupPlaces) check(v === topup, `smallest extra money on a paid Order: ${where} says ${v}, the payment code ${topup}`);
 
 // the smallest Order price (€1 today)
 const wholePlaces = [
-  ["the Order page (new Order form)", num(page, /f\.price_cents<(\d+)/)],
-  [`the database: a price after an amendment (order_amend, ${amend.file})`, num(amend.body, /new_total < (\d+)/)],
+  ["the Order page", pageWhole],
+  ["the page tests' fake backend", mockWhole],
+  [`the database: a new or edited Order (order_input_ok, ${input.file})`, num(input.body, /price < (\d+) or price >/)],
+  [`the database: a price after a change (order_amend, ${amend.file})`, num(amend.body, /new_total < (\d+)/)],
+  [`the database: the Orders table rule for protected payments (contracts_sane, ${sane.file}, in euros)`, euros(sane.body, /pricing = 'project' and price >= (\d+(?:\.\d+)?)/)],
+  [`the database: the old Order functions (contract_input_ok, ${oldInput.file}, in euros)`, euros(oldInput.body, /mode = 'escrow' and price < (\d+(?:\.\d+)?)/)],
 ];
 for (const [where, v] of wholePlaces) check(v === whole, `smallest Order price: ${where} says ${v}, the payment code ${whole}`);
 
