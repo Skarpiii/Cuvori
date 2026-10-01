@@ -484,6 +484,13 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('[data-caction="fund"]'); await p.waitForTimeout(2500);
   await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="deliver"]'); await p.waitForTimeout(400); await p.fill('#onUrl','https://drive.test/promo'); await p.click('#onGo'); await p.waitForTimeout(900);
+  // an old increase under €0.50 (only possible before the database refused them) can never be charged: no Fund prompt, and Approve & release works
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.amount_cents+=30; c.price=c.amount_cents/100; });
+  await signin('jonas@test.com'); await openOrders();
+  const tiny=await modal();
+  ok(await p.locator('[data-caction="topup"]').count()===0 && !tiny.includes('added €0.30') && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €200'),'an old increase under €0.50: no Fund prompt, and the client can still approve and release');
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.amount_cents-=30; c.price=c.amount_cents/100; });
+  await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.fill('#amNote','Add a vertical version'); await p.fill('#amDelta','50'); await p.click('#amGo'); await p.waitForTimeout(900);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-amact="accept"]'); await p.waitForTimeout(900);
   const inc=await modal();
