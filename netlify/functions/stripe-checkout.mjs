@@ -54,7 +54,7 @@ export default safe(async (req) => {
   const paidIn = c.status === "accepted" ? 0 : fc;
   if (c.status === "accepted") { amount = price; kind = "fund"; }
   else if (["funded", "delivered"].includes(c.status) && price > paidIn) { amount = price - paidIn; kind = "topup"; }
-  else return bad("This order is not waiting for payment", 409);
+  else return json(409, { error: "This order is not waiting for payment", code: "not_payable" });   // code: the page shows it in the client's language and reloads the Order
   // the amount being charged now (not just the price) must be a whole number of cents inside the limits:
   // a whole Order from €1, a top-up from €0.50, never above €950,000. The €0.50 is Cuvori's own floor for the
   // top-up amount, chosen so the charge (amount + fee) always clears Stripe's per-currency minimum for the whole
