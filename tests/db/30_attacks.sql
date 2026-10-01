@@ -792,3 +792,50 @@ select t.try('admin','sees an Order where the card cost came out higher than the
        and (select o from jsonb_array_elements($1::jsonb->'list') with ordinality a(x, o) where x->>'id' = $1::jsonb->>'short')
          < (select o from jsonb_array_elements($1::jsonb->'list') with ordinality a(x, o) where x->>'id' = $1::jsonb->>'plain')$$, 'allow');
 select t.try('client','reads the admin Orders list with the card-cost shortfalls', t.u('101'), $$select count(*) from public.admin_list_contracts()$$, $$select $1::int > 0$$);
+
+-- ---------- v27: an Order is at most €950,000 (the most one card payment can carry once the card fee is added) ----------
+select t.try('editor','creates an Order for €950,000.01 (more than one payment can carry)', t.u('207'), $$select public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(95000001))::text$$, $$select $1 is not null$$);
+select t.try('editor','creates a directly paid Order for €1,000,000', t.u('207'), $$select public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(100000000, null, 'direct'))::text$$, $$select $1 is not null$$);
+select t.try('editor','creates an Order for €950,000, the most allowed (normal)', t.u('207'), $$select public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(95000000))::text$$, $$select $1 is not null$$, 'allow');
+create or replace function t.f_edit_over_cap() returns text language plpgsql as $$
+declare oid uuid;
+begin
+  perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(90000000));
+  perform public.order_update(oid, t.v18_order(96000000));                                -- edited to €960,000 before anyone accepted
+  return (select amount_cents::text from public.contracts where id = oid);
+end $$;
+grant execute on function t.f_edit_over_cap() to authenticated;
+select t.try('editor','edits an Order up to €960,000 before it is accepted', t.u('207'), $$select t.f_edit_over_cap()$$, $$select $1::int > 95000000$$);
+create or replace function t.f_amend_cap(p_delta int) returns text language plpgsql as $$
+declare oid uuid; aid uuid;
+begin
+  perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(94000000));   -- €940,000
+  perform t.as_user('107'); perform public.order_accept(oid);
+  perform t.fund(oid);                                                                                                   -- paid
+  perform t.as_user('207');
+  begin aid := public.order_amend(oid, jsonb_build_object('note', 'more work', 'price_delta_cents', p_delta)); exception when others then return 'refused:' || sqlerrm; end;
+  return 'proposed';
+end $$;
+grant execute on function t.f_amend_cap(int) to authenticated;
+select t.try('editor','proposes +€20,000 on a paid €940,000 Order, taking it over €950,000', t.u('207'), $$select t.f_amend_cap(2000000)$$, $$select $1 = 'proposed'$$);
+select t.try('editor','proposes +€10,000 on a paid €940,000 Order, up to exactly €950,000 (normal)', t.u('207'), $$select t.f_amend_cap(1000000)$$, $$select $1 = 'proposed'$$, 'allow');
+-- an increase proposed before v27 that would take the Order over €950,000 cannot be accepted any more
+create or replace function t.put_amendment(oid uuid, who uuid, delta int) returns uuid language sql security definer as $$
+  insert into public.order_amendments (order_id, proposed_by, note, price_delta_cents) values (oid, who, 'proposed before v27', delta) returning id;
+$$;
+grant execute on function t.put_amendment(uuid, uuid, int) to authenticated;
+create or replace function t.f_accept_over_cap() returns text language plpgsql as $$
+declare oid uuid; aid uuid; r text;
+begin
+  perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(94000000));
+  perform t.as_user('107'); perform public.order_accept(oid); perform t.fund(oid);
+  aid := t.put_amendment(oid, t.u('207'), 2000000);                                            -- +€20,000, proposed earlier
+  perform t.as_user('107'); r := public.order_amendment_decide(aid, true);
+  return r || '|' || (select amount_cents from public.contracts where id = oid);
+end $$;
+grant execute on function t.f_accept_over_cap() to authenticated;
+select t.try('client','accepts an older +€20,000 increase that takes a paid €940,000 Order over €950,000', t.u('107'), $$select t.f_accept_over_cap()$$,
+  $$select split_part($1, '|', 1) = 'ok' or split_part($1, '|', 2)::int > 95000000$$);
+-- the old contract functions (still in the database, no longer used by the page) keep the same limit
+select t.try('editor','creates a €960,000 Order through the old contract function', t.u('207'), $$select public.propose_contract('10000000-0000-0000-0000-000000000023', 'Old way', 'x', 960000, 'project', null, 2, 'escrow')::text$$, $$select $1 is not null$$);
+select t.try('editor','creates a €900,000 Order through the old contract function (normal)', t.u('207'), $$select public.propose_contract('10000000-0000-0000-0000-000000000023', 'Old way', 'x', 900000, 'project', null, 2, 'escrow')::text$$, $$select $1 is not null$$, 'allow');
