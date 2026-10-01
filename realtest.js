@@ -478,12 +478,18 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#home'); await p.waitForTimeout(500); await p.click('#contactList .contact'); await p.waitForTimeout(800); await p.click('.chat-window .open-contract'); await p.waitForTimeout(700);
   await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#oTitle','Tiny job'); await p.fill('#oPrice','0.5'); await p.fill('#oScope','As discussed'); await p.click('#oSend');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price must be at least €1.')) && await db(()=>window.__mockdb.contracts.length)===ordersBefore,'an Order under €1: the page says the price must be at least €1, and nothing is sent');
+  // and over €950,000 (the most one card payment can carry once the card fee is added)
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#oPrice','950000.01'); await p.click('#oSend');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price can be at most €950,000.')) && await db(()=>window.__mockdb.contracts.length)===ordersBefore,'an Order over €950,000: the page says the most it can be, and nothing is sent');
+  ok(await p.getAttribute('#oPrice','max')==='950000','the price field stops at 950,000');
   await newOrder('Promo cut',200);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-caction="accept"]'); await p.waitForTimeout(900);
   // a price change that would take the price under €1: the page says the real rule (it used to say "between 0 and 1,000,000"), and nothing is sent
   const amendsBefore=await db(()=>window.__mockdb.order_amendments.length);
   await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#amNote','Smaller job'); await p.fill('#amDelta','-199.5'); await p.click('#amGo');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price after this change must be at least €1.')) && await db(()=>window.__mockdb.order_amendments.length)===amendsBefore,'a price change that would take the Order under €1: the page says the price must stay at least €1, and nothing is sent');
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#amDelta','949800.01'); await p.click('#amGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price after this change can be at most €950,000.')) && await db(()=>window.__mockdb.order_amendments.length)===amendsBefore,'a price change that would take the Order over €950,000: the page says the most it can be, and nothing is sent');
   await openOrders();
   // a stale page: the Order was paid meanwhile (another tab). Fund is refused in the page's language and the Order reloads without the button
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='funded'; c.funded_cents=c.amount_cents; });
@@ -526,6 +532,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order is already paid, so extra money must be at least €0.50.')) && await tinyAm()==='proposed','accepting extra money under €0.50 on a paid Order: the client is told the real rule, and nothing changes');
   await p.click('[data-amact="decline"]'); await p.waitForTimeout(900);
   ok(await tinyAm()==='declined','the client can still decline it');
+  await db(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.order_amendments.push({id:'am-big-1',order_id:c.id,proposed_by:c.editor,note:'Big extra',price_delta_cents:95000001-c.amount_cents,new_deadline:null,scope_add:'',deliverables_add:'',revisions_add:0,milestones:[],status:'proposed',created_at:new Date().toISOString(),decided_at:null,decided_by:null}); });
+  const bigAm=async()=>await db(()=>window.__mockdb.order_amendments.find(a=>a.id==='am-big-1').status);
+  await openOrders(); await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.click('[data-amact="accept"]');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price after this change can be at most €950,000.')) && await bigAm()==='proposed' && await db(()=>window.__mockdb.contracts.at(-1).amount_cents===20000),'accepting an older increase that would take the Order over €950,000: the client is told the most it can be, and nothing changes');
+  await p.click('[data-amact="decline"]'); await p.waitForTimeout(900);
+  ok(await bigAm()==='declined','the client can decline that one too');
   await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.fill('#amNote','Add a vertical version'); await p.fill('#amDelta','50'); await p.click('#amGo'); await p.waitForTimeout(900);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-amact="accept"]'); await p.waitForTimeout(900);
