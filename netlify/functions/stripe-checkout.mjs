@@ -59,7 +59,9 @@ export default safe(async (req) => {
   // a whole Order from €1, a top-up from €0.50, never above €950,000. The €0.50 is Cuvori's own floor for the
   // top-up amount, chosen so the charge (amount + fee) always clears Stripe's per-currency minimum for the whole
   // charge (€0.50 for euro). quoteFor checks the amount again and caps the fee-inclusive total; this is the early gate.
-  const minFor = kind === "fund" ? MIN_CENTS : MIN_TOPUP_CENTS;
+  // Only a price increase may be as small as €0.50: anything else (a first payment, or any kind of payment added
+  // later) needs the €1, so the stricter minimum is what applies unless someone decides otherwise.
+  const minFor = kind === "topup" ? MIN_TOPUP_CENTS : MIN_CENTS;
   if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return bad("Payment amount out of range", 409);
   if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
   if (await isBanned(c.editor)) return bad("This freelancer cannot receive payments", 409);
