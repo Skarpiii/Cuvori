@@ -33,7 +33,7 @@ function latestConstraint(name) {
 const lib = read("netlify/lib/cuvori.mjs"), checkout = read("netlify/functions/stripe-checkout.mjs"), page = read("index.html"), mock = read("mock-supabase.js");
 const topup = num(lib, /\bMIN_TOPUP_CENTS\s*=\s*(\d+)/), whole = num(lib, /\bMIN_CENTS\s*=\s*(\d+)/);
 check(Number.isInteger(topup) && Number.isInteger(whole), `the payment code sets the minimums: a top-up from ${topup} cents, an Order from ${whole} cents`);
-check(checkout.includes(`kind === "fund" ? MIN_CENTS : MIN_TOPUP_CENTS`), "the Stripe payment page takes its minimums from the payment code (stripe-checkout.mjs)");
+check(checkout.includes(`kind === "topup" ? MIN_TOPUP_CENTS : MIN_CENTS`), "the Stripe payment page takes its minimums from the payment code, €1 unless it is a price increase (stripe-checkout.mjs)");
 
 // the page and the fake backend each write the two numbers once, and every check there uses them
 const pageTopup = num(page, /\bMIN_TOPUP_CENTS=(\d+)/), pageWhole = num(page, /\bMIN_ORDER_CENTS=(\d+)/);
@@ -52,7 +52,7 @@ uses(mock, "the page tests' fake backend", [
   ["a price change: extra money on a paid Order", "delta>0&&delta<MIN_TOPUP_CENTS&&paidIn(c)"],
   ["accepting a price change", "a.price_delta_cents<MIN_TOPUP_CENTS&&paidIn(c)"],
   ["the release", "c.amount_cents-(c.funded_cents||0)>=MIN_TOPUP_CENTS"],
-  ["the Stripe payment page", "kind===\"fund\"?MIN_ORDER_CENTS:MIN_TOPUP_CENTS"],
+  ["the Stripe payment page", "kind===\"topup\"?MIN_TOPUP_CENTS:MIN_ORDER_CENTS"],
 ]);
 
 const amend = latestSql("order_amend"), decide = latestSql("order_amendment_decide"), input = latestSql("order_input_ok"), oldInput = latestSql("contract_input_ok");
