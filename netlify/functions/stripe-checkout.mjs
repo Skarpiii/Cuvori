@@ -64,7 +64,9 @@ export default safe(async (req) => {
   const minFor = kind === "topup" ? MIN_TOPUP_CENTS : MIN_CENTS;
   if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return bad("Payment amount out of range", 409);
   if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
-  if (await isBanned(c.editor)) return bad("This freelancer cannot receive payments", 409);
+  // code: the page says it in the client's language (the Fund button shows even then: the page only knows whether the
+  // freelancer finished their Stripe setup, not whether they were banned after the Order was accepted)
+  if (await isBanned(c.editor)) return json(409, { error: "This freelancer cannot receive payments", code: "freelancer_unavailable" });
   const acct = await payoutAccount(c.editor);
   if (!accountReady(acct)) return bad("The freelancer's Stripe account can't receive payments right now. Ask them to finish or update their Stripe setup under Account → Payout details.", 409);
 
