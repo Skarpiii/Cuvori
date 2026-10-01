@@ -1,5 +1,5 @@
 // POST { contract_id, milestone_id? } (client) — "Approve & release". Whole Order, or one milestone.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, releaseMilestone, readJson, safe, isBanned, heldCents, owedCents, closeCheckout, moneyUnchanged, payoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, releaseMilestone, readJson, safe, isBanned, heldCents, owedCents, closeCheckout, moneyUnchanged, MIN_TOPUP_CENTS, payoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -31,8 +31,10 @@ export default safe(async (req) => {
   if (!row) {
     if (!["funded", "delivered"].includes(c.status)) return bad("Nothing to release right now", 409);
     // A price increase both sides accepted is paid in before the client can approve and close the Order: once it is
-    // closed, the increase can never be paid through Cuvori. If something is wrong, a dispute is the way.
-    if (owedCents(c) > 0) return bad("The price increase you agreed to is not paid yet. Fund it first, then release the payment. If something is wrong, open a dispute.", 409);
+    // closed, the increase can never be paid through Cuvori. If something is wrong, a dispute is the way. An increase
+    // under the €0.50 top-up minimum (only on Orders from before the database refused them) can never be charged, so it
+    // does not block the release.
+    if (owedCents(c) >= MIN_TOPUP_CENTS) return bad("The price increase you agreed to is not paid yet. Fund it first, then release the payment. If something is wrong, open a dispute.", 409);
     const acct = await payoutAccount(c.editor);
     if (!accountReady(acct)) return bad("The freelancer's Stripe account is not ready yet", 409);
     // Nothing can be paid into the Order once it is closed: its Stripe payment page is closed first.
