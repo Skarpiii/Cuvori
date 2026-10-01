@@ -491,6 +491,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#amDelta','949800.01'); await p.click('#amGo');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price after this change can be at most €950,000.')) && await db(()=>window.__mockdb.order_amendments.length)===amendsBefore,'a price change that would take the Order over €950,000: the page says the most it can be, and nothing is sent');
   await openOrders();
+  // a freelancer banned after the Order was accepted: the Fund button still shows (the page only knows the Stripe setup),
+  // so the refusal is said in the client's language, and nothing is paid
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.profiles.find(x=>x.id===c.editor).banned=true; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('[data-caction="fund"]');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This freelancer can't receive payments right now, so this Order can't be paid. Nothing was charged.")) && await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='accepted' && !c.funded_cents; }),"a freelancer banned after the Order was accepted: Fund is refused in the client's language, and nothing is paid");
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.profiles.find(x=>x.id===c.editor).banned=false; });
   // a stale page: the Order was paid meanwhile (another tab). Fund is refused in the page's language and the Order reloads without the button
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='funded'; c.funded_cents=c.amount_cents; });
   await p.click('[data-caction="fund"]');
