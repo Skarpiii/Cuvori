@@ -473,8 +473,18 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   // scenario: a price increase accepted on a delivered Order is funded before the client can approve and release
   await signin('maya@test.com');
+  // a price under €1 is refused on the page with the real rule (it used to say "Fill in every field."), and nothing is sent
+  const ordersBefore=await db(()=>window.__mockdb.contracts.length);
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#home'); await p.waitForTimeout(500); await p.click('#contactList .contact'); await p.waitForTimeout(800); await p.click('.chat-window .open-contract'); await p.waitForTimeout(700);
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#oTitle','Tiny job'); await p.fill('#oPrice','0.5'); await p.fill('#oScope','As discussed'); await p.click('#oSend');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price must be at least €1.')) && await db(()=>window.__mockdb.contracts.length)===ordersBefore,'an Order under €1: the page says the price must be at least €1, and nothing is sent');
   await newOrder('Promo cut',200);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-caction="accept"]'); await p.waitForTimeout(900);
+  // a price change that would take the price under €1: the page says the real rule (it used to say "between 0 and 1,000,000"), and nothing is sent
+  const amendsBefore=await db(()=>window.__mockdb.order_amendments.length);
+  await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#amNote','Smaller job'); await p.fill('#amDelta','-199.5'); await p.click('#amGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('The price after this change must be at least €1.')) && await db(()=>window.__mockdb.order_amendments.length)===amendsBefore,'a price change that would take the Order under €1: the page says the price must stay at least €1, and nothing is sent');
+  await openOrders();
   // a stale page: the Order was paid meanwhile (another tab). Fund is refused in the page's language and the Order reloads without the button
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='funded'; c.funded_cents=c.amount_cents; });
   await p.click('[data-caction="fund"]');
@@ -488,8 +498,34 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.amount_cents+=30; c.price=c.amount_cents/100; });
   await signin('jonas@test.com'); await openOrders();
   const tiny=await modal();
-  ok(await p.locator('[data-caction="topup"]').count()===0 && !tiny.includes('added €0.30') && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €200'),'an old increase under €0.50: no Fund prompt, and the client can still approve and release');
+  ok(await p.locator('[data-caction="topup"]').count()===0 && !tiny.includes('added €0.3') && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €200'),'an old increase under €0.50: no Fund prompt, and the client can still approve and release');
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.amount_cents-=30; c.price=c.amount_cents/100; });
+  await signin('maya@test.com'); await openOrders();
+  // on a paid Order, extra money under €0.50 is refused on the page with the real rule (it used to say "between 0 and 1,000,000"), and nothing is sent
+  const amends0=await db(()=>window.__mockdb.order_amendments.length);
+  await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#amNote','Tiny extra'); await p.fill('#amDelta','0.3'); await p.click('#amGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order is already paid, so extra money must be at least €0.50.')) && await db(()=>window.__mockdb.order_amendments.length)===amends0,'extra money under €0.50 on a paid Order: the page says the real rule, and nothing is sent');
+  // the same on a page opened before the payment came in: the database refuses it, and the page says why
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='accepted'; c.funded_cents=null; });
+  await openOrders(); await p.click('[data-caction="amend"]'); await p.waitForTimeout(400);
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.status=c.__was.status; c.funded_cents=c.__was.funded_cents; delete c.__was; });
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.fill('#amNote','Tiny extra'); await p.fill('#amDelta','0.3'); await p.click('#amGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order is already paid, so extra money must be at least €0.50.')) && await db(()=>window.__mockdb.order_amendments.length)===amends0,'on a page opened before the payment: the database refuses extra money under €0.50, and the page gives the same reason');
+  // extra money under €0.50 proposed before the Order was paid can no longer be accepted once it is paid
+  await db(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.order_amendments.push({id:'am-tiny-1',order_id:c.id,proposed_by:c.editor,note:'Tiny extra',price_delta_cents:30,new_deadline:null,scope_add:'',deliverables_add:'',revisions_add:0,milestones:[],status:'proposed',created_at:new Date().toISOString(),decided_at:null,decided_by:null}); });
+  const tinyAm=async()=>await db(()=>window.__mockdb.order_amendments.find(a=>a.id==='am-tiny-1').status);
+  await signin('jonas@test.com');
+  // first on a page opened before the payment came in: refused, and the Order reloads as it is now (paid, so Approve & release shows)
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='accepted'; c.funded_cents=null; });
+  await openOrders();
+  const staleView=await p.locator('[data-caction="release"]').count();
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.status=c.__was.status; c.funded_cents=c.__was.funded_cents; delete c.__was; });
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.click('[data-amact="accept"]');
+  ok(staleView===0 && await until(async()=>(await p.textContent('#toastWrap')).includes('That action is not available right now.')) && await until(async()=>await p.locator('[data-caction="release"]').count()===1) && await tinyAm()==='proposed','accepting on a page opened before the payment: refused, nothing changes, and the Order reloads as it is now');
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await p.click('[data-amact="accept"]');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order is already paid, so extra money must be at least €0.50.')) && await tinyAm()==='proposed','accepting extra money under €0.50 on a paid Order: the client is told the real rule, and nothing changes');
+  await p.click('[data-amact="decline"]'); await p.waitForTimeout(900);
+  ok(await tinyAm()==='declined','the client can still decline it');
   await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="amend"]'); await p.waitForTimeout(400); await p.fill('#amNote','Add a vertical version'); await p.fill('#amDelta','50'); await p.click('#amGo'); await p.waitForTimeout(900);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-amact="accept"]'); await p.waitForTimeout(900);
