@@ -369,6 +369,18 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-W: an old increase under €0.50 (before the database refused them) can never be charged, so it does not block the release ----------
+{
+  for (const owed of [30, 49, 50]) {
+    const c = mk({ amount_cents: 10000 }); await fund(fx, c); Object.assign(c, { amount_cents: 10000 + owed, price: (10000 + owed) / 100, status: "delivered" });
+    const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    const must = owed < 50 ? 200 : 409;
+    vuln(r.status !== must || (must === 200 ? (c.status !== "completed" || moneyOut(c).transferred !== 10000) : moneyOut(c).transferred !== 0),
+      `R-W unpaid increase of ${owed} cents, then Approve & release -> ${r.status} ${r.json && r.json.error || ""} (must be ${must}), status ${c.status}, transferred ${moneyOut(c).transferred}`);
+  }
+  reset();
+}
+
 console.log(out.join("\n"));
 const bad = out.filter(l => l.startsWith("VULNERABLE")).length;
 console.log(`\n${bad} vulnerable, ${out.filter(l => l.startsWith("safe")).length} safe`);
