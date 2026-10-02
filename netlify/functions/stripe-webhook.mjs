@@ -1,7 +1,7 @@
 // Stripe → Cuvori. Hardened copy.
 // Platform endpoint events: checkout.session.completed, checkout.session.async_payment_succeeded,
 //   charge.refunded, charge.dispute.created, charge.dispute.closed. Connect endpoint (separate secret): account.updated.
-import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder } from "../lib/cuvori.mjs";
+import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols } from "../lib/cuvori.mjs";
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 
 export default async (req) => {
@@ -23,7 +23,8 @@ export default async (req) => {
       if (!isAcct(o.id)) return json(200, { ignored: true });
       const a = await stripe("GET", `/accounts/${o.id}`);                  // current state, not the (possibly stale / replayed) payload
       const enabled = !!(a.payouts_enabled && a.charges_enabled);
-      await db.update("payout_details", `stripe_account_id=eq.${a.id}`, { stripe_payouts_enabled: enabled });
+      const col = acctCols();                                               // the saved account of this Stripe mode; the other mode's is never touched
+      await db.update("payout_details", `${col.id}=eq.${a.id}`, { [col.ready]: enabled });
     } else if (!fromConnect && event.type === "charge.dispute.created") {
       await onDisputeCreated(o);
     } else if (!fromConnect && event.type === "charge.dispute.closed") {
