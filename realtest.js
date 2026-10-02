@@ -526,7 +526,14 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries today. Nothing was charged. Please try again tomorrow.")) && await unpaid(),"too many Fund tries in a day: the client is asked to try again tomorrow and told nothing was charged");
   await fundWith([409,{error:"This Order was paid in test mode, so its money cannot move with the live keys. Cuvori support needs to look at it.",code:"other_mode"}]);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments on this Order are on hold. Please contact Cuvori support.")) && !(await p.textContent('#toastWrap')).includes('test mode') && await unpaid(),"an Order paid in the other mode: the client is told payments are on hold, without the technical reason");
+  // the freelancer's Stripe account can't take money right now (Stripe asked them for something, or restricted it): said in the
+  // client's language, with where the freelancer looks (Settings → Payout details), and nothing is charged
+  const NOT_READY=[409,{error:"The freelancer's Stripe account can't receive payments right now. Ask them to check Payout details under Settings on Cuvori.",code:"freelancer_not_ready"}];
+  await fundWith(NOT_READY);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This freelancer's Stripe account can't receive payments right now, so this Order can't be paid. Nothing was charged. Ask them in the chat to check Settings → Payout details.")) && await unpaid(),"the freelancer's Stripe account can't receive payments: the client is told in plain words where the freelancer looks, and nothing is paid");
   await p.evaluate(()=>document.querySelector('[data-lang="lt"]').click());
+  await fundWith(NOT_READY);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Šio specialisto Stripe paskyra šiuo metu negali gauti mokėjimų, todėl šio užsakymo apmokėti negalima. Nieko nebuvo nuskaičiuota. Paprašykite jo pokalbyje pasitikrinti skiltį Nustatymai → Apmokėjimo rekvizitai.")) && !(await p.textContent('#toastWrap')).includes('Payout details under Settings'),"the same, client using Cuvori in Lithuanian: told in Lithuanian, with the Lithuanian menu names");
   await fundWith(PAUSED);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Mokėjimai šiuo metu sustabdyti. Nieko nebuvo nuskaičiuota. Pabandykite vėliau.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys'),"payments paused, client using Cuvori in Lithuanian: told in Lithuanian");
   await fundWith(SERVER);
