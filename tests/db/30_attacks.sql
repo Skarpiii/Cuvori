@@ -895,3 +895,31 @@ end $$;
 grant execute on function t.f_live_identifier() to authenticated;
 select t.try('admin','a saved live Stripe account is recorded for bad-actor matching (normal)', t.u('401'), $$select t.f_live_identifier()$$, $$select $1 = '1'$$, 'allow');
 select t.try('server','saves a malformed live Stripe account ID', t.u('401'), $$select t.put_live_acct(t.u('202'), 'acct_1x/../../charges')$$, $$select $1 is not null$$);
+
+-- ---------- v29: Cuvori remembers which Stripe account its keys belong to ----------
+select t.try('admin','changes which Stripe account Cuvori remembers from the admin panel', t.u('401'), $$select public.admin_set_setting('stripe_platform_live', '"acct_1EVILEVILEVIL"')$$,
+  $$select $1 = 'ok' or exists (select 1 from public.site_settings where key = 'stripe_platform_live')$$);
+select t.try('admin','still switches the database to live from the admin panel (v28 rule kept)', t.u('401'), $$select public.admin_set_setting('stripe_mode', '"live"')$$, $$select $1 = 'ok'$$);
+select t.try('editor','runs the move to another Stripe account herself', t.u('202'), $$select public.stripe_platform_switch()$$, $$select $1 like 'switched%'$$);
+select t.try('admin','runs the move to another Stripe account through the API', t.u('401'), $$select public.stripe_platform_switch()$$, $$select $1 like 'switched%'$$);
+-- the owner's move (in Supabase): refused while money is held, otherwise every saved account goes to the history
+create or replace function t.f_platform_switch(p_settle boolean) returns text language plpgsql security definer as $$
+declare r text; h jsonb;
+begin
+  insert into public.site_settings (key, value) values ('stripe_platform_test', '"acct_1OLDPLATFORMAA"') on conflict (key) do update set value = excluded.value;
+  update public.payout_details set stripe_live_account_id = 'acct_1LIVEOLDOLDOLD', stripe_live_payouts_enabled = true where id = t.u('202');
+  if p_settle then update public.contracts set status = 'completed' where status in ('funded','delivered','disputed','releasing','resolving'); end if;
+  r := public.stripe_platform_switch();
+  select stripe_account_history into h from public.payout_details where id = t.u('202');
+  return r || '|' || coalesce((select stripe_account_id from public.payout_details where id = t.u('202')), 'none')
+           || '|' || coalesce((select stripe_live_account_id from public.payout_details where id = t.u('202')), 'none')
+           || '|' || (select stripe_payouts_enabled::text || '/' || stripe_live_payouts_enabled::text from public.payout_details where id = t.u('202'))
+           || '|' || coalesce((select string_agg(x->>'mode' || ':' || (x->>'id'), ',') from jsonb_array_elements(h) x), '')
+           || '|' || (select count(*)::text from public.site_settings where key like 'stripe\_platform\_%');
+end $$;
+grant execute on function t.f_platform_switch(boolean) to authenticated;
+select t.try('client','the move to another Stripe account is refused while an Order holds money (normal)', t.u('101'), $$select t.f_platform_switch(false)$$,
+  $$select $1 like 'not switched:%' and split_part($1, '|', 2) = 'acct_1EMILEMILEMIL' and split_part($1, '|', 6) = '1'$$, 'allow');
+select t.try('client','once nothing is held, the move sets every saved Stripe account aside in the history and forgets the remembered account (normal)', t.u('101'), $$select t.f_platform_switch(true)$$,
+  $$select $1 like 'switched:%' and split_part($1, '|', 2) = 'none' and split_part($1, '|', 3) = 'none' and split_part($1, '|', 4) = 'false/false'
+       and split_part($1, '|', 5) like '%test:acct_1EMILEMILEMIL%' and split_part($1, '|', 5) like '%live:acct_1LIVEOLDOLDOLD%' and split_part($1, '|', 6) = '0'$$, 'allow');
