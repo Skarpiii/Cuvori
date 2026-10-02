@@ -923,3 +923,21 @@ select t.try('client','the move to another Stripe account is refused while an Or
 select t.try('client','once nothing is held, the move sets every saved Stripe account aside in the history and forgets the remembered account (normal)', t.u('101'), $$select t.f_platform_switch(true)$$,
   $$select $1 like 'switched:%' and split_part($1, '|', 2) = 'none' and split_part($1, '|', 3) = 'none' and split_part($1, '|', 4) = 'false/false'
        and split_part($1, '|', 5) like '%test:acct_1EMILEMILEMIL%' and split_part($1, '|', 5) like '%live:acct_1LIVEOLDOLDOLD%' and split_part($1, '|', 6) = '0'$$, 'allow');
+-- the remembered Stripe accounts are not public: no visitor or member (admins included) reads them, through the table or setting()
+insert into public.site_settings (key, value) values ('stripe_platform_test', '"acct_1PLATFORMTESTAA"'), ('stripe_platform_live', '"acct_1PLATFORMLIVEAA"')
+  on conflict (key) do update set value = excluded.value;
+select t.try('visitor','reads which Stripe account Cuvori remembers', null, $$select count(*)::text from public.site_settings where key in ('stripe_platform_test', 'stripe_platform_live')$$, $$select $1::int > 0$$);
+select t.try('visitor','reads which Stripe account Cuvori remembers through setting()', null, $$select concat(public.setting('stripe_platform_test'), public.setting('stripe_platform_live'))$$, $$select $1 <> ''$$);
+select t.try('editor','reads which Stripe account Cuvori remembers', t.u('202'), $$select count(*)::text from public.site_settings where key like 'stripe\_platform%'$$, $$select $1::int > 0$$);
+select t.try('admin','reads which Stripe account Cuvori remembers', t.u('401'), $$select string_agg(value::text, ',') from public.site_settings$$, $$select coalesce($1, '') like '%acct_1PLATFORM%'$$);
+select t.try('admin','reads which Stripe account Cuvori remembers through setting()', t.u('401'), $$select concat(public.setting('stripe_platform_test'), public.setting('stripe_platform_live'))$$, $$select $1 <> ''$$);
+select t.try('visitor','still reads the other settings (normal)', null, $$select count(*)::text from public.site_settings where key in ('posting_rules', 'review_window_days', 'stripe_mode')$$, $$select $1::int = 3$$, 'allow');
+select t.try('visitor','still reads the posting rules through setting() (normal)', null, $$select public.setting('posting_rules')::text$$, $$select $1 is not null$$, 'allow');
+do $$ declare v text; begin
+  execute 'set local role service_role';
+  select string_agg(key || '=' || (value #>> '{}'), ',' order by key) into v from public.site_settings where key in ('stripe_platform_test', 'stripe_platform_live');
+  execute 'reset role';
+  insert into t.results (grp, name, ok, detail) values ('server', 'the payment functions still read which Stripe account Cuvori remembers (normal)',
+    coalesce(v, '') = 'stripe_platform_live=acct_1PLATFORMLIVEAA,stripe_platform_test=acct_1PLATFORMTESTAA', 'returned: ' || coalesce(v, 'nothing'));
+end $$;
+delete from public.site_settings where key in ('stripe_platform_test', 'stripe_platform_live');
