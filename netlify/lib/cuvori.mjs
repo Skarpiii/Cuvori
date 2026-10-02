@@ -16,6 +16,9 @@ export const SUPABASE_URL = configuredOrigin(env("SUPABASE_URL") || "https://tnx
 // Legacy service-role keys are JWTs; new secret keys use only the apikey header.
 export const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SECRET_KEY");
 export const STRIPE_KEY = env("STRIPE_SECRET_KEY");
+// Test and live are two separate worlds at Stripe: an account, payment or payout made with test keys does not exist for
+// live keys, and the other way round. The key says which one these functions work in.
+export const STRIPE_MODE = /^(sk|rk)_live_/.test(STRIPE_KEY) ? "live" : /^(sk|rk)_test_/.test(STRIPE_KEY) ? "test" : null;
 export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 export const SITE_URL = configuredOrigin(env("SITE_URL") || env("URL"), "SITE_URL or URL");
 // the page may live on another host (GitHub Pages) and call these functions across origins
@@ -103,8 +106,25 @@ function encode(obj, prefix) {
   }
   return out.filter(Boolean).join("&");
 }
+// The database says which Stripe mode it belongs to (site_settings.stripe_mode: "test" until the owner switches it on
+// launch day, see SETUP.md). Keys of the other mode never move money in it, so test and live accounts, payments and
+// payouts never mix — also when a deploy is left with the old keys. Read at most once a minute.
+let modeSeen = { mode: null, at: 0 };
+export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; };
+async function checkStripeMode() {
+  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503);
+  if (!modeSeen.mode || Date.now() - modeSeen.at > 60e3) {
+    const row = await db.one("site_settings", "key=eq.stripe_mode&select=value");
+    modeSeen = { mode: row ? String(row.value) : "test", at: Date.now() };
+  }
+  if (modeSeen.mode !== STRIPE_MODE) {
+    console.error("Stripe mode mismatch: keys are", STRIPE_MODE, "but the database is set to", modeSeen.mode);
+    throw fail(`Payments are paused: the Stripe keys are for ${STRIPE_MODE} mode, but the database is set to ${modeSeen.mode} mode.`, 503);
+  }
+}
 export async function stripe(method, path, body, opts = {}) {
   if (!STRIPE_KEY) throw fail("Payments are not configured. Please contact support.", 503);
+  await checkStripeMode();
   if (!/^\/[a-z_]+(\/[A-Za-z0-9_]+)*$/.test(path)) throw new Error("bad Stripe path");
   const headers = { Authorization: `Bearer ${STRIPE_KEY}`, "Stripe-Version": "2024-06-20" };
   if (opts.idempotency) headers["Idempotency-Key"] = opts.idempotency;
@@ -290,13 +310,33 @@ async function moneyPost(scope, path, body) {
   }
 }
 
-// Editor's connected account, verified against Stripe (not just the DB row)
+// Each freelancer has one saved Stripe account per mode: the test pair is the original stripe_account_id /
+// stripe_payouts_enabled, the live pair stripe_live_account_id / stripe_live_payouts_enabled (schema v28). Only the
+// pair of the current mode is ever read or written; the other one stays exactly as it is.
+export const acctCols = () => {
+  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503);
+  return STRIPE_MODE === "live" ? { mode: "live", id: "stripe_live_account_id", ready: "stripe_live_payouts_enabled" }
+                                : { mode: "test", id: "stripe_account_id", ready: "stripe_payouts_enabled" };
+};
+// The saved account as Stripe sees it now, or null only when Stripe confirms it is gone for these keys (it does not
+// exist, or these keys have no access to it). A timeout, too many requests, a key problem or a Stripe outage throws:
+// nothing is ever decided on a guess.
+export async function lookupAccount(id) {
+  try { return await stripe("GET", `/accounts/${id}`); }
+  catch (e) {
+    const code = e && e.stripe && e.stripe.code;
+    if ((e.status === 404 && code === "resource_missing") || (e.status === 403 && code === "account_invalid")) return null;
+    throw e;
+  }
+}
+// Editor's connected account of the current mode, verified against Stripe (not just the DB row)
 export async function payoutAccount(editorId) {
-  const p = await db.one("payout_details", `id=eq.${editorId}&select=stripe_account_id`);
-  if (!p || !isAcct(p.stripe_account_id)) return null;
+  const col = acctCols();
+  const p = await db.one("payout_details", `id=eq.${editorId}&select=${col.id}`);
+  if (!p || !isAcct(p[col.id])) return null;
   let acct;
-  try { acct = await stripe("GET", `/accounts/${p.stripe_account_id}`); }
-  catch (e) { if (e.status === 404 || e.status === 403) return null; throw e; }
+  try { acct = await stripe("GET", `/accounts/${p[col.id]}`); }
+  catch (e) { if (e.status === 404 || e.status === 403) return null; throw e; }   // reading only: anything Stripe refuses counts as not ready
   if (!acct || !acct.metadata || acct.metadata.cuvori_user !== editorId) return null;
   return acct;
 }
