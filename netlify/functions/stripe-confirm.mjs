@@ -9,7 +9,7 @@ export default safe(async (req) => {
   if (!escrowEnabled()) return bad("Protected payments are not configured yet", 503);
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
-  await limitTries(me, "pay_confirm");         // at most about 10 tries a minute: nobody can use up Stripe's limit for everyone
+  await limitTries(me, "pay_confirm");         // at most about 10 tries a minute and 50 a day: nobody can use up Stripe's limits for everyone
   const { contract_id: id } = await readJson(req);
   const c = await db.contract(id);
   if (!c || (c.client !== me.id && c.editor !== me.id)) return bad("Not your order", 403);

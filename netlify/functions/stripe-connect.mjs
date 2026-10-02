@@ -16,7 +16,7 @@ export default safe(async (req) => {
   if (me.banned) return bad("Account suspended", 403);
   if (me.role !== "editor") return bad("Only professionals can receive payouts", 403);
   // the Payout details box asks for the status each time it opens, so that one may be asked a little more often
-  await limitTries(me, req.method === "GET" ? "pay_connect_status" : "pay_connect", req.method === "GET" ? 30 : 10);
+  await limitTries(me, req.method === "GET" ? "pay_connect_status" : "pay_connect", req.method === "GET" ? 30 : 10, req.method === "GET" ? 100 : 50);
 
   const col = acctCols();
   const payout = await db.one("payout_details", `id=eq.${me.id}&select=id,${col.id},${col.ready},stripe_account_history`);

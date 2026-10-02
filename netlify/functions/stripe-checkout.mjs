@@ -29,7 +29,7 @@ export default safe(async (req) => {
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
-  await limitTries(me, "pay_checkout");          // at most about 10 tries a minute: nobody can use up Stripe's limit for everyone
+  await limitTries(me, "pay_checkout");          // at most about 10 tries a minute and 50 a day: nobody can use up Stripe's limits for everyone
   const { contract_id: id, lang } = await readJson(req);
   const lng = typeof lang === "string" && Object.prototype.hasOwnProperty.call(STRIPE_TEXT, lang) ? lang : "en", L = STRIPE_TEXT[lng];
   const c = await db.contract(id);

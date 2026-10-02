@@ -8,7 +8,7 @@ export default safe(async (req) => {
   if (!escrowEnabled()) return bad("Escrow payments are not configured yet", 503);
   const me = await userFromRequest(req);
   if (!me || !me.is_admin || me.banned) return bad("Admins only", 403);
-  await limitTries(me, "pay_resolve");         // at most about 10 tries a minute: nobody can use up Stripe's limit for everyone
+  await limitTries(me, "pay_resolve", 10, 200);   // at most about 10 tries a minute and 200 a day (admins decide many disputes in a busy day)
   const body = await readJson(req);
   const decision = body.decision;
   if (!["release", "refund", "split"].includes(decision)) return bad("decision must be release, refund or split");
