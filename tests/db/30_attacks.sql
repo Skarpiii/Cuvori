@@ -1000,7 +1000,7 @@ begin
 end $$;
 grant execute on function t.f_set_mode() to authenticated;
 select t.try('client','going live is refused while Orders hold test money; then it switches and closes test card-fee refunds; going back waits for real ones (normal)', t.u('101'), $$select t.f_set_mode()$$,
-  $$select split_part($1, '|', 1) like 'not switched: % Order(s) still hold money paid in test mode%' and split_part($1, '|', 2) = 'test'
+  $$select split_part($1, '|', 1) like 'not switched: % Order(s) still have money on the way from test mode%' and split_part($1, '|', 2) = 'test'
        and split_part($1, '|', 3) like 'switched to live mode (% card-fee refund(s) from test mode closed)' and split_part($1, '|', 4) = 'live' and split_part($1, '|', 5) = '0'
        and split_part($1, '|', 6) = 'already live mode: nothing changed'
        and split_part($1, '|', 7) like 'not switched: % card-fee refund(s) to clients are still waiting%' and split_part($1, '|', 8) = 'live'
@@ -1051,3 +1051,54 @@ end $$;
 grant execute on function t.f_money_note() to authenticated;
 select t.try('client','an Order note gets its time; a "Stripe check" note goes when the unpaid Order is cancelled or declined, another note stays (normal)', t.u('101'), $$select t.f_money_note()$$,
   $$select $1 = 'timed|gone|no time|top-up pi_x may not be recorded — check by hand|gone'$$, 'allow');
+
+-- ---------- v32: test money and real money can never meet ----------
+-- going live and moving Stripe accounts also wait for chargebacks and re-payments, even on finished Orders; a stray
+-- stored mode is put right instead of "already"
+create or replace function t.f_set_mode_cb() returns text language plpgsql security definer as $$
+declare out text; r text; a uuid := '30000000-0000-0000-0000-000000000003';
+begin
+  update public.site_settings set value = '"test"' where key = 'stripe_mode';
+  update public.contracts set status = 'completed' where payment_mode = 'escrow' and status in ('funded','delivered','disputed','releasing','resolving');
+  update public.order_payments set fee_refund_cents = 0 where fee_refund_cents is null;
+  update public.contracts set chargeback_status = 'won', money_error = 'chargeback won; re-payment pending' where id = a;
+  r := public.stripe_set_mode('live'); out := r || '|' || public.stripe_mode();
+  r := public.stripe_platform_switch(); out := out || '|' || r;
+  update public.contracts set chargeback_status = 'open', money_error = null where id = a;
+  r := public.stripe_set_mode('live'); out := out || '|' || r;
+  update public.contracts set chargeback_status = 'won', money_error = null where id = a;
+  r := public.stripe_set_mode('live'); out := out || '|' || r || '|' || public.stripe_mode();
+  update public.site_settings set value = '"Live"' where key = 'stripe_mode';
+  r := public.stripe_set_mode('test'); out := out || '|' || r || '|' || (select value #>> '{}' from public.site_settings where key = 'stripe_mode');
+  return out;
+end $$;
+grant execute on function t.f_set_mode_cb() to authenticated;
+select t.try('client','going live and moving Stripe accounts wait for a re-payment still owed or an open chargeback on a finished Order; a stray mode setting is put right (normal)', t.u('101'), $$select t.f_set_mode_cb()$$,
+  $$select split_part($1, '|', 1) like 'not switched: 1 Order(s) still have money on the way from test mode%' and split_part($1, '|', 2) = 'test'
+       and split_part($1, '|', 3) like 'not switched: 1 Order(s) still have money on the way through the current Stripe account%'
+       and split_part($1, '|', 4) like 'not switched: 1 Order(s)%'
+       and split_part($1, '|', 5) = 'switched to live mode' and split_part($1, '|', 6) = 'live'
+       and split_part($1, '|', 7) = 'switched to test mode' and split_part($1, '|', 8) = 'test'$$, 'allow');
+-- the database records money on an Order only in its own mode, and never mixes modes on one Order
+create or replace function t.f_paid_mode() returns text language plpgsql security definer as $$
+declare out text := ''; a uuid := '30000000-0000-0000-0000-000000000001';
+begin
+  update public.site_settings set value = '"test"' where key = 'stripe_mode';
+  update public.contracts set payment_mode = 'escrow', status = 'accepted', funded_cents = 0, paid_mode = null where id = a;
+  begin update public.contracts set status = 'funded', funded_cents = 10000, paid_mode = 'live' where id = a; out := 'taken';
+  exception when others then out := case when sqlerrm = 'stripe_mode_changed' then 'refused' else sqlerrm end; end;
+  update public.contracts set status = 'funded', funded_cents = 10000, paid_mode = 'test' where id = a;
+  out := out || '|' || (select paid_mode || '/' || funded_cents from public.contracts where id = a);
+  begin update public.contracts set funded_cents = 15000, paid_mode = 'live' where id = a; out := out || '|taken';
+  exception when others then out := out || '|' || case when sqlerrm = 'stripe_mode_mixed' then 'refused' else sqlerrm end; end;
+  update public.site_settings set value = '"live"' where key = 'stripe_mode';
+  begin update public.contracts set funded_cents = 15000 where id = a; out := out || '|taken';
+  exception when others then out := out || '|' || case when sqlerrm = 'stripe_mode_changed' then 'refused' else sqlerrm end; end;
+  update public.contracts set released_cents = 10000, status = 'completed' where id = a;
+  out := out || '|' || (select status from public.contracts where id = a);
+  return out;
+end $$;
+grant execute on function t.f_paid_mode() to authenticated;
+select t.try('client','money is recorded on an Order only in the database''s mode and never mixed; closing it is not held up (normal)', t.u('101'), $$select t.f_paid_mode()$$,
+  $$select $1 = 'refused|test/10000|refused|refused|completed'$$, 'allow');
+select t.try('client','records a payment on their Order directly', t.u('101'), $$with x as (update public.contracts set paid_mode = 'test' returning 1) select count(*)::text from x$$, $$select $1::int > 0$$);
