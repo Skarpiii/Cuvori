@@ -110,7 +110,9 @@ function encode(obj, prefix) {
 // launch day, see SETUP.md). Keys of the other mode never move money in it, so test and live accounts, payments and
 // payouts never mix — also when a deploy is left with the old keys. Read at most once a minute.
 let modeSeen = { mode: null, at: 0 };
-export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; };
+let keyPlatform = null;                         // the Stripe account these keys belong to: asked once, it never changes for a key
+let platformSeen = { id: null, at: 0 };
+export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; keyPlatform = null; platformSeen = { id: null, at: 0 }; };
 async function checkStripeMode() {
   if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503);
   if (!modeSeen.mode || Date.now() - modeSeen.at > 60e3) {
@@ -122,9 +124,35 @@ async function checkStripeMode() {
     throw fail(`Payments are paused: the Stripe keys are for ${STRIPE_MODE} mode, but the database is set to ${modeSeen.mode} mode.`, 503);
   }
 }
+// The Stripe account Cuvori's keys belong to is remembered the first time, once per mode (site_settings
+// stripe_platform_test / stripe_platform_live). Keys of a different Stripe account pause every payment: money paid in
+// through one Stripe account can only be paid out from it, and every freelancer's saved account would look gone. A
+// deliberate move to another Stripe account is confirmed in Supabase (SETUP.md, "Moving to another Stripe account").
+async function checkStripePlatform() {
+  if (!keyPlatform) { const me = await stripeCall("GET", "/account"); keyPlatform = me && isAcct(me.id) ? me.id : null; }
+  if (!keyPlatform) throw new Error("Stripe did not say which Stripe account these keys belong to");
+  if (!platformSeen.id || Date.now() - platformSeen.at > 60e3) {
+    const key = `stripe_platform_${STRIPE_MODE}`;
+    let row = await db.one("site_settings", `key=eq.${key}&select=value`);
+    if (!row) {                                 // the first time in this mode: remember it, never over one already remembered
+      await sbFetch("/site_settings?on_conflict=key", { method: "POST", prefer: "resolution=ignore-duplicates,return=minimal", body: JSON.stringify({ key, value: keyPlatform }) });
+      row = await db.one("site_settings", `key=eq.${key}&select=value`);
+    }
+    platformSeen = { id: row ? String(row.value) : null, at: Date.now() };
+  }
+  if (platformSeen.id !== keyPlatform) {
+    console.error("Stripe account mismatch: the keys belong to", keyPlatform, "but Cuvori was set up with", platformSeen.id);
+    throw fail("Payments are paused: the Stripe keys belong to a different Stripe account than the one Cuvori was set up with.", 503);
+  }
+}
 export async function stripe(method, path, body, opts = {}) {
   if (!STRIPE_KEY) throw fail("Payments are not configured. Please contact support.", 503);
   await checkStripeMode();
+  await checkStripePlatform();
+  return stripeCall(method, path, body, opts);
+}
+// the call itself, without the checks: only for the checks and through stripe()
+async function stripeCall(method, path, body, opts = {}) {
   if (!/^\/[a-z_]+(\/[A-Za-z0-9_]+)*$/.test(path)) throw new Error("bad Stripe path");
   const headers = { Authorization: `Bearer ${STRIPE_KEY}`, "Stripe-Version": "2024-06-20" };
   if (opts.idempotency) headers["Idempotency-Key"] = opts.idempotency;
@@ -329,15 +357,29 @@ export async function lookupAccount(id) {
     throw e;
   }
 }
-// Editor's connected account of the current mode, verified against Stripe (not just the DB row)
+// Editor's connected account of the current mode, verified against Stripe (not just the DB row). null = not ready:
+// none saved, Stripe confirms it is gone, or it is not this freelancer's. Anything else (Cuvori's key not allowed to
+// read accounts, Stripe not answering) throws, so nobody is told to fix a setup that is fine.
 export async function payoutAccount(editorId) {
   const col = acctCols();
   const p = await db.one("payout_details", `id=eq.${editorId}&select=${col.id}`);
   if (!p || !isAcct(p[col.id])) return null;
-  let acct;
-  try { acct = await stripe("GET", `/accounts/${p[col.id]}`); }
-  catch (e) { if (e.status === 404 || e.status === 403) return null; throw e; }   // reading only: anything Stripe refuses counts as not ready
+  const acct = await lookupAccount(p[col.id]);
   if (!acct || !acct.metadata || acct.metadata.cuvori_user !== editorId) return null;
+  return acct;
+}
+// The same for an Order. A problem on Cuvori's side is written on the Order, so the admin panel shows it under "Needs a
+// hand" — never over another note — and the note goes once the check works again. Cuvori's own clear refusals
+// (payments paused, not configured) are not written: everyone is shown those already.
+const CHECK_FAILED = "Stripe check failed: ";
+export async function orderPayoutAccount(c) {
+  let acct;
+  try { acct = await payoutAccount(c.editor); }
+  catch (e) {
+    if (!(e && e.expose) && !c.money_error) await db.update("contracts", `id=eq.${c.id}&money_error=is.null`, { money_error: (CHECK_FAILED + String(e && e.message || e)).slice(0, 300) }).catch(() => {});
+    throw e;
+  }
+  if (String(c.money_error || "").startsWith(CHECK_FAILED)) await db.update("contracts", `id=eq.${c.id}&money_error=like.${q(CHECK_FAILED.trim())}*`, { money_error: null }).catch(() => {});
   return acct;
 }
 // Keep the existing charge/payout restrictions and explicitly require the capability
