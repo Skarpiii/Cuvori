@@ -517,6 +517,8 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments are paused at the moment. Nothing was charged. Please try again later.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys') && await unpaid(),"payments paused at Fund: plain words, without the technical reason meant for the owner, and nothing is paid");
   await fundWith([429,{error:"Too many tries in a short time. Please wait a minute and try again.",code:"too_many_tries"}]);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries in a short time. Nothing was charged. Please wait a minute and try again.")) && await unpaid(),"too many Fund tries in a minute: the client is asked to wait a minute and told nothing was charged");
+  await fundWith([429,{error:"Too many tries today. Please try again tomorrow.",code:"too_many_today"}]);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries today. Nothing was charged. Please try again tomorrow.")) && await unpaid(),"too many Fund tries in a day: the client is asked to try again tomorrow and told nothing was charged");
   await p.evaluate(()=>document.querySelector('[data-lang="lt"]').click());
   await fundWith(PAUSED);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Mokėjimai šiuo metu sustabdyti. Nieko nebuvo nuskaičiuota. Pabandykite vėliau.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys'),"payments paused, client using Cuvori in Lithuanian: told in Lithuanian");
