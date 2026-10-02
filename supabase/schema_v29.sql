@@ -7,6 +7,8 @@
 --
 --   * The stripe_* settings (stripe_mode and the two remembered accounts) are no longer admin-panel settings: they are
 --     changed only here in Supabase.
+--   * The remembered accounts are not public. The other settings stay readable as before, but visitors and members
+--     (admins too) cannot see which Stripe account Cuvori uses: only the payment functions and you in Supabase can.
 --   * select public.stripe_platform_switch();  — the deliberate move to another Stripe account (SETUP.md, "Moving to
 --     another Stripe account"). It refuses while any Order still holds money paid in through the current account. It
 --     sets every freelancer's saved Stripe accounts aside in their history (never deleted) so each of them sets up
@@ -25,6 +27,17 @@ begin
   return 'ok';
 end $$;
 grant execute on function public.admin_set_setting(text, jsonb) to authenticated;
+
+-- the remembered Stripe accounts are hidden from everyone who reads settings through the API (the payment functions
+-- read them with the service key, which these rules do not limit)
+drop policy if exists "settings are readable" on public.site_settings;
+create policy "settings are readable" on public.site_settings for select to anon, authenticated
+  using (key not in ('stripe_platform_test', 'stripe_platform_live'));
+create or replace function public.setting(p_key text)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select value from public.site_settings where key = p_key and key not in ('stripe_platform_test', 'stripe_platform_live');
+$$;
+grant execute on function public.setting(text) to anon, authenticated;
 
 create or replace function public.stripe_platform_switch()
 returns text language plpgsql security definer set search_path = public as $$
@@ -61,5 +74,8 @@ revoke execute on function public.stripe_platform_switch() from public, anon, au
 select case when pg_get_functiondef('public.admin_set_setting(text,jsonb)'::regprocedure) like '%remembered Stripe accounts: only in Supabase%'
              and exists (select 1 from pg_proc where proname = 'stripe_platform_switch' and pronamespace = 'public'::regnamespace)
              and not has_function_privilege('authenticated', 'public.stripe_platform_switch()', 'execute')
-            then 'v29 applied: Cuvori remembers which Stripe account its keys belong to'
+             and exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'site_settings'
+                           and policyname = 'settings are readable' and qual like '%stripe_platform_test%')
+             and pg_get_functiondef('public.setting(text)'::regprocedure) like '%stripe_platform_test%'
+            then 'v29 applied: Cuvori remembers which Stripe account its keys belong to; visitors and members cannot see it'
             else 'v29 NOT applied' end as result;
