@@ -436,6 +436,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>{ window.__mockEscrow=true; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(400);
   await p.goto(url+'#settings'); await p.waitForTimeout(300); await p.click('.snav[data-set="payout"]'); await p.waitForTimeout(200);
   ok(await p.locator('#stripeBox').isVisible() && (await p.textContent('#stripeBox')).includes('Not connected'),'freelancer sees Stripe box: not connected');
+  // a problem on Cuvori's side: the freelancer reads it in plain words in their language, with the ref, never the server's own text
+  await p.evaluate(()=>{ window.__mockFnFail={"stripe-connect":[500,{error:"Something went wrong (ref 9f8e7d6c)",code:"server_error",ref:"9f8e7d6c"}]}; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('#stripeConnectBtn');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Something went wrong on Cuvori's side. Please try again in a few minutes. (ref 9f8e7d6c)")) && !(await p.textContent('#toastWrap')).includes('Nothing was charged') && (await p.textContent('#stripeBox')).includes('Not connected'),"a problem on Cuvori's side at Payout details: plain words with the ref, the Stripe box unchanged");
+  await p.evaluate(()=>{ window.__mockFnFail=null; });
   await p.click('#stripeConnectBtn'); await p.waitForTimeout(1200);
   ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'after Stripe onboarding: ready');
   const newOrder=async(title,price,extra)=>{ await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#home'); await p.waitForTimeout(500); await p.click('#contactList .contact'); await p.waitForTimeout(800); await p.click('.chat-window .open-contract'); await p.waitForTimeout(700); await p.fill('#oTitle',title); await p.fill('#oPrice',String(price)); await p.fill('#oScope','As discussed'); if(extra) await extra(); await p.click('#oSend'); await p.waitForTimeout(900); await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); };
@@ -497,6 +502,22 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('[data-caction="fund"]');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This freelancer can't receive payments right now, so this Order can't be paid. Nothing was charged.")) && await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='accepted' && !c.funded_cents; }),"a freelancer banned after the Order was accepted: Fund is refused in the client's language, and nothing is paid");
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.profiles.find(x=>x.id===c.editor).banned=false; });
+  // a problem on Cuvori's side, or payments paused (for example the wrong Stripe keys): the client reads it in plain words in
+  // their language, with the ref, never the technical sentence meant for the owner, and is told nothing was charged
+  const unpaid=()=>db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='accepted' && !c.funded_cents; });
+  const SERVER=[500,{error:"Something went wrong (ref 1a2b3c4d)",code:"server_error",ref:"1a2b3c4d"}];
+  const PAUSED=[503,{error:"Payments are paused: the Stripe keys are for live mode, but the database is set to test mode.",code:"payments_paused"}];
+  const fundWith=async(fail)=>{ await p.evaluate((f)=>{ window.__mockFnFail={"stripe-checkout":f}; document.querySelector('#toastWrap').innerHTML=''; },fail); await p.click('[data-caction="fund"]'); };
+  await fundWith(SERVER);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Something went wrong on Cuvori's side. Nothing was charged. Please try again in a few minutes. (ref 1a2b3c4d)")) && await unpaid(),"a problem on Cuvori's side at Fund: the client is told in plain words, with the ref, that nothing was charged");
+  await fundWith(PAUSED);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments are paused at the moment. Nothing was charged. Please try again later.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys') && await unpaid(),"payments paused at Fund: plain words, without the technical reason meant for the owner, and nothing is paid");
+  await p.evaluate(()=>document.querySelector('[data-lang="lt"]').click());
+  await fundWith(PAUSED);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Mokėjimai šiuo metu sustabdyti. Nieko nebuvo nuskaičiuota. Pabandykite vėliau.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys'),"payments paused, client using Cuvori in Lithuanian: told in Lithuanian");
+  await fundWith(SERVER);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Cuvori pusėje kažkas nepavyko. Nieko nebuvo nuskaičiuota. Pabandykite dar kartą po kelių minučių. (kodas 1a2b3c4d)")),"a problem on Cuvori's side, client using Cuvori in Lithuanian: told in Lithuanian, with the ref");
+  await p.evaluate(()=>{ window.__mockFnFail=null; document.querySelector('[data-lang="en"]').click(); });
   // a stale page: the Order was paid meanwhile (another tab). Fund is refused in the page's language and the Order reloads without the button
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='funded'; c.funded_cents=c.amount_cents; });
   await p.click('[data-caction="fund"]');
@@ -617,7 +638,14 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   await p.goto(url+'#account'); await p.waitForTimeout(400); await p.click('#adminBtn'); await p.waitForTimeout(600); await p.click('.admin-tab[data-atab="contracts"]'); await p.waitForTimeout(600);
   ok((await p.textContent('#adminBody')).includes('Dispute by client') && (await p.textContent('#adminBody')).includes('not what we agreed') && (await p.textContent('#adminBody')).includes('held €850'),'admin sees the dispute, the reason and what is still held');
-  await p.locator('.admin-row.is-banned [data-res="split"]').click(); await p.waitForTimeout(300); await p.fill('#resPct','70'); await p.fill('#resNote','Work delivered, minor issues'); await p.click('#resGo'); await p.waitForTimeout(800);
+  await p.locator('.admin-row.is-banned [data-res="split"]').click(); await p.waitForTimeout(300); await p.fill('#resPct','70'); await p.fill('#resNote','Work delivered, minor issues');
+  // payments paused while the admin decides: plain words, and the admin also sees the technical reason so they know what to fix
+  const stBefore=await db(()=>window.__mockdb.contracts.at(-1).status);
+  await p.evaluate(()=>{ window.__mockFnFail={"stripe-resolve":[503,{error:"Payments are paused: the Stripe keys are for live mode, but the database is set to test mode.",code:"payments_paused"}]}; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('#resGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments are paused at the moment. Please try again later. — Admin: Payments are paused: the Stripe keys are for live mode, but the database is set to test mode.")) && await db(()=>window.__mockdb.contracts.at(-1).status)===stBefore,'payments paused while the admin decides a dispute: plain words plus the technical reason for the admin, and nothing moved');
+  await p.evaluate(()=>{ window.__mockFnFail=null; });
+  await p.click('#resGo'); await p.waitForTimeout(800);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); const s=window.__fakeStripe; return c.status==='completed' && s.transfers.at(-1).amount===59500 && s.refunds.at(-1).amount===25500 && c.released_cents===25000+59500 && c.refunded_cents===25500; }),'admin split 70/30 of the €850 still held; the €250 already released stays released');
   ok(await db(()=>window.__mockdb.messages.some(m=>m.body&&m.body.startsWith('Cuvori decision'))),'decision note posted to chat');
   // cancellation: before funding either side walks away; after funding the freelancer can give the money back
