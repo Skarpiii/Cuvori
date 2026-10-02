@@ -4,7 +4,9 @@
 // automatically, and keys of the other mode never move money (the database says which mode it belongs to).
 // M1–M5: keys and database in different modes say "paused" even with nothing saved; a saved account that belongs to someone
 // else (or a live account Stripe says is gone) is noted for the admin; a payment is never taken in the wrong mode, also
-// when the database was switched a moment ago; old "Stripe check" notes on unpaid Orders leave after a day.
+// when the database was switched a moment ago; old "Stripe check failed" notes on unpaid Orders leave after a day.
+// N1–N5: every Order remembers the mode its money was paid in; a payment recorded while test/live is being switched goes
+// back to the card; an Order's money never moves with the other mode's keys; the newest note replaces the check's own.
 // K1–K4: only Stripe's precise "account gone" answers mean "the freelancer is not ready"; a problem on Cuvori's side says
 // "something went wrong", is noted on the Order for the admin in plain words (never Stripe's own text, which can name
 // Cuvori's Stripe account or end with part of its key) and cleared once it works again; and Cuvori remembers which
@@ -285,8 +287,39 @@ if (!LIVE) {
     const paidIn = mk({ status: "funded", funded_cents: 10000, money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 9c9c9c9c)", money_error_at: old });
     await call(fx.autoRelease, req("POST", "x", {}));
     const st = (o) => o.money_error ? "kept" : "gone";
-    vuln(a.money_error || b.money_error || !k.money_error || !other.money_error || !paidIn.money_error,
-      `M5 the hourly run -> unpaid Order, note over a day old: ${st(a)}; unpaid, a note from before notes had a time: ${st(b)}; unpaid, an hour old: ${st(k)}; another kind of note: ${st(other)}; a paid Order: ${st(paidIn)} (only the first two may go)`);
+    const legacy = mk({ money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 3c4d5e6f)", money_error_at: null });
+    await call(fx.autoRelease, req("POST", "x", {}));
+    vuln(a.money_error || legacy.money_error || !b.money_error || !k.money_error || !other.money_error || !paidIn.money_error,
+      `M5 the hourly run -> unpaid Order, "check failed" over a day old: ${st(a)}; from before notes had a time: ${st(legacy)}; "account needs a check" (needs a person): ${st(b)}; an hour old: ${st(k)}; another kind of note: ${st(other)}; a paid Order: ${st(paidIn)} (only the first two may go)`);
+  }
+
+  // ---------- N1: a funded Order remembers the mode its money was paid in ----------
+  {
+    const c = mk(); await fund(fx, c);
+    vuln(c.status !== "funded" || c.paid_mode !== "test", `N1 a client pays an Order in test mode -> Order ${c.status}, paid in ${c.paid_mode} mode (must say test)`);
+  }
+  // ---------- N2: test and live switched while a payment is being recorded: it goes back to the card, the Order stays unpaid ----------
+  {
+    const c = mk(); await fundIt(c);
+    const s = pay(c.stripe_checkout_id);
+    hooks.db = async (method, table, search, body) => { if (method === "PATCH" && table === "contracts" && String(body || "").includes('"status":"funded"') && hooks.db) { DB.site_settings.find(x => x.key === "stripe_mode").value = "live"; hooks.db = null; } return null; };
+    const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
+    reset(); setMode("test");
+    const back = STRIPE.refunds.filter(r => r.payment_intent === s.payment_intent).reduce((a, r) => a + r.amount, 0);
+    vuln(c.status !== "accepted" || c.funded_cents || back <= 0, `N2 the owner switches to live while a test payment is being recorded -> webhook ${w.status}; Order ${c.status}, paid in ${c.funded_cents || 0}; given back to the card: ${back} (must be unpaid, the money back)`);
+  }
+  // ---------- N5: the newest note replaces the check's own older one (current reason and time), never another note ----------
+  {
+    const c = mk({ money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 1a2b3c4d)" });
+    const notMine = () => { STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed2.id; }, mine = () => { STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed.id; };
+    notMine(); const r = await fundIt(c); mine();
+    vuln(r.status !== 409 || !NEEDED.test(c.money_error || ""), `N5 an older "Stripe did not answer" note, and now the saved account isn't the freelancer's -> Fund ${r.status}; the note: ${c.money_error} (must give the newer reason)`);
+    const before = c.money_error;
+    notMine(); await fundIt(c); mine();
+    vuln(!NEEDED.test(c.money_error || "") || c.money_error === before, `N5 the same problem again -> the note is renewed (new ref, so its time is current): ${c.money_error !== before}`);
+    const d = mk({ money_error: "top-up pi_x may not be recorded — check by hand" });
+    notMine(); await fundIt(d); mine();
+    vuln(d.money_error !== "top-up pi_x may not be recorded — check by hand", `N5 an Order with another kind of note keeps it -> ${d.money_error}`);
   }
 
   // ---------- the live-mode part: the same file with live keys ----------
@@ -357,6 +390,20 @@ if (!LIVE) {
     vuln(r.status !== 409 || !NEEDED.test(c.money_error || ""), `L6 Stripe can't find the freelancer's live account, the client clicks Fund -> ${r.status}; note for the admin: ${c.money_error}`);
     const ok = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
     vuln(ok.status !== 200 || c.money_error, `L6 once the live account is found again -> Fund ${ok.status}; the note is gone: ${!c.money_error}`);
+  }
+  // ---------- N3: live keys never pay out an Order whose money was paid in test mode ----------
+  {
+    const c = mk({ status: "delivered", funded_cents: 10000, stripe_payment_intent: "pi_testmodeAAAAAAAA", paid_mode: "test" });
+    const n0 = STRIPE.transfers.length;
+    const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status !== 409 || (r.json && r.json.code) !== "other_mode" || STRIPE.transfers.length !== n0, `N3 live keys, an Order paid in test mode, the client clicks Approve & release -> ${r.status} ${r.json && r.json.code}; transfers made: ${STRIPE.transfers.length - n0} (must be none)`);
+  }
+  // ---------- N4: and take no real top-up into it ----------
+  {
+    const c = mk({ status: "funded", funded_cents: 5000, amount_cents: 10000, stripe_payment_intent: "pi_testmodeBBBBBBBB", paid_mode: "test" });
+    const pages = Object.keys(STRIPE.sessions).length;
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status !== 409 || (r.json && r.json.code) !== "other_mode" || Object.keys(STRIPE.sessions).length !== pages, `N4 live keys, the client pays the agreed increase on an Order paid in test mode -> ${r.status} ${r.json && r.json.code}; payment page made: ${Object.keys(STRIPE.sessions).length !== pages}`);
   }
 }
 

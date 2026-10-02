@@ -142,7 +142,16 @@ globalThis.fetch = async (url, init = {}) => {
     // like the real database: text holding half an emoji (a lone surrogate) is refused, never stored
     if ((method === "POST" || method === "PATCH") && body) { const bad = (v) => typeof v === "string" ? !v.isWellFormed() : v && typeof v === "object" ? Object.values(v).some(bad) : false; if (bad(JSON.parse(body))) return res(400, { code: "22P05", message: "unsupported Unicode escape sequence" }); }
     if (method === "GET") return res(200, rows.filter(r => match(r, f)));
-    if (method === "PATCH") { const patch = JSON.parse(body); const o = rows.filter(r => match(r, f)); o.forEach(r => Object.assign(r, patch)); return res(200, o); }
+    if (method === "PATCH") { const patch = JSON.parse(body); const o = rows.filter(r => match(r, f));
+      // like the database (schema v32): money is recorded on an Order only in the mode the database is in, never mixed
+      if (table === "contracts" && patch.paid_mode) {
+        const dbMode = (DB.site_settings.find(r => r.key === "stripe_mode") || {}).value === "live" ? "live" : "test";
+        for (const r of o) {
+          if (r.paid_mode && r.paid_mode !== patch.paid_mode) return res(400, { code: "P0001", message: "stripe_mode_mixed" });
+          if ((r.paid_mode !== patch.paid_mode || (patch.funded_cents || 0) > (r.funded_cents || 0)) && patch.paid_mode !== dbMode) return res(400, { code: "P0001", message: "stripe_mode_changed" });
+        }
+      }
+      o.forEach(r => Object.assign(r, patch)); return res(200, o); }
     if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); if (table === "payout_details" && rows.some(r => r.id === row.id)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"payout_details_pkey\"" }); if (table === "site_settings" && rows.some(r => r.key === row.key)) return String((init.headers || {}).Prefer || "").includes("ignore-duplicates") ? res(201, []) : res(409, { code: "23505", message: "duplicate key value violates unique constraint \"site_settings_pkey\"" }); rows.push(row); return res(201, [row]); }
     if (method === "DELETE") { const keep = rows.filter(r => !match(r, f)); const gone = rows.length - keep.length; rows.length = 0; rows.push(...keep); return res(200, []); }
   }
