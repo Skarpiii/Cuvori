@@ -93,6 +93,14 @@ export const safe = (fn) => async (req, ctx) => corsContext.run({ origin: null }
 // code: a short name the page shows in the person's language (fnPlain in index.html); the message stays for the owner
 export const fail = (msg, status = 409, code) => { const e = new Error(msg); e.expose = true; e.status = status; if (code) e.code = code; return e; };
 const PAUSED = "payments_paused";
+// An Order's money only moves in the mode it was paid in (schema v32 records it): money paid with test cards is never
+// paid out, refunded or pulled back with live keys, and the other way round. The database refuses to record a payment
+// in the other mode too (MODE_REFUSED: then the payment goes back to the card).
+const MODE_REFUSED = /stripe_mode_(changed|mixed)/;
+export function sameMode(c) {
+  if (c && c.paid_mode && STRIPE_MODE && c.paid_mode !== STRIPE_MODE)
+    throw fail(`This Order was paid in ${c.paid_mode} mode, so its money cannot move with the ${STRIPE_MODE} keys. Cuvori support needs to look at it.`, 409, "other_mode");
+}
 const SETTLING = "The card payment is still settling at the payment provider. Cuvori retries this every hour; nothing needs to be done.";
 const NOT_READY = "The freelancer's Stripe account is not ready to receive money. Once they finish their Stripe setup, Cuvori retries this every hour.";
 const CHARGEBACK = "A card chargeback is open on this payment. Nothing can move until the bank decides.";
@@ -408,6 +416,13 @@ export async function payoutAccount(editorId, why = {}) {
 // and Stripe's text can name Cuvori's Stripe account or show the end of its key. The full error goes to the Netlify
 // function log under the ref the note gives, and only the owner sees that log.
 const CHECK_FAILED = "Stripe check failed: ", CHECK_NEEDED = "Stripe account check: ";
+const ownNote = (c) => [CHECK_FAILED, CHECK_NEEDED].find(p => String(c.money_error || "").startsWith(p));
+// written over an empty note or over this check's own older note (its time and reason then stay current), never over another
+async function writeCheckNote(c, text) {
+  const mine = ownNote(c);
+  if (c.money_error && !mine) return;
+  await db.update("contracts", `id=eq.${c.id}&${mine ? `money_error=like.${q(mine.trim())}*` : "money_error=is.null"}`, { money_error: text }).catch(() => {});
+}
 function checkNote(e) {
   const s = e && e.status;
   if (e && e.network) return "Stripe did not answer";
@@ -430,7 +445,7 @@ export async function orderPayoutAccount(c) {
       const ref = crypto.randomUUID().slice(0, 8);
       try { e.ref = ref; } catch {}                // "Something went wrong (ref …)" then shows the same ref as the note
       console.error("Stripe check failed", ref, "order", c.id, e && e.stack || e);
-      if (!c.money_error) await db.update("contracts", `id=eq.${c.id}&money_error=is.null`, { money_error: `${CHECK_FAILED}${checkNote(e)} (Netlify log ref ${ref})` }).catch(() => {});
+      await writeCheckNote(c, `${CHECK_FAILED}${checkNote(e)} (Netlify log ref ${ref})`);
     }
     throw e;
   }
@@ -438,11 +453,11 @@ export async function orderPayoutAccount(c) {
     // the client is told the freelancer isn't ready; this tells you, because only you can sort it out
     const ref = crypto.randomUUID().slice(0, 8);
     console.error("Stripe account needs a check", ref, "order", c.id, "freelancer", c.editor, why.reason);
-    if (!c.money_error) await db.update("contracts", `id=eq.${c.id}&money_error=is.null`, { money_error: `${CHECK_NEEDED}the freelancer's Stripe account needs a check by hand (Netlify log ref ${ref})` }).catch(() => {});
+    await writeCheckNote(c, `${CHECK_NEEDED}the freelancer's Stripe account needs a check by hand (Netlify log ref ${ref})`);
     return acct;
   }
   // the check works again: its own note goes (only that one, never another note)
-  const mine = [CHECK_FAILED, CHECK_NEEDED].find(p => String(c.money_error || "").startsWith(p));
+  const mine = ownNote(c);
   if (mine) await db.update("contracts", `id=eq.${c.id}&money_error=like.${q(mine.trim())}*`, { money_error: null }).catch(() => {});
   return acct;
 }
@@ -457,6 +472,7 @@ export async function transfersOf(c) { const r = await stripe("GET", "/transfers
 export async function releaseToEditor(c, editorCents, milestoneId = null, purpose = "release") {
   if (!Number.isInteger(editorCents) || editorCents <= 0) throw new Error("bad release amount");
   if (purpose === "release" && editorCents > heldCents(c)) throw new Error("bad release amount");
+  sameMode(c);
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
   // a transfer for the same milestone / the same settlement attempt is never made twice. Whole-order releases carry
   // the attempt (the decision's timestamp): a later, different decision on the same Order may transfer again.
@@ -501,6 +517,7 @@ const OURS = (r) => !!(r.metadata && (r.metadata.contract_id || r.metadata.reaso
 export const FEE_REFUND = (r) => !!(r && r.metadata && r.metadata.kind === "fee_surplus");
 export async function refundToClient(c, cents) {
   if (!Number.isInteger(cents) || cents <= 0) throw new Error("bad refund amount");
+  sameMode(c);
   if (chargebackOpen(c)) throw fail(CHARGEBACK);
   const funds = await fundRows(c);
   const sources = funds.length ? funds.map(f => ({ pi: f.provider_ref, amount: f.amount_cents })).reverse() : (c.stripe_payment_intent ? [{ pi: c.stripe_payment_intent, amount: nz(c.funded_cents) || centsOf(c) || 0 }] : []);
@@ -533,6 +550,7 @@ export async function refundToClient(c, cents) {
 }
 // Take money back from the freelancer's account (a chargeback after a release). Newest transfers first.
 export async function reverseTransfers(c, cents, why) {
+  sameMode(c);
   const ts = (await transfersOf(c)).filter(t => t.amount - nz(t.amount_reversed) > 0).sort((a, b) => (b.created || 0) - (a.created || 0));
   let left = cents; const ids = [];
   for (const t of ts) {
@@ -692,6 +710,7 @@ async function holdRefusal(s) {
   const amount = Number(md.amount_cents), fee = Number(md.fee_cents);
   if (!Number.isInteger(amount) || amount <= 0 || !Number.isInteger(fee) || fee < 0 || s.amount_total !== amount + fee) return "amounts do not match";
   if (chargebackOpen(c)) return "a chargeback is open";
+  if (c.paid_mode && c.paid_mode !== STRIPE_MODE) return `the order was paid in ${c.paid_mode} mode`;
   if (await isBanned(c.editor)) return "the freelancer cannot receive payments";
   if (kind === "fund") {
     if (c.status !== "accepted" || c.stripe_payment_intent) return `order is ${c.status}`;
@@ -726,6 +745,7 @@ async function chargeHold(s) {
   if (p.status !== "requires_capture") return "unpaid";
   const why = await holdRefusal(s);
   if (why) return releaseHold(s, why);
+  await checkStripeMode(true);                          // right before the card is charged: test or live asked once more
   try { await moneyPost(`capture:${s.payment_intent}`, `/payment_intents/${s.payment_intent}/capture`, {}); }
   catch (e) { const now = await holdState(s.payment_intent); if (now) return now; throw e; }
   return "charged";
@@ -779,7 +799,8 @@ export async function applyPaidSession(s) {
   const bt = charge && charge.balance_transaction && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
   let u;
   if (kind === "fund") {
-    u = await db.claim(id, ["accepted"], { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee });
+    try { u = await db.claim(id, ["accepted"], { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, paid_mode: STRIPE_MODE }); }
+    catch (e) { if (MODE_REFUSED.test(String(e && e.message))) return refundOrphan(s, "test and live were switched while this payment came in"); throw e; }
     if (!u) {
       const now = await db.contract(id);
       if (now && now.stripe_payment_intent === s.payment_intent) return "already";   // concurrent duplicate delivery won the claim
@@ -816,11 +837,16 @@ export async function applyPaidSession(s) {
         if (i) cur = await db.contract(id);
         if (!cur || !["funded", "delivered"].includes(cur.status)) break;
         if (amount > Math.max((centsOf(cur) || 0) - nz(cur.funded_cents), 0)) break;     // no longer owed (paid another way meanwhile)
-        const rows = await db.update("contracts", `id=eq.${id}&status=in.(funded,delivered)&funded_cents=eq.${nz(cur.funded_cents)}`, { funded_cents: nz(cur.funded_cents) + amount })
-          .catch(async (e) => { e.outcomeUnknown = true; await db.update("contracts", `id=eq.${id}`, { money_error: `top-up ${s.payment_intent} may not be recorded — check by hand` }).catch(() => {}); throw e; });
+        const rows = await db.update("contracts", `id=eq.${id}&status=in.(funded,delivered)&funded_cents=eq.${nz(cur.funded_cents)}`, { funded_cents: nz(cur.funded_cents) + amount, paid_mode: STRIPE_MODE })
+          .catch(async (e) => {
+            if (MODE_REFUSED.test(String(e && e.message))) { e.modeRefused = true; throw e; }      // nothing was recorded: the payment goes back
+            e.outcomeUnknown = true; await db.update("contracts", `id=eq.${id}`, { money_error: `top-up ${s.payment_intent} may not be recorded — check by hand` }).catch(() => {}); throw e; });
         u = rows && rows[0] || null;
       }
-    } catch (e) { if (!e.outcomeUnknown) await dropKey(scope); throw e; }                // nothing was changed: the next delivery starts over
+    } catch (e) {
+      if (e.modeRefused) { await dropKey(scope); return refundOrphan(s, "test and live were switched while this payment came in"); }
+      if (!e.outcomeUnknown) await dropKey(scope); throw e;                              // nothing was changed: the next delivery starts over
+    }
     if (!u) { await dropKey(scope); return refundOrphan(s, `top-up no longer applies (order is ${cur && cur.status})`); }   // the refund has its own key
     // the ledger line is the record other deliveries wait for: written right away, and a failure is not silent
     try { await db.insert("order_payments", ledgerRow); }
