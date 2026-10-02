@@ -84,7 +84,9 @@ export const safe = (fn) => async (req, ctx) => corsContext.run({ origin: null }
   try { return await fn(req, ctx); }
   catch (e) {
     if (e && e.expose) return bad(e.message, e.status || 409);
-    const ref = crypto.randomUUID().slice(0, 8); console.error("fn error", ref, e && e.stack || e);
+    // the same ref as a note written on the Order for this error (orderPayoutAccount), so the person's message and the note match
+    const ref = e && typeof e.ref === "string" && /^[0-9a-f]{8}$/.test(e.ref) ? e.ref : crypto.randomUUID().slice(0, 8);
+    console.error("fn error", ref, e && e.stack || e);
     return bad(`Something went wrong (ref ${ref})`, 500);
   }
 });
@@ -197,10 +199,13 @@ function requireServiceKey() {
 async function sbFetch(path, init = {}) {
   requireServiceKey();
   const auth = SERVICE_KEY.startsWith("sb_secret_") ? {} : { Authorization: `Bearer ${SERVICE_KEY}` };
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, { ...init, signal: AbortSignal.timeout(8000), headers: { apikey: SERVICE_KEY, ...auth, "content-type": "application/json", Prefer: init.prefer || "return=representation", ...(init.headers || {}) } });
-  const text = await r.text();
+  let r, text;
+  try {
+    r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, { ...init, signal: AbortSignal.timeout(8000), headers: { apikey: SERVICE_KEY, ...auth, "content-type": "application/json", Prefer: init.prefer || "return=representation", ...(init.headers || {}) } });
+    text = await r.text();
+  } catch (e) { try { e.db = true; } catch {} throw e; }       // marked as the database's, so a note can say so (checkNote)
   let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!r.ok) { const e = new Error((data && data.message) || `Supabase ${r.status}`); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error((data && data.message) || `Supabase ${r.status}`); e.status = r.status; e.db = true; throw e; }
   return data;
 }
 const q = encodeURIComponent;
@@ -371,12 +376,34 @@ export async function payoutAccount(editorId) {
 // The same for an Order. A problem on Cuvori's side is written on the Order, so the admin panel shows it under "Needs a
 // hand" — never over another note — and the note goes once the check works again. Cuvori's own clear refusals
 // (payments paused, not configured) are not written: everyone is shown those already.
+// The note says in plain words what went wrong, never Stripe's own text: both people on the Order can read its notes,
+// and Stripe's text can name Cuvori's Stripe account or show the end of its key. The full error goes to the Netlify
+// function log under the ref the note gives, and only the owner sees that log.
 const CHECK_FAILED = "Stripe check failed: ";
+function checkNote(e) {
+  const s = e && e.status;
+  if (e && e.network) return "Stripe did not answer";
+  if (e && e.stripe) {
+    if (s === 401) return "Stripe refused Cuvori's secret key";
+    if (s === 403) return "Cuvori's Stripe key is missing a permission";
+    if (s === 429) return "Stripe was busy (too many requests)";
+    if (s >= 500) return "Stripe had a problem on its side";
+    return "Stripe refused the request";
+  }
+  if (e && e.outcomeUnknown) return "Stripe's answer could not be read";
+  if (e && e.db) return "Cuvori's database had a problem";
+  return "something unexpected went wrong";
+}
 export async function orderPayoutAccount(c) {
   let acct;
   try { acct = await payoutAccount(c.editor); }
   catch (e) {
-    if (!(e && e.expose) && !c.money_error) await db.update("contracts", `id=eq.${c.id}&money_error=is.null`, { money_error: (CHECK_FAILED + String(e && e.message || e)).slice(0, 300) }).catch(() => {});
+    if (!(e && e.expose)) {
+      const ref = crypto.randomUUID().slice(0, 8);
+      try { e.ref = ref; } catch {}                // "Something went wrong (ref …)" then shows the same ref as the note
+      console.error("Stripe check failed", ref, "order", c.id, e && e.stack || e);
+      if (!c.money_error) await db.update("contracts", `id=eq.${c.id}&money_error=is.null`, { money_error: `${CHECK_FAILED}${checkNote(e)} (Netlify log ref ${ref})` }).catch(() => {});
+    }
     throw e;
   }
   if (String(c.money_error || "").startsWith(CHECK_FAILED)) await db.update("contracts", `id=eq.${c.id}&money_error=like.${q(CHECK_FAILED.trim())}*`, { money_error: null }).catch(() => {});
