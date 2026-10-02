@@ -160,7 +160,7 @@ if (!LIVE) {
   {
     const c = mk(); const pages = Object.keys(STRIPE.sessions).length;
     hooks.stripe = keyProblem; const r = await fundIt(c); reset();
-    vuln(r.status !== 500 || /Stripe setup/.test(r.json && r.json.error || "") || c.money_error !== `Stripe check failed: Cuvori's Stripe key is missing a permission (Netlify log ref ${refOf(c.money_error)})`
+    vuln(r.status !== 500 || (r.json && r.json.code) === "freelancer_not_ready" || c.money_error !== `Stripe check failed: Cuvori's Stripe key is missing a permission (Netlify log ref ${refOf(c.money_error)})`
       || leaks(c.money_error) || !inLog(c.money_error, "required permissions") || Object.keys(STRIPE.sessions).length !== pages
       || (r.json && r.json.error) !== `Something went wrong (ref ${refOf(c.money_error)})` || (r.json && r.json.code) !== "server_error" || (r.json && r.json.ref) !== refOf(c.money_error),
       `K1 Cuvori's own key can't read Stripe accounts, the client clicks Fund -> ${r.status} ${r.json && r.json.error}; note for the admin: ${c.money_error}; Stripe's full text in the log under that ref: ${inLog(c.money_error, "required permissions")} (must be "Something went wrong" with the note's ref, never "ask the freelancer", no Stripe page, a plain note without Stripe's text)`);
@@ -171,7 +171,7 @@ if (!LIVE) {
     vuln(c2.money_error !== "top-up pi_x may not be recorded — check by hand", `K1 an Order that already has a note for the admin keeps it -> ${c2.money_error}`);
     const c3 = mk();
     hooks.stripe = gone403(ORIGINAL); const g = await fundIt(c3); reset();
-    vuln(g.status !== 409 || !/Stripe setup under Account/.test(g.json && g.json.error || "") || c3.money_error, `K1 Stripe confirms the freelancer's account is gone -> ${g.status} ${g.json && g.json.error}; no note: ${!c3.money_error}`);
+    vuln(g.status !== 409 || (g.json && g.json.code) !== "freelancer_not_ready" || !/Payout details under Settings/.test(g.json && g.json.error || "") || c3.money_error, `K1 Stripe confirms the freelancer's account is gone -> ${g.status} ${g.json && g.json.error} (${g.json && g.json.code}); no note: ${!c3.money_error}`);
     for (const [name, hook, says] of [
       ["Stripe not answering", (path) => { if (path === `/accounts/${ORIGINAL}`) throw new Error("network down"); return null; }, "Stripe did not answer"],
       ["a Stripe outage (500)", (path) => path === `/accounts/${ORIGINAL}` ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null, "Stripe had a problem on its side"],
@@ -209,6 +209,25 @@ if (!LIVE) {
       `K2 the hourly automatic release with Cuvori's key problem -> reason in the log: ${why && why.why}; note on the Order: ${d.money_error}`);
     await call(fx.autoRelease, req("POST", "x", {}));
     vuln(d.status !== "completed" || d.money_error, `K2 once fixed, the next hourly run pays out -> Order ${d.status}, note gone: ${!d.money_error}`);
+  }
+  // ---------- K5: the page's "ready" mark follows what Stripe says, so the Fund button and the refusal agree ----------
+  // The page shows the Fund button by the database's mark (editor_can_receive). Stripe normally keeps it current through the
+  // account webhook; when that update never arrived, the check at Fund puts it right, in the mode's own column only.
+  {
+    const c = mk(); const pages = Object.keys(STRIPE.sessions).length;
+    STRIPE.accounts[ORIGINAL].payouts_enabled = false; row().stripe_payouts_enabled = true; row().stripe_live_payouts_enabled = true;
+    const r = await fundIt(c);
+    vuln(r.status !== 409 || (r.json && r.json.code) !== "freelancer_not_ready" || row().stripe_payouts_enabled !== false || row().stripe_live_payouts_enabled !== true || Object.keys(STRIPE.sessions).length !== pages || c.money_error,
+      `K5 Stripe stopped the freelancer's payouts, the webhook never came, the client clicks Fund -> ${r.status} ${r.json && r.json.code}; test mark now ${row().stripe_payouts_enabled}, live mark untouched: ${row().stripe_live_payouts_enabled === true}; no Stripe page: ${Object.keys(STRIPE.sessions).length === pages}; no note: ${!c.money_error}`);
+    STRIPE.accounts[ORIGINAL].payouts_enabled = true;                 // Stripe is happy again, the mark still says no
+    const ok = await fundIt(c);
+    vuln(ok.status !== 200 || row().stripe_payouts_enabled !== true, `K5 once Stripe allows payouts again -> Fund ${ok.status}; the mark follows: ${row().stripe_payouts_enabled}`);
+    // the write names the freelancer and the very account the check looked at, so an account saved a moment later keeps its own mark
+    const other = newAccount({ payouts_enabled: false }); const saved = row().stripe_account_id; row().stripe_account_id = other;
+    const n0 = urls.length; await fundIt(mk());
+    const writes = urls.slice(n0).filter(u => u.startsWith("PATCH ") && u.includes("/payout_details?")).map(u => decodeURIComponent(u));
+    row().stripe_account_id = saved; row().stripe_payouts_enabled = true; delete row().stripe_live_payouts_enabled;
+    vuln(writes.length !== 1 || !writes[0].includes(`id=eq.${users.ed.id}`) || !writes[0].includes(`stripe_account_id=eq.${other}`), `K5 the mark is written for the freelancer and the account the check looked at only -> ${writes.length ? writes.join(" | ") : "no write"}`);
   }
   // ---------- K3: Cuvori remembers which Stripe account its keys belong to ----------
   {
