@@ -117,9 +117,9 @@ let modeSeen = { mode: null, at: 0 };
 let keyPlatform = null;                         // the Stripe account these keys belong to: asked once, it never changes for a key
 let platformSeen = { id: null, at: 0 };
 export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; keyPlatform = null; platformSeen = { id: null, at: 0 }; };
-async function checkStripeMode() {
+async function checkStripeMode(fresh = false) {
   if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503, PAUSED);
-  if (!modeSeen.mode || Date.now() - modeSeen.at > 60e3) {
+  if (fresh || !modeSeen.mode || Date.now() - modeSeen.at > 60e3) {
     const row = await db.one("site_settings", "key=eq.stripe_mode&select=value");
     modeSeen = { mode: row ? String(row.value) : "test", at: Date.now() };
   }
@@ -262,20 +262,22 @@ export async function userFromRequest(req) {
 export const isBanned = async (uid) => { const p = await db.one("profiles", `id=eq.${uid}&select=banned`); return !p || !!p.banned; };
 
 // How often one person may make a payment function ask Stripe. Stripe takes only so many requests a second from Cuvori
-// as a whole (25 a second for one kind, such as checking a freelancer's account); without a limit, one person or a small
-// script pressing a button over and over could use it all, and Stripe would then refuse Cuvori for everyone — nobody
-// could pay, and payouts would wait. Past the limit the person is asked to wait a minute and Stripe is not asked at all.
-// Normal use never comes close. Counted in the database (schema v30), so every running copy of a function shares one count.
-export const TRY_WINDOW_S = 60;
-export async function limitTries(me, kind, max = 10) {
-  let ok;
-  try { ok = await db.rpc("rate_limit_for", { p_user: me.id, p_kind: kind, p_max: max, p_seconds: TRY_WINDOW_S }); }
+// as a whole (25 a second for one kind, such as checking a freelancer's account), and only so many checks a month
+// (at least 10,000; more as payments grow). Without a limit, one person or a small script pressing a button over and over
+// could use it all, and Stripe would then refuse Cuvori for everyone — nobody could pay, and payouts would wait. Past the
+// limit the person is asked to wait (a minute, or until tomorrow) and Stripe is not asked at all. Normal use never comes
+// close. Counted in the database (schema v31), so every running copy of a function shares one count.
+export async function limitTries(me, kind, perMinute = 10, perDay = 50) {
+  let r;
+  try { r = await db.rpc("rate_limit_tries", { p_user: me.id, p_kind: kind, p_per_minute: perMinute, p_per_day: perDay }); }
   catch (e) {
-    // schema v30 not run yet: payments keep working without the limit, and the log says what is missing
-    if (e && e.status === 404) { console.error("the limit on tries is not set up yet: run supabase/schema_v30.sql", e.message); return; }
+    // schema v31 not run yet: payments keep working without the limit, and the log says what is missing
+    if (e && e.status === 404) { console.error("the limit on tries is not set up yet: run supabase/schema_v31.sql", e.message); return; }
     throw e;
   }
-  if (ok !== true) throw fail("Too many tries in a short time. Please wait a minute and try again.", 429, "too_many_tries");
+  if (r === "ok") return;
+  if (r === "day") throw fail("Too many tries today. Please try again tomorrow.", 429, "too_many_today");
+  throw fail("Too many tries in a short time. Please wait a minute and try again.", 429, "too_many_tries");
 }
 
 // ---- the price the client pays: from the fee table in the database, never a number in code ----
@@ -384,12 +386,19 @@ export async function lookupAccount(id) {
 // Editor's connected account of the current mode, verified against Stripe (not just the DB row). null = not ready:
 // none saved, Stripe confirms it is gone, or it is not this freelancer's. Anything else (Cuvori's key not allowed to
 // read accounts, Stripe not answering) throws, so nobody is told to fix a setup that is fine.
-export async function payoutAccount(editorId) {
+// The mode and Stripe-account checks come first, so keys and database in different modes (or keys of another Stripe
+// account) always say "payments are paused" — also for a freelancer with nothing saved yet in the keys' mode.
+// why.reason says when a person has to look: a live account Stripe says is gone (only Cuvori can sort that out), or a
+// saved account that belongs to someone else.
+export async function payoutAccount(editorId, why = {}) {
+  await checkStripeMode();
+  await checkStripePlatform();
   const col = acctCols();
   const p = await db.one("payout_details", `id=eq.${editorId}&select=${col.id}`);
   if (!p || !isAcct(p[col.id])) return null;
   const acct = await lookupAccount(p[col.id]);
-  if (!acct || !acct.metadata || acct.metadata.cuvori_user !== editorId) return null;
+  if (!acct) { if (col.mode === "live") why.reason = "Stripe says the saved live account is gone"; return null; }
+  if (!acct.metadata || acct.metadata.cuvori_user !== editorId) { why.reason = "the saved Stripe account belongs to someone else"; return null; }
   return acct;
 }
 // The same for an Order. A problem on Cuvori's side is written on the Order, so the admin panel shows it under "Needs a
@@ -398,7 +407,7 @@ export async function payoutAccount(editorId) {
 // The note says in plain words what went wrong, never Stripe's own text: both people on the Order can read its notes,
 // and Stripe's text can name Cuvori's Stripe account or show the end of its key. The full error goes to the Netlify
 // function log under the ref the note gives, and only the owner sees that log.
-const CHECK_FAILED = "Stripe check failed: ";
+const CHECK_FAILED = "Stripe check failed: ", CHECK_NEEDED = "Stripe account check: ";
 function checkNote(e) {
   const s = e && e.status;
   if (e && e.network) return "Stripe did not answer";
@@ -414,8 +423,8 @@ function checkNote(e) {
   return "something unexpected went wrong";
 }
 export async function orderPayoutAccount(c) {
-  let acct;
-  try { acct = await payoutAccount(c.editor); }
+  let acct; const why = {};
+  try { acct = await payoutAccount(c.editor, why); }
   catch (e) {
     if (!(e && e.expose)) {
       const ref = crypto.randomUUID().slice(0, 8);
@@ -425,7 +434,16 @@ export async function orderPayoutAccount(c) {
     }
     throw e;
   }
-  if (String(c.money_error || "").startsWith(CHECK_FAILED)) await db.update("contracts", `id=eq.${c.id}&money_error=like.${q(CHECK_FAILED.trim())}*`, { money_error: null }).catch(() => {});
+  if (why.reason) {
+    // the client is told the freelancer isn't ready; this tells you, because only you can sort it out
+    const ref = crypto.randomUUID().slice(0, 8);
+    console.error("Stripe account needs a check", ref, "order", c.id, "freelancer", c.editor, why.reason);
+    if (!c.money_error) await db.update("contracts", `id=eq.${c.id}&money_error=is.null`, { money_error: `${CHECK_NEEDED}the freelancer's Stripe account needs a check by hand (Netlify log ref ${ref})` }).catch(() => {});
+    return acct;
+  }
+  // the check works again: its own note goes (only that one, never another note)
+  const mine = [CHECK_FAILED, CHECK_NEEDED].find(p => String(c.money_error || "").startsWith(p));
+  if (mine) await db.update("contracts", `id=eq.${c.id}&money_error=like.${q(mine.trim())}*`, { money_error: null }).catch(() => {});
   return acct;
 }
 // Keep the existing charge/payout restrictions and explicitly require the capability
@@ -723,6 +741,9 @@ export async function dropHold(s) {
 
 export async function applyPaidSession(s) {
   if (!s || (s.mode !== undefined && s.mode !== "payment")) return "ignored";
+  // test and live never mix: right before a payment is taken or counted, the database's mode is asked again, not the
+  // answer from up to a minute ago (on launch day the database may have just been switched)
+  await checkStripeMode(true);
   if (s.payment_status !== "paid") {
     // a hold (or a page not paid yet): charged only if the Order can still take it, otherwise released
     if (s.status !== "complete" || !isPi(s.payment_intent)) return "unpaid";     // async methods: wait for async_payment_succeeded
