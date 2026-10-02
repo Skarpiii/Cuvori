@@ -1,7 +1,7 @@
 // POST { contract_id } (freelancer) — give a funded Order back: everything still held goes back to the
 // client. A client who wants out after funding asks the freelancer (or opens a dispute); money never
 // moves on one side's say-so in the other direction.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, orderEvent, chargebackOpen, cut, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, limitTries, heldCents, orderEvent, chargebackOpen, cut, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -9,6 +9,7 @@ export default safe(async (req) => {
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
+  await limitTries(me, "pay_cancel");          // at most about 10 tries a minute: nobody can use up Stripe's limit for everyone
   const { contract_id: id, note } = await readJson(req);
   const c = await db.contract(id);
   if (!c || c.editor !== me.id) return bad("Not your order", 403);

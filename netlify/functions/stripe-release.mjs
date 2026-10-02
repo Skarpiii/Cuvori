@@ -1,5 +1,5 @@
 // POST { contract_id, milestone_id? } (client) — "Approve & release". Whole Order, or one milestone.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, releaseMilestone, readJson, safe, isBanned, heldCents, owedCents, closeCheckout, moneyUnchanged, MIN_TOPUP_CENTS, orderPayoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, releaseMilestone, readJson, safe, isBanned, limitTries, heldCents, owedCents, closeCheckout, moneyUnchanged, MIN_TOPUP_CENTS, orderPayoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -7,6 +7,7 @@ export default safe(async (req) => {
   const me = await userFromRequest(req);
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
+  await limitTries(me, "pay_release");        // at most about 10 tries a minute: nobody can use up Stripe's limit for everyone
   const { contract_id: id, milestone_id } = await readJson(req);
   const c = await db.contract(id);
   if (!c || c.client !== me.id) return bad("Not your order", 403);

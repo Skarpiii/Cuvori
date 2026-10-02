@@ -3,7 +3,7 @@
 // other one is never read, changed or removed, so switching the keys (on launch day, or by mistake and back) loses
 // nothing. The only thing that ever sets a saved account aside is Stripe confirming it is gone, and only in test mode;
 // it then moves to the history, never deleted. A live account is never replaced automatically.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, safe, isAcct, acctCols, lookupAccount } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, safe, isAcct, acctCols, lookupAccount, limitTries } from "../lib/cuvori.mjs";
 
 const BROKEN = "Stripe connection is broken, contact support";
 const CHANGED = "Your Stripe setup changed a moment ago. Reload the page and try again.";
@@ -15,6 +15,8 @@ export default safe(async (req) => {
   if (!me) return bad("Sign in first", 401);
   if (me.banned) return bad("Account suspended", 403);
   if (me.role !== "editor") return bad("Only professionals can receive payouts", 403);
+  // the Payout details box asks for the status each time it opens, so that one may be asked a little more often
+  await limitTries(me, req.method === "GET" ? "pay_connect_status" : "pay_connect", req.method === "GET" ? 30 : 10);
 
   const col = acctCols();
   const payout = await db.one("payout_details", `id=eq.${me.id}&select=id,${col.id},${col.ready},stripe_account_history`);

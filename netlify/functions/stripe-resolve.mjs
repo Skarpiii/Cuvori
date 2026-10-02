@@ -1,13 +1,14 @@
 // POST { contract_id, decision, editor_percent, note } — admin only. Hardened copy.
 // Decides a dispute (release / refund / split), and can take over a release that got stuck before any
 // transfer was made (freelancer's account closed, for example) so the client is not left waiting for ever.
-import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, heldCents, chargebackOpen, transfersOf, lockOrder, cut, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, settle, readJson, safe, limitTries, heldCents, chargebackOpen, transfersOf, lockOrder, cut, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
   if (!escrowEnabled()) return bad("Escrow payments are not configured yet", 503);
   const me = await userFromRequest(req);
   if (!me || !me.is_admin || me.banned) return bad("Admins only", 403);
+  await limitTries(me, "pay_resolve");         // at most about 10 tries a minute: nobody can use up Stripe's limit for everyone
   const body = await readJson(req);
   const decision = body.decision;
   if (!["release", "refund", "split"].includes(decision)) return bad("decision must be release, refund or split");
