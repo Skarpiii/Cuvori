@@ -839,3 +839,59 @@ select t.try('client','accepts an older +€20,000 increase that takes a paid �
 -- the old contract functions (still in the database, no longer used by the page) keep the same limit
 select t.try('editor','creates a €960,000 Order through the old contract function', t.u('207'), $$select public.propose_contract('10000000-0000-0000-0000-000000000023', 'Old way', 'x', 960000, 'project', null, 2, 'escrow')::text$$, $$select $1 is not null$$);
 select t.try('editor','creates a €900,000 Order through the old contract function (normal)', t.u('207'), $$select public.propose_contract('10000000-0000-0000-0000-000000000023', 'Old way', 'x', 900000, 'project', null, 2, 'escrow')::text$$, $$select $1 is not null$$, 'allow');
+
+-- ---------- v28: a freelancer's Stripe account is kept separately for test and live ----------
+-- only the payment functions write these columns; a member cannot connect, "ready" or rewrite them for herself
+select t.try('editor','saves a live Stripe account to herself', t.u('201'), $$with x as (update public.payout_details set stripe_live_account_id = 'acct_1EMILEMILEMIL' where id = auth.uid() returning 1) select count(*) from x$$,
+  $$select (select stripe_live_account_id from public.payout_details where id = t.u('201')) is not null$$);
+select t.try('editor','marks herself "ready for live payouts" without Stripe', t.u('201'), $$with x as (update public.payout_details set stripe_live_payouts_enabled = true where id = auth.uid() returning 1) select count(*) from x$$,
+  $$select (select stripe_live_payouts_enabled from public.payout_details where id = t.u('201'))$$);
+select t.try('editor','rewrites her Stripe account history', t.u('202'), $$with x as (update public.payout_details set stripe_account_history = '[{"id":"acct_1FAKEFAKEFAKE"}]' where id = auth.uid() returning 1) select count(*) from x$$,
+  $$select jsonb_array_length((select stripe_account_history from public.payout_details where id = t.u('202'))) > 0$$);
+select t.try('editor','still saves her payout methods (normal)', t.u('201'), $$with x as (update public.payout_details set note = 'v28 note', updated_at = now() where id = auth.uid() returning 1) select count(*)::text from x$$,
+  $$select $1 = '1'$$, 'allow');
+-- the launch-day switch is not an admin-panel setting
+select t.try('admin','switches the database to live mode from the admin panel', t.u('401'), $$select public.admin_set_setting('stripe_mode', '"live"')$$,
+  $$select $1 = 'ok' or (select value from public.site_settings where key = 'stripe_mode') = '"live"'::jsonb$$);
+select t.try('admin','still changes other settings (normal)', t.u('401'), $$select public.admin_set_setting('review_window_days', '14')$$, $$select $1 = 'ok'$$, 'allow');
+select t.try('visitor','reads which Stripe mode the database is in (normal: test until launch day)', null, $$select public.stripe_mode()$$, $$select $1 = 'test'$$, 'allow');
+-- the Fund button and the "verified" badge follow the account of the current mode, never the other mode's
+create or replace function t.set_stripe(uid uuid, test_ready boolean, live_acct text, live_ready boolean) returns void language sql security definer as $$
+  update public.payout_details set stripe_payouts_enabled = test_ready, stripe_live_account_id = live_acct, stripe_live_payouts_enabled = live_ready where id = uid;
+$$;
+create or replace function t.set_stripe_mode(m text) returns void language sql security definer as $$
+  update public.site_settings set value = to_jsonb(m) where key = 'stripe_mode';
+$$;
+grant execute on function t.set_stripe(uuid, boolean, text, boolean), t.set_stripe_mode(text) to authenticated;
+create or replace function t.f_stripe_modes() returns text language plpgsql as $$
+declare r text := '';
+begin
+  perform t.set_stripe(t.u('202'), true, null, false);                                    -- set up with Stripe's test data only
+  r := r || public.editor_can_receive(t.u('202')) || '/' || public.is_verified(t.u('202'));
+  perform t.set_stripe_mode('live');                                                      -- launch day
+  r := r || '|' || public.editor_can_receive(t.u('202')) || '/' || public.is_verified(t.u('202'));
+  perform t.set_stripe(t.u('202'), true, 'acct_1LIVELIVELIVE', true);                     -- the freelancer set up live payouts for real
+  r := r || '|' || public.editor_can_receive(t.u('202')) || '/' || public.is_verified(t.u('202'));
+  perform t.set_stripe(t.u('202'), false, 'acct_1LIVELIVELIVE', true);                    -- the test account changing does not matter in live mode
+  r := r || '|' || public.editor_can_receive(t.u('202')) || '/' || public.is_verified(t.u('202'));
+  perform t.set_stripe_mode('test');                                                      -- and back in test mode the test account counts again
+  r := r || '|' || public.editor_can_receive(t.u('202')) || '/' || public.is_verified(t.u('202'));
+  return r;
+end $$;
+grant execute on function t.f_stripe_modes() to authenticated;
+select t.try('client','sees Fund and "verified" from the account of the current Stripe mode only (normal)', t.u('101'), $$select t.f_stripe_modes()$$,
+  $$select $1 = 'true/true|false/false|true/true|true/true|false/false'$$, 'allow');
+-- a live account is recorded for bad-actor matching like a test one, and a malformed one is refused
+create or replace function t.put_live_acct(uid uuid, acct text) returns text language sql security definer as $$
+  update public.payout_details set stripe_live_account_id = acct where id = uid returning stripe_live_account_id;
+$$;
+grant execute on function t.put_live_acct(uuid, text) to authenticated;
+create or replace function t.f_live_identifier() returns text language plpgsql security definer as $$
+begin
+  perform t.put_live_acct(t.u('202'), 'acct_1LIVEIDENTIFY1');
+  return (select count(*)::text from public.user_identifiers where user_id = t.u('202') and kind = 'stripe_account'
+            and value_hash = encode(extensions.digest(public.norm_identifier('acct_1LIVEIDENTIFY1'), 'sha256'), 'hex'));
+end $$;
+grant execute on function t.f_live_identifier() to authenticated;
+select t.try('admin','a saved live Stripe account is recorded for bad-actor matching (normal)', t.u('401'), $$select t.f_live_identifier()$$, $$select $1 = '1'$$, 'allow');
+select t.try('server','saves a malformed live Stripe account ID', t.u('401'), $$select t.put_live_acct(t.u('202'), 'acct_1x/../../charges')$$, $$select $1 is not null$$);
