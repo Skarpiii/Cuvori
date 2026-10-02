@@ -1,7 +1,7 @@
 // Shared fakes for the payment-function attack suites: a small Stripe (with the rules that bite in
 // production — idempotency, transfer caps per source charge, refund caps per payment, disputes,
 // balance), a small Supabase REST, and helpers to sign webhooks.
-process.env.STRIPE_SECRET_KEY = "sk_test_fake"; process.env.SUPABASE_SERVICE_ROLE_KEY = "service_fake"; process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake"; process.env.SITE_URL = "https://cuvori.test"; process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://tnxujwlfatcvxzevllfr.supabase.co";
+process.env.STRIPE_SECRET_KEY = process.env.HARNESS_STRIPE_KEY || "sk_test_fake"; process.env.SUPABASE_SERVICE_ROLE_KEY = "service_fake"; process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake"; process.env.SITE_URL = "https://cuvori.test"; process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://tnxujwlfatcvxzevllfr.supabase.co";
 import crypto from "node:crypto";
 export const F = (process.env.TARGET || new URL("..", import.meta.url).pathname.replace(/\/$/, "")) + "/netlify/functions/";
 export const uuid = () => crypto.randomUUID();
@@ -9,7 +9,7 @@ const U = (role, extra = {}) => ({ id: uuid(), email: role + "@t.com", first_nam
 export const users = { ed: U("ed"), cl: U("cl"), adm: U("adm", { is_admin: true }), ed2: U("ed2"), cl2: U("cl2") };
 export const tokens = { tok_ed: users.ed, tok_cl: users.cl, tok_adm: users.adm, tok_ed2: users.ed2, tok_cl2: users.cl2 };
 export const conv = uuid();
-export const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [],
+export const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [], site_settings: [],
   payout_details: [{ id: users.ed.id, methods: [], note: "", stripe_account_id: "acct_1EditorAAAAAAAA", stripe_payouts_enabled: true },
                    { id: users.ed2.id, methods: [], note: "", stripe_account_id: "acct_1SecondBBBBBBBB", stripe_payouts_enabled: true }] };
 export const STRIPE = { sessions: {}, charges: {}, intents: {}, transfers: [], refunds: [], reversals: [], disputes: {}, idem: new Map(), balance: 0, settleDelay: false,
@@ -130,7 +130,7 @@ globalThis.fetch = async (url, init = {}) => {
     if ((method === "POST" || method === "PATCH") && body) { const bad = (v) => typeof v === "string" ? !v.isWellFormed() : v && typeof v === "object" ? Object.values(v).some(bad) : false; if (bad(JSON.parse(body))) return res(400, { code: "22P05", message: "unsupported Unicode escape sequence" }); }
     if (method === "GET") return res(200, rows.filter(r => match(r, f)));
     if (method === "PATCH") { const patch = JSON.parse(body); const o = rows.filter(r => match(r, f)); o.forEach(r => Object.assign(r, patch)); return res(200, o); }
-    if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); rows.push(row); return res(201, [row]); }
+    if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); if (table === "payout_details" && rows.some(r => r.id === row.id)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"payout_details_pkey\"" }); rows.push(row); return res(201, [row]); }
     if (method === "DELETE") { const keep = rows.filter(r => !match(r, f)); const gone = rows.length - keep.length; rows.length = 0; rows.push(...keep); return res(200, []); }
   }
   throw new Error("unexpected fetch " + url);

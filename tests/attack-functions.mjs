@@ -15,7 +15,7 @@ const U = (role, extra = {}) => ({ id: uuid(), email: role + "@t.com", first_nam
 const users = { ed: U("ed"), cl: U("cl"), adm: U("adm", { is_admin: true }), ed2: U("ed2"), ed3: U("ed3") };
 const tokens = { tok_ed: users.ed, tok_cl: users.cl, tok_adm: users.adm, tok_ed2: users.ed2, tok_ed3: users.ed3 };
 const conv = uuid();
-const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [],
+const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [], site_settings: [],
   payout_details: [{ id: users.ed.id, methods: [], note: "", stripe_account_id: "acct_1EditorAAAAAAAA", stripe_payouts_enabled: true },
                    { id: users.ed2.id, methods: [], note: "", stripe_account_id: "acct_1VictimBBBBBBBB", stripe_payouts_enabled: true }] };
 const STRIPE = { sessions: {}, transfers: [], refunds: [], idem: new Map(), accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
