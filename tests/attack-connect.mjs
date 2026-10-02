@@ -132,7 +132,7 @@ if (!LIVE) {
     const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
     const g = await connect("GET");
     const stripeCalls = urls.slice(n0).filter(u => u.includes("api.stripe.com")).length;
-    vuln(r.status !== 503 || !/Payments are paused/.test(r.json && r.json.error || "") || g.status !== 503 || Object.keys(STRIPE.sessions).length !== pages || stripeCalls,
+    vuln(r.status !== 503 || !/Payments are paused/.test(r.json && r.json.error || "") || (r.json && r.json.code) !== "payments_paused" || (g.json && g.json.code) !== "payments_paused" || g.status !== 503 || Object.keys(STRIPE.sessions).length !== pages || stripeCalls,
       `C9 test keys, database in live mode -> Fund ${r.status} ${r.json && r.json.error}; Payout details ${g.status}; Stripe calls made: ${stripeCalls} (must be paused, none)`);
     setMode("test");
     const ok = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: mk().id } }));
@@ -157,7 +157,7 @@ if (!LIVE) {
     hooks.stripe = keyProblem; const r = await fundIt(c); reset();
     vuln(r.status !== 500 || /Stripe setup/.test(r.json && r.json.error || "") || c.money_error !== `Stripe check failed: Cuvori's Stripe key is missing a permission (Netlify log ref ${refOf(c.money_error)})`
       || leaks(c.money_error) || !inLog(c.money_error, "required permissions") || Object.keys(STRIPE.sessions).length !== pages
-      || (r.json && r.json.error) !== `Something went wrong (ref ${refOf(c.money_error)})`,
+      || (r.json && r.json.error) !== `Something went wrong (ref ${refOf(c.money_error)})` || (r.json && r.json.code) !== "server_error" || (r.json && r.json.ref) !== refOf(c.money_error),
       `K1 Cuvori's own key can't read Stripe accounts, the client clicks Fund -> ${r.status} ${r.json && r.json.error}; note for the admin: ${c.money_error}; Stripe's full text in the log under that ref: ${inLog(c.money_error, "required permissions")} (must be "Something went wrong" with the note's ref, never "ask the freelancer", no Stripe page, a plain note without Stripe's text)`);
     const again = await fundIt(c);
     vuln(again.status !== 200 || c.money_error, `K1 once Cuvori's key works again -> Fund ${again.status}; the note is gone: ${!c.money_error}`);
@@ -214,7 +214,7 @@ if (!LIVE) {
     const pages = Object.keys(STRIPE.sessions).length, accounts = Object.keys(STRIPE.accounts).length, before = snap();
     const f = await fundIt(mk());
     const g = await connect("GET"), p = await connect("POST");
-    vuln(f.status !== 503 || !/belong to a different Stripe account/.test(f.json && f.json.error || "") || g.status !== 503 || p.status !== 503
+    vuln(f.status !== 503 || !/belong to a different Stripe account/.test(f.json && f.json.error || "") || (f.json && f.json.code) !== "payments_paused" || g.status !== 503 || p.status !== 503
       || Object.keys(STRIPE.sessions).length !== pages || Object.keys(STRIPE.accounts).length !== accounts || snap() !== before || rec() !== was,
       `K3 keys of a different Stripe account -> Fund ${f.status} ${f.json && f.json.error}; Payout details ${g.status}/${p.status}; nothing changed: ${snap() === before && Object.keys(STRIPE.accounts).length === accounts}; still remembers ${rec()}`);
     // the owner confirms the move in Supabase (stripe_platform_switch): the new account is remembered, payments work again
@@ -279,7 +279,7 @@ if (!LIVE) {
     const n0 = urls.length;
     const f = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: mk().id } }));
     const stripeCalls = urls.slice(n0).filter(u => u.includes("api.stripe.com")).length;
-    vuln(f.status !== 503 || !/Payments are paused: the Stripe keys are for live mode, but the database is set to test mode/.test(f.json && f.json.error || "") || stripeCalls,
+    vuln(f.status !== 503 || !/Payments are paused: the Stripe keys are for live mode, but the database is set to test mode/.test(f.json && f.json.error || "") || (f.json && f.json.code) !== "payments_paused" || stripeCalls,
       `L4 live keys, database still in test mode (launch-day step not done) -> Fund ${f.status} ${f.json && f.json.error}; Stripe calls: ${stripeCalls}`);
   }
 }
