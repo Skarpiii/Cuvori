@@ -70,7 +70,9 @@ export default safe(async (req) => {
   // freelancer finished their Stripe setup, not whether they were banned after the Order was accepted)
   if (await isBanned(c.editor)) return json(409, { error: "This freelancer cannot receive payments", code: "freelancer_unavailable" });
   const acct = await orderPayoutAccount(c);      // Stripe confirming the account is gone = not ready; a problem on Cuvori's side stops here, noted on the Order
-  if (!accountReady(acct)) return bad("The freelancer's Stripe account can't receive payments right now. Ask them to finish or update their Stripe setup under Account → Payout details.", 409);
+  // code: the page says it in the client's language. The page shows the Fund button by the database's "ready" mark, which
+  // the check above has just brought in line with Stripe, so after a reload the button is gone and the page says why.
+  if (!accountReady(acct)) return json(409, { error: "The freelancer's Stripe account can't receive payments right now. Ask them to check Payout details under Settings on Cuvori.", code: "freelancer_not_ready" });
 
   // The card fee is charged at a rate that covers even the most expensive cards (the fee table's "unknown country" row), the same for everyone,
   // and the same number the page showed. Nothing the client declares can lower it. Once the payment is made,
