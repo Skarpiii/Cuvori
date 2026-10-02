@@ -941,3 +941,34 @@ do $$ declare v text; begin
     coalesce(v, '') = 'stripe_platform_live=acct_1PLATFORMLIVEAA,stripe_platform_test=acct_1PLATFORMTESTAA', 'returned: ' || coalesce(v, 'nothing'));
 end $$;
 delete from public.site_settings where key in ('stripe_platform_test', 'stripe_platform_live');
+
+-- ---------- v30: a limit on how often one person can make Cuvori ask Stripe ----------
+select t.try('visitor','uses the limit on tries meant for the payment functions', null, $$select public.rate_limit_for(t.u('101'), 'pay_checkout', 10, 60)::text$$, $$select $1 is not null$$);
+select t.try('client','resets their own count of tries', t.u('101'), $$select public.rate_limit_for(t.u('101'), 'pay_checkout', 1000, 1)::text$$, $$select $1 is not null$$);
+select t.try('client','reads everyone''s counts of tries', t.u('101'), $$select count(*)::text from public.rate_events$$, $$select $1 is not null$$);
+-- as the payment functions (the service role): ten tries a minute, the eleventh refused; other people and other buttons
+-- unaffected; it lifts by itself after the minute
+do $$ declare got text := ''; i int; u1 uuid := t.u('101'); u2 uuid := t.u('102'); begin
+  execute 'set local role service_role';
+  for i in 1..11 loop got := got || case when public.rate_limit_for(u1, 'pay_checkout', 10, 60) then 'y' else 'n' end; end loop;
+  got := got || '|' || case when public.rate_limit_for(u2, 'pay_checkout', 10, 60) then 'y' else 'n' end;
+  got := got || '|' || case when public.rate_limit_for(u1, 'pay_release', 10, 60) then 'y' else 'n' end;
+  execute 'reset role';
+  update public.rate_events set at = at - interval '61 seconds' where user_id = u1 and kind = 'pay_checkout';
+  execute 'set local role service_role';
+  got := got || '|' || case when public.rate_limit_for(u1, 'pay_checkout', 10, 60) then 'y' else 'n' end;
+  execute 'reset role';
+  insert into t.results (grp, name, ok, detail) values ('server', 'the payment functions: ten tries a minute, the eleventh refused; other people and other buttons unaffected; it lifts after the minute (normal)',
+    got = 'yyyyyyyyyyn|y|y|y', 'returned: ' || got);
+end $$;
+-- odd input is refused, never counted as a pass
+do $$ declare refused int := 0; u1 uuid := t.u('101'); begin
+  execute 'set local role service_role';
+  begin perform public.rate_limit_for(null, 'pay_checkout', 10, 60); exception when others then refused := refused + 1; end;
+  begin perform public.rate_limit_for(u1, 'DROP TABLE', 10, 60); exception when others then refused := refused + 1; end;
+  begin perform public.rate_limit_for(u1, 'pay_checkout', 0, 60); exception when others then refused := refused + 1; end;
+  begin perform public.rate_limit_for(u1, 'pay_checkout', 10, 0); exception when others then refused := refused + 1; end;
+  execute 'reset role';
+  insert into t.results (grp, name, ok, detail) values ('server', 'odd input to the limit on tries is refused', refused = 4, 'refused ' || refused || ' of 4');
+end $$;
+delete from public.rate_events where kind like 'pay\_%';
