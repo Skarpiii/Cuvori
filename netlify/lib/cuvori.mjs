@@ -402,11 +402,16 @@ export async function payoutAccount(editorId, why = {}) {
   await checkStripeMode();
   await checkStripePlatform();
   const col = acctCols();
-  const p = await db.one("payout_details", `id=eq.${editorId}&select=${col.id}`);
+  const p = await db.one("payout_details", `id=eq.${editorId}&select=${col.id},${col.ready}`);
   if (!p || !isAcct(p[col.id])) return null;
   const acct = await lookupAccount(p[col.id]);
   if (!acct) { if (col.mode === "live") why.reason = "Stripe says the saved live account is gone"; return null; }
   if (!acct.metadata || acct.metadata.cuvori_user !== editorId) { why.reason = "the saved Stripe account belongs to someone else"; return null; }
+  // The "ready" mark the page shows the Fund button by follows what Stripe just said (the same rule as Payout details and
+  // the account webhook use), so a Stripe update that never arrived cannot leave a Fund button that always ends in
+  // "can't receive payments". Only this saved account's mark, and only when it differs; a failure here changes nothing else.
+  const ready = !!(acct.payouts_enabled && acct.charges_enabled);
+  if (ready !== !!p[col.ready]) await db.update("payout_details", `id=eq.${editorId}&${col.id}=eq.${p[col.id]}`, { [col.ready]: ready }).catch(() => {});
   return acct;
 }
 // The same for an Order. A problem on Cuvori's side is written on the Order, so the admin panel shows it under "Needs a
