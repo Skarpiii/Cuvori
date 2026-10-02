@@ -2,6 +2,9 @@
 // safeguards around setting one aside: only when Stripe confirms it is gone, only in test mode, only while it is still
 // the saved one, kept in the history, with a fresh retry key for a genuinely new account. Live mode is never replaced
 // automatically, and keys of the other mode never move money (the database says which mode it belongs to).
+// M1–M5: keys and database in different modes say "paused" even with nothing saved; a saved account that belongs to someone
+// else (or a live account Stripe says is gone) is noted for the admin; a payment is never taken in the wrong mode, also
+// when the database was switched a moment ago; old "Stripe check" notes on unpaid Orders leave after a day.
 // K1–K4: only Stripe's precise "account gone" answers mean "the freelancer is not ready"; a problem on Cuvori's side says
 // "something went wrong", is noted on the Order for the admin in plain words (never Stripe's own text, which can name
 // Cuvori's Stripe account or end with part of its key) and cleared once it works again; and Cuvori remembers which
@@ -11,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const LIVE = process.env.HARNESS_STRIPE_KEY === "sk_live_fake";
 const H = await import("./fn-harness.mjs");
-const { DB, STRIPE, users, hooks, urls, req, call, mk, reset, fns, signed, F, fund, past, onlyDue } = H;
+const { DB, STRIPE, users, hooks, urls, req, call, mk, reset, fns, signed, F, fund, past, onlyDue, pay } = H;
 const lib = await import(F + "../lib/cuvori.mjs");
 const fx = await fns();
 const out = [];
@@ -233,6 +236,58 @@ if (!LIVE) {
     const ok = await fundIt(mk());
     vuln(ok.status !== 200, `K4 once Stripe answers again -> Fund ${ok.status}`);
   }
+  const NEEDED = /^Stripe account check: the freelancer's Stripe account needs a check by hand \(Netlify log ref [0-9a-f]{8}\)$/;
+  // ---------- M1: keys and database in different modes say "paused", even when the freelancer has nothing saved yet ----------
+  {
+    const keep = row().stripe_account_id; row().stripe_account_id = null;
+    setMode("live");
+    const n0 = urls.length;
+    const f = await fundIt(mk());
+    const calls = urls.slice(n0).filter(u => u.includes("api.stripe.com")).length;
+    row().stripe_account_id = keep; setMode("test");
+    vuln(f.status !== 503 || (f.json && f.json.code) !== "payments_paused" || calls,
+      `M1 test keys, database in live mode, the freelancer has nothing saved -> Fund ${f.status} ${f.json && f.json.error}; Stripe calls: ${calls} (must say payments are paused, not "ask the freelancer")`);
+  }
+  // ---------- M2: a saved account that belongs to someone else: the client is told "not ready", the admin gets a note ----------
+  {
+    const c = mk();
+    STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed2.id;
+    const r = await fundIt(c);
+    STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed.id;
+    vuln(r.status !== 409 || !NEEDED.test(c.money_error || "") || leaks(c.money_error), `M2 the saved Stripe account belongs to someone else, the client clicks Fund -> ${r.status}; note for the admin: ${c.money_error}`);
+    const ok = await fundIt(c);
+    vuln(ok.status !== 200 || c.money_error, `M2 once it is sorted out -> Fund ${ok.status}; the note is gone: ${!c.money_error}`);
+  }
+  // ---------- M3: a test account Stripe says is gone is the normal "set up again" case: no note ----------
+  {
+    const c = mk(); hooks.stripe = gone403(ORIGINAL); const r = await fundIt(c); reset();
+    vuln(r.status !== 409 || c.money_error, `M3 a test-mode account Stripe says is gone -> Fund ${r.status}; note: ${c.money_error || "none"} (none: the freelancer just sets up again)`);
+  }
+  // ---------- M4: the database is switched to live a moment before a test payment: the payment is not taken or counted ----------
+  {
+    const c = mk();
+    const f = await fundIt(c);                                         // a payment page made in test mode
+    DB.site_settings.find(x => x.key === "stripe_mode").value = "live";  // the database switched; this copy still remembers "test" (under a minute ago)
+    const s = pay(c.stripe_checkout_id);                               // the client pays with a test card
+    const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: s } })));
+    const hold = STRIPE.intents[s.payment_intent].status;
+    setMode("test");
+    vuln(f.status !== 200 || w.status === 200 || c.status !== "accepted" || c.funded_cents || hold !== "requires_capture",
+      `M4 the database switched to live just before a test payment -> webhook ${w.status}; Order ${c.status}, paid in ${c.funded_cents || 0}; card hold ${hold} (must be neither taken nor counted)`);
+  }
+  // ---------- M5: the hourly run: "Stripe check" notes on unpaid Orders leave after a day, nothing else is touched ----------
+  {
+    const old = new Date(Date.now() - 25 * 3600e3).toISOString(), recent = new Date(Date.now() - 3600e3).toISOString();
+    const a = mk({ money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 1a2b3c4d)", money_error_at: old });
+    const b = mk({ money_error: "Stripe account check: the freelancer's Stripe account needs a check by hand (Netlify log ref 2b3c4d5e)", money_error_at: null });
+    const k = mk({ money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 5e6f7a8b)", money_error_at: recent });
+    const other = mk({ money_error: "top-up pi_x may not be recorded — check by hand", money_error_at: old });
+    const paidIn = mk({ status: "funded", funded_cents: 10000, money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 9c9c9c9c)", money_error_at: old });
+    await call(fx.autoRelease, req("POST", "x", {}));
+    const st = (o) => o.money_error ? "kept" : "gone";
+    vuln(a.money_error || b.money_error || !k.money_error || !other.money_error || !paidIn.money_error,
+      `M5 the hourly run -> unpaid Order, note over a day old: ${st(a)}; unpaid, a note from before notes had a time: ${st(b)}; unpaid, an hour old: ${st(k)}; another kind of note: ${st(other)}; a paid Order: ${st(paidIn)} (only the first two may go)`);
+  }
 
   // ---------- the live-mode part: the same file with live keys ----------
   let liveOut = "";
@@ -281,6 +336,27 @@ if (!LIVE) {
     const stripeCalls = urls.slice(n0).filter(u => u.includes("api.stripe.com")).length;
     vuln(f.status !== 503 || !/Payments are paused: the Stripe keys are for live mode, but the database is set to test mode/.test(f.json && f.json.error || "") || (f.json && f.json.code) !== "payments_paused" || stripeCalls,
       `L4 live keys, database still in test mode (launch-day step not done) -> Fund ${f.status} ${f.json && f.json.error}; Stripe calls: ${stripeCalls}`);
+  }
+  // ---------- L5: the same with a freelancer who has no live account yet: still "paused", never "ask the freelancer" ----------
+  {
+    const keep = row().stripe_live_account_id; row().stripe_live_account_id = null;
+    const n0 = urls.length;
+    const f = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: mk().id } }));
+    const calls = urls.slice(n0).filter(u => u.includes("api.stripe.com")).length;
+    row().stripe_live_account_id = keep;
+    vuln(f.status !== 503 || (f.json && f.json.code) !== "payments_paused" || calls, `L5 live keys, database in test mode, freelancer without a live account -> Fund ${f.status} ${f.json && f.json.error}; Stripe calls: ${calls}`);
+  }
+  // ---------- L6: a live account Stripe says is gone: the client is told "not ready", the admin gets a note ----------
+  {
+    setMode("live");
+    const live = row().stripe_live_account_id, c = mk();
+    hooks.stripe = gone403(live);
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    reset();
+    const NEEDED = /^Stripe account check: the freelancer's Stripe account needs a check by hand \(Netlify log ref [0-9a-f]{8}\)$/;
+    vuln(r.status !== 409 || !NEEDED.test(c.money_error || ""), `L6 Stripe can't find the freelancer's live account, the client clicks Fund -> ${r.status}; note for the admin: ${c.money_error}`);
+    const ok = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(ok.status !== 200 || c.money_error, `L6 once the live account is found again -> Fund ${ok.status}; the note is gone: ${!c.money_error}`);
   }
 }
 

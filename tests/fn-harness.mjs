@@ -16,7 +16,7 @@ export const STRIPE = { platform: "acct_1CuvoriPlatformAA", sessions: {}, charge
   accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
               acct_1SecondBBBBBBBB: { id: "acct_1SecondBBBBBBBB", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
 export const hooks = { stripe: null, db: null, rpc: null };
-// the limit on tries (schema v30): off unless a test turns it on — the other suites press buttons far faster than people do
+// the limit on tries (schema v31): off unless a test turns it on — the other suites press buttons far faster than people do
 export const LIMITS = { strict: false, events: [] };
 export const urls = [];
 const tick = () => new Promise(r => setImmediate(r));
@@ -125,12 +125,15 @@ globalThis.fetch = async (url, init = {}) => {
     if (hooks.rpc) { const h = await hooks.rpc(fn, args); if (h) return res(h[0], h[1]); }
     if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country == null || args.p_country === "US" ? 3.25 : 1.5; /* no country = the ceiling row, what the page and the checkout use */ const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
     if (fn === "expire_jobs") return res(200, 0);
-    if (fn === "rate_limit_for") {                     // like the database function: count this person's tries of this kind in the window
-      if (!LIMITS.strict) return res(200, true);
+    if (fn === "rate_limit_for") return res(200, true);      // the older per-minute-only limit (schema v30): always lets through here
+    if (fn === "rate_limit_tries") {                   // like the database function (schema v31): this person's tries of this kind, per minute and per day
+      if (!LIMITS.strict) return res(200, "ok");
       const now = Date.now(), same = (e) => e.user_id === args.p_user && e.kind === args.p_kind;
-      LIMITS.events = LIMITS.events.filter(e => !(same(e) && e.at < now - args.p_seconds * 1000));
-      if (LIMITS.events.filter(same).length >= args.p_max) return res(200, false);
-      LIMITS.events.push({ user_id: args.p_user, kind: args.p_kind, at: now }); return res(200, true);
+      LIMITS.events = LIMITS.events.filter(e => !(same(e) && e.at < now - 86400e3));
+      const mine = LIMITS.events.filter(same);
+      if (mine.filter(e => e.at >= now - 60e3).length >= args.p_per_minute) return res(200, "minute");
+      if (mine.length >= args.p_per_day) return res(200, "day");
+      LIMITS.events.push({ user_id: args.p_user, kind: args.p_kind, at: now }); return res(200, "ok");
     }
     return res(200, null); }
   if (u.pathname.startsWith("/rest/v1/")) {
