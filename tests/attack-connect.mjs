@@ -3,7 +3,8 @@
 // the saved one, kept in the history, with a fresh retry key for a genuinely new account. Live mode is never replaced
 // automatically, and keys of the other mode never move money (the database says which mode it belongs to).
 // K1–K4: only Stripe's precise "account gone" answers mean "the freelancer is not ready"; a problem on Cuvori's side says
-// "something went wrong", is noted on the Order for the admin and cleared once it works again; and Cuvori remembers which
+// "something went wrong", is noted on the Order for the admin in plain words (never Stripe's own text, which can name
+// Cuvori's Stripe account or end with part of its key) and cleared once it works again; and Cuvori remembers which
 // Stripe account its keys belong to, pausing every payment for keys of another Stripe account.
 // The test-mode part runs here; the file then runs itself again with live keys for the live-mode part.
 import { execFileSync } from "node:child_process";
@@ -139,14 +140,25 @@ if (!LIVE) {
   }
 
   // ---------- K1: Fund: the right reason for the right person ----------
+  // Stripe's own texts as Stripe writes them: they name Cuvori's Stripe account and end with part of the key. Both people
+  // on an Order can read its notes, so a note says in plain words what went wrong; Stripe's text goes to the log only.
   const keyProblem = (path, method) => path === `/accounts/${ORIGINAL}` && method === "GET"
-    ? [403, { error: { type: "invalid_request_error", message: "The provided key 'rk_test_***' does not have the required permissions for this endpoint" } }] : null;
+    ? [403, { error: { type: "invalid_request_error", message: `The provided key 'rk_test_*********************wXyZ' does not have the required permissions for this endpoint on account '${STRIPE.platform}'. Having the 'rak_accounts_kyc_basic_read' permission would allow this request to continue.` } }] : null;
+  const keyRefused = (path, method) => path === `/accounts/${ORIGINAL}` && method === "GET"
+    ? [401, { error: { type: "invalid_request_error", message: "Invalid API Key provided: sk_test_*********************wXyZ" } }] : null;
+  const leaks = (note) => /acct_|sk_|rk_|wXyZ|required permissions|Invalid API Key|10\.0\.3\.7|connection reset/.test(String(note || ""));
+  const refOf = (note) => (String(note || "").match(/ \(Netlify log ref ([0-9a-f]{8})\)$/) || [])[1];
+  const logged = [], realError = console.error;
+  console.error = (...a) => { logged.push(a.map(x => String(x && x.stack || x)).join(" ")); };
+  const inLog = (note, text) => { const ref = refOf(note); return !!ref && logged.some(l => l.includes(ref) && l.includes(text)); };
   const fundIt = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
   {
     const c = mk(); const pages = Object.keys(STRIPE.sessions).length;
     hooks.stripe = keyProblem; const r = await fundIt(c); reset();
-    vuln(r.status !== 500 || /Stripe setup/.test(r.json && r.json.error || "") || !String(c.money_error || "").startsWith("Stripe check failed: ") || !/required permissions/.test(c.money_error) || Object.keys(STRIPE.sessions).length !== pages,
-      `K1 Cuvori's own key can't read Stripe accounts, the client clicks Fund -> ${r.status} ${r.json && r.json.error}; note for the admin: ${c.money_error} (must be "Something went wrong", never "ask the freelancer", no Stripe page)`);
+    vuln(r.status !== 500 || /Stripe setup/.test(r.json && r.json.error || "") || c.money_error !== `Stripe check failed: Cuvori's Stripe key is missing a permission (Netlify log ref ${refOf(c.money_error)})`
+      || leaks(c.money_error) || !inLog(c.money_error, "required permissions") || Object.keys(STRIPE.sessions).length !== pages
+      || (r.json && r.json.error) !== `Something went wrong (ref ${refOf(c.money_error)})`,
+      `K1 Cuvori's own key can't read Stripe accounts, the client clicks Fund -> ${r.status} ${r.json && r.json.error}; note for the admin: ${c.money_error}; Stripe's full text in the log under that ref: ${inLog(c.money_error, "required permissions")} (must be "Something went wrong" with the note's ref, never "ask the freelancer", no Stripe page, a plain note without Stripe's text)`);
     const again = await fundIt(c);
     vuln(again.status !== 200 || c.money_error, `K1 once Cuvori's key works again -> Fund ${again.status}; the note is gone: ${!c.money_error}`);
     const c2 = mk({ money_error: "top-up pi_x may not be recorded — check by hand" });
@@ -155,19 +167,31 @@ if (!LIVE) {
     const c3 = mk();
     hooks.stripe = gone403(ORIGINAL); const g = await fundIt(c3); reset();
     vuln(g.status !== 409 || !/Stripe setup under Account/.test(g.json && g.json.error || "") || c3.money_error, `K1 Stripe confirms the freelancer's account is gone -> ${g.status} ${g.json && g.json.error}; no note: ${!c3.money_error}`);
-    for (const [name, hook] of [["Stripe not answering", (path) => { if (path === `/accounts/${ORIGINAL}`) throw new Error("network down"); return null; }],
-                                ["a Stripe outage (500)", (path) => path === `/accounts/${ORIGINAL}` ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null]]) {
+    for (const [name, hook, says] of [
+      ["Stripe not answering", (path) => { if (path === `/accounts/${ORIGINAL}`) throw new Error("network down"); return null; }, "Stripe did not answer"],
+      ["a Stripe outage (500)", (path) => path === `/accounts/${ORIGINAL}` ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null, "Stripe had a problem on its side"],
+      ["Stripe refusing Cuvori's secret key (401)", keyRefused, "Stripe refused Cuvori's secret key"],
+      ["too many requests (429)", (path) => path === `/accounts/${ORIGINAL}` ? [429, { error: { type: "invalid_request_error", code: "rate_limit", message: "Too many requests" } }] : null, "Stripe was busy (too many requests)"],
+    ]) {
       const c4 = mk(); hooks.stripe = hook; const x = await fundIt(c4); reset();
-      vuln(x.status !== 500 || /Stripe setup/.test(x.json && x.json.error || "") || !String(c4.money_error || "").startsWith("Stripe check failed: "), `K1 ${name}, the client clicks Fund -> ${x.status} ${x.json && x.json.error}; note: ${c4.money_error}`);
+      vuln(x.status !== 500 || (x.json && x.json.error) !== `Something went wrong (ref ${refOf(c4.money_error)})` || c4.money_error !== `Stripe check failed: ${says} (Netlify log ref ${refOf(c4.money_error)})` || leaks(c4.money_error),
+        `K1 ${name}, the client clicks Fund -> ${x.status} ${x.json && x.json.error}; note: ${c4.money_error}`);
     }
+    // Cuvori's database failing while the freelancer's account is read: said plainly, the database's own text is not copied
+    const c5 = mk();
+    hooks.db = async (method, table) => method === "GET" && table === "payout_details" ? new Response(JSON.stringify({ message: "connection reset by peer at 10.0.3.7" }), { status: 503 }) : null;
+    const d5 = await fundIt(c5); reset();
+    vuln(d5.status !== 500 || c5.money_error !== `Stripe check failed: Cuvori's database had a problem (Netlify log ref ${refOf(c5.money_error)})` || leaks(c5.money_error) || !inLog(c5.money_error, "connection reset"),
+      `K1 Cuvori's database failing during the check -> ${d5.status} ${d5.json && d5.json.error}; note: ${c5.money_error}`);
   }
+  console.error = realError;
   // ---------- K2: releases: the real reason on the Order, gone once it is paid out ----------
   {
     const c = mk(); await fund(fx, c); c.status = "delivered";
     hooks.stripe = keyProblem;
     const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
     reset();
-    vuln(r.status !== 500 || !String(c.money_error || "").startsWith("Stripe check failed: ") || c.status !== "delivered",
+    vuln(r.status !== 500 || !String(c.money_error || "").startsWith("Stripe check failed: Cuvori's Stripe key is missing a permission (Netlify log ref ") || leaks(c.money_error) || c.status !== "delivered",
       `K2 Cuvori's key problem, the client clicks Approve & release -> ${r.status} ${r.json && r.json.error}; Order ${c.status}, note: ${c.money_error}`);
     const ok = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
     vuln(ok.status !== 200 || c.status !== "completed" || c.money_error, `K2 once fixed -> release ${ok.status}, Order ${c.status}, note gone: ${!c.money_error}`);
@@ -176,7 +200,7 @@ if (!LIVE) {
     const a = await call(fx.autoRelease, req("POST", "x", {}));
     reset();
     const why = ((a.json && a.json.failures) || []).find(f => f.id === d.id);
-    vuln(!why || !/required permissions/.test(why.why) || !String(d.money_error || "").startsWith("Stripe check failed: ") || d.status !== "delivered",
+    vuln(!why || !/required permissions/.test(why.why) || !String(d.money_error || "").startsWith("Stripe check failed: Cuvori's Stripe key is missing a permission (Netlify log ref ") || leaks(d.money_error) || d.status !== "delivered",
       `K2 the hourly automatic release with Cuvori's key problem -> reason in the log: ${why && why.why}; note on the Order: ${d.money_error}`);
     await call(fx.autoRelease, req("POST", "x", {}));
     vuln(d.status !== "completed" || d.money_error, `K2 once fixed, the next hourly run pays out -> Order ${d.status}, note gone: ${!d.money_error}`);
