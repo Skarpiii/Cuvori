@@ -446,6 +446,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>{ window.__mockFnFail=null; });
   await p.click('#stripeConnectBtn'); await p.waitForTimeout(1200);
   ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'after Stripe onboarding: ready');
+  // the status can't be checked (too many tries today): the box shows the "ready" mark the database keeps, never "not connected"
+  await p.evaluate(()=>{ window.__mockFnFail={"stripe-connect":[429,{error:"Too many tries today. Please try again tomorrow.",code:"too_many_today"}]}; });
+  await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(600);
+  ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'the Payout details status refused for today: the box still says ready (from the database)');
+  await p.evaluate(()=>{ window.__mockFnFail=null; });
   const newOrder=async(title,price,extra)=>{ await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#home'); await p.waitForTimeout(500); await p.click('#contactList .contact'); await p.waitForTimeout(800); await p.click('.chat-window .open-contract'); await p.waitForTimeout(700); await p.fill('#oTitle',title); await p.fill('#oPrice',String(price)); await p.fill('#oScope','As discussed'); if(extra) await extra(); await p.click('#oSend'); await p.waitForTimeout(900); await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); };
   // scenario: fixed-price €500, both accept, client funds, work delivered, approve & release
   await newOrder('Reel edit',500);
@@ -519,6 +524,8 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries in a short time. Nothing was charged. Please wait a minute and try again.")) && await unpaid(),"too many Fund tries in a minute: the client is asked to wait a minute and told nothing was charged");
   await fundWith([429,{error:"Too many tries today. Please try again tomorrow.",code:"too_many_today"}]);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries today. Nothing was charged. Please try again tomorrow.")) && await unpaid(),"too many Fund tries in a day: the client is asked to try again tomorrow and told nothing was charged");
+  await fundWith([409,{error:"This Order was paid in test mode, so its money cannot move with the live keys. Cuvori support needs to look at it.",code:"other_mode"}]);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments on this Order are on hold. Please contact Cuvori support.")) && !(await p.textContent('#toastWrap')).includes('test mode') && await unpaid(),"an Order paid in the other mode: the client is told payments are on hold, without the technical reason");
   await p.evaluate(()=>document.querySelector('[data-lang="lt"]').click());
   await fundWith(PAUSED);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Mokėjimai šiuo metu sustabdyti. Nieko nebuvo nuskaičiuota. Pabandykite vėliau.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys'),"payments paused, client using Cuvori in Lithuanian: told in Lithuanian");
