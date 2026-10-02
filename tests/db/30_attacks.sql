@@ -972,3 +972,82 @@ do $$ declare refused int := 0; u1 uuid := t.u('101'); begin
   insert into t.results (grp, name, ok, detail) values ('server', 'odd input to the limit on tries is refused', refused = 4, 'refused ' || refused || ' of 4');
 end $$;
 delete from public.rate_events where kind like 'pay\_%';
+
+-- ---------- v31: launch day can't mix test money with real money; tries per day; "Stripe check" notes clean up ----------
+select t.try('admin','switches the database between test and live through the API', t.u('401'), $$select public.stripe_set_mode('live')$$, $$select $1 is not null$$);
+select t.try('editor','switches the database between test and live through the API', t.u('202'), $$select public.stripe_set_mode('live')$$, $$select $1 is not null$$);
+select t.try('visitor','uses the daily limit on tries meant for the payment functions', null, $$select public.rate_limit_tries(t.u('101'), 'pay_checkout', 10, 50)$$, $$select $1 is not null$$);
+select t.try('client','resets their own daily count of tries', t.u('101'), $$select public.rate_limit_tries(t.u('101'), 'pay_checkout', 1000, 100000)$$, $$select $1 is not null$$);
+-- the owner's switch (in Supabase): refused while Orders hold test money; then it switches and closes test card-fee
+-- refunds; switching back waits for real card-fee refunds; odd input changes nothing
+create or replace function t.f_set_mode() returns text language plpgsql security definer as $$
+declare out text; r text; pid uuid;
+begin
+  -- each answer is read in its own statement: a statement sees the database as it was when it started
+  update public.site_settings set value = '"test"' where key = 'stripe_mode';
+  insert into public.order_payments (order_id, kind, amount_cents, fee_cents, provider, provider_ref, status)
+    values ('30000000-0000-0000-0000-000000000003', 'fund', 10000, 325, 'stripe', 'pi_testfee1', 'succeeded') returning id into pid;
+  r := public.stripe_set_mode('live'); out := r || '|' || public.stripe_mode();
+  update public.contracts set status = 'completed' where payment_mode = 'escrow' and status in ('funded','delivered','disputed','releasing','resolving');
+  r := public.stripe_set_mode('live'); out := out || '|' || r;
+  out := out || '|' || public.stripe_mode() || '|' || coalesce((select fee_refund_cents::text from public.order_payments where id = pid), 'null');
+  r := public.stripe_set_mode('live'); out := out || '|' || r;
+  insert into public.order_payments (order_id, kind, amount_cents, fee_cents, provider, provider_ref, status)
+    values ('30000000-0000-0000-0000-000000000003', 'fund', 500, 40, 'stripe', 'pi_livefee1', 'succeeded');
+  r := public.stripe_set_mode('test'); out := out || '|' || r || '|' || public.stripe_mode();
+  r := public.stripe_set_mode('LIVE'); out := out || '|' || r || '|' || public.stripe_mode();
+  return out;
+end $$;
+grant execute on function t.f_set_mode() to authenticated;
+select t.try('client','going live is refused while Orders hold test money; then it switches and closes test card-fee refunds; going back waits for real ones (normal)', t.u('101'), $$select t.f_set_mode()$$,
+  $$select split_part($1, '|', 1) like 'not switched: % Order(s) still hold money paid in test mode%' and split_part($1, '|', 2) = 'test'
+       and split_part($1, '|', 3) like 'switched to live mode (% card-fee refund(s) from test mode closed)' and split_part($1, '|', 4) = 'live' and split_part($1, '|', 5) = '0'
+       and split_part($1, '|', 6) = 'already live mode: nothing changed'
+       and split_part($1, '|', 7) like 'not switched: % card-fee refund(s) to clients are still waiting%' and split_part($1, '|', 8) = 'live'
+       and split_part($1, '|', 9) like 'not switched: the mode must be%' and split_part($1, '|', 10) = 'live'$$, 'allow');
+-- the payment functions: ten tries a minute and fifty a day; other people unaffected; it lifts the next day
+do $$ declare got text := ''; i int; u1 uuid := t.u('101'); u2 uuid := t.u('102'); begin
+  execute 'set local role service_role';
+  for i in 1..11 loop got := got || left(public.rate_limit_tries(u1, 'pay_confirm', 10, 50), 1); end loop;
+  execute 'reset role';
+  update public.rate_events set at = at - interval '2 minutes' where user_id = u1 and kind = 'pay_confirm';
+  insert into public.rate_events (user_id, kind, at) select u1, 'pay_confirm', now() - interval '3 hours' from generate_series(1, 40);
+  execute 'set local role service_role';
+  got := got || '|' || public.rate_limit_tries(u1, 'pay_confirm', 10, 50) || '|' || public.rate_limit_tries(u2, 'pay_confirm', 10, 50);
+  execute 'reset role';
+  update public.rate_events set at = at - interval '1 day' where user_id = u1 and kind = 'pay_confirm';
+  execute 'set local role service_role';
+  got := got || '|' || public.rate_limit_tries(u1, 'pay_confirm', 10, 50);
+  execute 'reset role';
+  insert into t.results (grp, name, ok, detail) values ('server', 'the payment functions: ten tries a minute and fifty a day; other people unaffected; it lifts the next day (normal)',
+    got = 'oooooooooom|day|ok|ok', 'returned: ' || got);
+end $$;
+do $$ declare refused int := 0; u1 uuid := t.u('101'); begin
+  execute 'set local role service_role';
+  begin perform public.rate_limit_tries(null, 'pay_checkout', 10, 50); exception when others then refused := refused + 1; end;
+  begin perform public.rate_limit_tries(u1, 'DROP TABLE', 10, 50); exception when others then refused := refused + 1; end;
+  begin perform public.rate_limit_tries(u1, 'pay_checkout', 0, 50); exception when others then refused := refused + 1; end;
+  begin perform public.rate_limit_tries(u1, 'pay_checkout', 10, 5); exception when others then refused := refused + 1; end;
+  execute 'reset role';
+  insert into t.results (grp, name, ok, detail) values ('server', 'odd input to the daily limit on tries is refused', refused = 4, 'refused ' || refused || ' of 4');
+end $$;
+delete from public.rate_events where kind like 'pay\_%';
+-- Order notes: written with their time; a "Stripe check" note goes when the unpaid Order is cancelled or declined, another note stays
+create or replace function t.f_money_note() returns text language plpgsql security definer as $$
+declare out text; a uuid := '30000000-0000-0000-0000-000000000001'; b uuid := '30000000-0000-0000-0000-000000000002';
+begin
+  update public.contracts set money_error = 'Stripe check failed: Stripe did not answer (Netlify log ref 1a2b3c4d)' where id = a;
+  out := case when (select money_error_at from public.contracts where id = a) is not null then 'timed' else 'untimed' end;
+  update public.contracts set status = 'cancelled' where id = a;
+  out := out || '|' || coalesce((select money_error from public.contracts where id = a), 'gone') || '|' || coalesce((select money_error_at::text from public.contracts where id = a), 'no time');
+  update public.contracts set status = 'accepted', money_error = 'top-up pi_x may not be recorded — check by hand' where id = a;
+  update public.contracts set status = 'cancelled' where id = a;
+  out := out || '|' || coalesce((select money_error from public.contracts where id = a), 'gone');
+  update public.contracts set money_error = 'Stripe account check: the freelancer''s Stripe account needs a check by hand (Netlify log ref 2b3c4d5e)' where id = b;
+  update public.contracts set status = 'declined' where id = b;
+  out := out || '|' || coalesce((select money_error from public.contracts where id = b), 'gone');
+  return out;
+end $$;
+grant execute on function t.f_money_note() to authenticated;
+select t.try('client','an Order note gets its time; a "Stripe check" note goes when the unpaid Order is cancelled or declined, another note stays (normal)', t.u('101'), $$select t.f_money_note()$$,
+  $$select $1 = 'timed|gone|no time|top-up pi_x may not be recorded — check by hand|gone'$$, 'allow');
