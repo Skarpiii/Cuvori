@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, payoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -25,7 +25,7 @@ export default async () => {
       if (c.status === "delivered") {
         if (!cents) throw new Error("amount missing");
         if (await isBanned(c.editor)) { failed.push({ id: c.id, why: "freelancer banned" }); continue; }
-        const acct = await payoutAccount(c.editor);
+        const acct = await orderPayoutAccount(c);
         if (!accountReady(acct)) { failed.push({ id: c.id, why: "freelancer account not ready" }); continue; }
         // Nothing can be paid into the Order once it is closed: its Stripe payment page is closed first. What is held is
         // paid out even when an accepted price increase was never paid in, so a client who goes silent cannot hold back
@@ -51,7 +51,7 @@ export default async () => {
       if (!c || c.payment_mode !== "escrow" || !["funded", "delivered"].includes(c.status)) continue;
       if (chargebackOpen(c)) { skipped.push({ id: m.id, why: "chargeback open" }); continue; }
       if (await isBanned(c.editor)) { failed.push({ id: m.id, why: "freelancer banned" }); continue; }
-      const acct = await payoutAccount(c.editor);
+      const acct = await orderPayoutAccount(c);
       if (!accountReady(acct)) { failed.push({ id: m.id, why: "freelancer account not ready" }); continue; }
       await releaseMilestone(c, m, null, m.status === "approved" ? "approve" : "auto_release");
       done.push(m.id);
