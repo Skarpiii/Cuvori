@@ -1,7 +1,7 @@
 // POST { contract_id, lang } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -65,6 +65,7 @@ export default safe(async (req) => {
   const minFor = kind === "topup" ? MIN_TOPUP_CENTS : MIN_CENTS;
   if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return bad("Payment amount out of range", 409);
   if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
+  sameMode(c);                                   // an Order paid in test mode takes no real money, and the other way round
   // code: the page says it in the client's language (the Fund button shows even then: the page only knows whether the
   // freelancer finished their Stripe setup, not whether they were banned after the Order was accepted)
   if (await isBanned(c.editor)) return json(409, { error: "This freelancer cannot receive payments", code: "freelancer_unavailable" });

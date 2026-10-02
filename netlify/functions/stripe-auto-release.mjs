@@ -12,11 +12,12 @@ export default async () => {
   let expired = 0;
   try { expired = Number(await db.rpc("expire_jobs", {})) || 0; } catch (e) { console.error("expire_jobs failed", e.message); }
   if (!escrowEnabled()) return json(200, { skipped: "escrow not configured", expired });
-  // "Stripe check" notes on unpaid Orders, written more than a day ago (or before notes had a time): nothing needs doing
-  // on those — no money was taken — so they leave the admin panel's "Needs a hand" list. Other notes are never touched.
+  // "Stripe check failed" notes on unpaid Orders with no new failure for a day (each failure renews its note) or from
+  // before notes had a time: nothing needs doing on those — no money was taken — so they leave the admin panel's "Needs
+  // a hand" list. "Stripe account check" notes stay until the account is sorted out; other notes are never touched.
   const dayAgo = encodeURIComponent(ago(24 * 60));
-  for (const note of ["Stripe check failed:", "Stripe account check:"]) for (const when of [`lt.${dayAgo}`, "is.null"])
-    await db.update("contracts", `status=eq.accepted&money_error=like.${encodeURIComponent(note)}*&money_error_at=${when}`, { money_error: null }).catch(e => console.error("clearing old Stripe check notes failed", e.message));
+  for (const when of [`lt.${dayAgo}`, "is.null"])
+    await db.update("contracts", `status=eq.accepted&money_error=like.${encodeURIComponent("Stripe check failed:")}*&money_error_at=${when}`, { money_error: null }).catch(e => console.error("clearing old Stripe check notes failed", e.message));
   const now = new Date().toISOString();
   const due = await db.select("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&order=auto_release_at.asc&limit=50`);
   // stuck: a release or a decision whose money move failed earlier; not one that started a moment ago
