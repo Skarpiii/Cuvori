@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 set -o pipefail
 r=0
 echo "== CSP";            python3 tools/csp.py index.html --check || r=1
-echo "== database attacks"; tests/db/start-pg.sh >/dev/null; out=$(EXTRA="schema_v9.sql schema_v10.sql schema_v11.sql schema_v12.sql schema_v13.sql schema_v14.sql schema_v15.sql professions_seed.sql schema_v16.sql schema_v17.sql professions_seed.sql schema_v18.sql schema_v19.sql schema_v20.sql schema_v21.sql schema_v22.sql schema_v23.sql schema_v24.sql schema_v25.sql schema_v26.sql schema_v27.sql schema_v28.sql schema_v29.sql" MIGRATE="migrate_v15.sql" tests/db/run.sh | tail -1); echo "$out"; echo "$out" | grep -q ' 0 failed' || r=1
+echo "== database attacks"; tests/db/start-pg.sh >/dev/null; out=$(EXTRA="schema_v9.sql schema_v10.sql schema_v11.sql schema_v12.sql schema_v13.sql schema_v14.sql schema_v15.sql professions_seed.sql schema_v16.sql schema_v17.sql professions_seed.sql schema_v18.sql schema_v19.sql schema_v20.sql schema_v21.sql schema_v22.sql schema_v23.sql schema_v24.sql schema_v25.sql schema_v26.sql schema_v27.sql schema_v28.sql schema_v29.sql schema_v30.sql" MIGRATE="migrate_v15.sql" tests/db/run.sh | tail -1); echo "$out"; echo "$out" | grep -q ' 0 failed' || r=1
 echo "== payment attacks";  out=$(node tests/attack-functions.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== money attacks";    out=$(node tests/attack-money.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== money attacks 2";  out=$(node tests/attack-money2.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
@@ -12,6 +12,7 @@ echo "== money attacks 3";  out=$(node tests/attack-money3.mjs 2>/dev/null | tai
 echo "== processing fee";   out=$(node tests/attack-fee.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== roles & tampering"; out=$(node tests/attack-roles.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== Stripe accounts per mode"; out=$(node tests/attack-connect.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== limit on tries";   out=$(node tests/attack-rate.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limits match";     out=$(node tests/limits-match.mjs | tail -1); echo "$out"; echo "$out" | grep -q " 0 failed" || r=1
 echo "== stored XSS";       tests/xss/run.sh || r=1
 echo "== CSP in browser";   node tests/csp-test.js || r=1

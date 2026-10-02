@@ -66,6 +66,7 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(403, { code: 403, error_code: "bad_jwt", msg: "invalid JWT" }); }
   if (u.pathname.startsWith("/rest/v1/rpc/")) { const fn = u.pathname.split("/")[4], args = JSON.parse(body); DB.rpc_calls.push({ fn, args });
+    if (fn === "rate_limit_for") return res(200, true);      // the limit on tries (schema v30) is tested in attack-rate.mjs; here every try is let through
     if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country === "US" ? 3.25 : 1.5; const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
     return res(200, null); }
   if (u.pathname.startsWith("/rest/v1/")) {
