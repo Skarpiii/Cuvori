@@ -83,14 +83,16 @@ export const safe = (fn) => async (req, ctx) => corsContext.run({ origin: null }
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
   try { return await fn(req, ctx); }
   catch (e) {
-    if (e && e.expose) return bad(e.message, e.status || 409);
+    if (e && e.expose) return json(e.status || 409, e.code ? { error: e.message, code: e.code } : { error: e.message });
     // the same ref as a note written on the Order for this error (orderPayoutAccount), so the person's message and the note match
     const ref = e && typeof e.ref === "string" && /^[0-9a-f]{8}$/.test(e.ref) ? e.ref : crypto.randomUUID().slice(0, 8);
     console.error("fn error", ref, e && e.stack || e);
-    return bad(`Something went wrong (ref ${ref})`, 500);
+    return json(500, { error: `Something went wrong (ref ${ref})`, code: "server_error", ref });
   }
 });
-export const fail = (msg, status = 409) => { const e = new Error(msg); e.expose = true; e.status = status; return e; };
+// code: a short name the page shows in the person's language (fnPlain in index.html); the message stays for the owner
+export const fail = (msg, status = 409, code) => { const e = new Error(msg); e.expose = true; e.status = status; if (code) e.code = code; return e; };
+const PAUSED = "payments_paused";
 const SETTLING = "The card payment is still settling at the payment provider. Cuvori retries this every hour; nothing needs to be done.";
 const NOT_READY = "The freelancer's Stripe account is not ready to receive money. Once they finish their Stripe setup, Cuvori retries this every hour.";
 const CHARGEBACK = "A card chargeback is open on this payment. Nothing can move until the bank decides.";
@@ -116,14 +118,14 @@ let keyPlatform = null;                         // the Stripe account these keys
 let platformSeen = { id: null, at: 0 };
 export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; keyPlatform = null; platformSeen = { id: null, at: 0 }; };
 async function checkStripeMode() {
-  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503);
+  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503, PAUSED);
   if (!modeSeen.mode || Date.now() - modeSeen.at > 60e3) {
     const row = await db.one("site_settings", "key=eq.stripe_mode&select=value");
     modeSeen = { mode: row ? String(row.value) : "test", at: Date.now() };
   }
   if (modeSeen.mode !== STRIPE_MODE) {
     console.error("Stripe mode mismatch: keys are", STRIPE_MODE, "but the database is set to", modeSeen.mode);
-    throw fail(`Payments are paused: the Stripe keys are for ${STRIPE_MODE} mode, but the database is set to ${modeSeen.mode} mode.`, 503);
+    throw fail(`Payments are paused: the Stripe keys are for ${STRIPE_MODE} mode, but the database is set to ${modeSeen.mode} mode.`, 503, PAUSED);
   }
 }
 // The Stripe account Cuvori's keys belong to is remembered the first time, once per mode (site_settings
@@ -144,11 +146,11 @@ async function checkStripePlatform() {
   }
   if (platformSeen.id !== keyPlatform) {
     console.error("Stripe account mismatch: the keys belong to", keyPlatform, "but Cuvori was set up with", platformSeen.id);
-    throw fail("Payments are paused: the Stripe keys belong to a different Stripe account than the one Cuvori was set up with.", 503);
+    throw fail("Payments are paused: the Stripe keys belong to a different Stripe account than the one Cuvori was set up with.", 503, PAUSED);
   }
 }
 export async function stripe(method, path, body, opts = {}) {
-  if (!STRIPE_KEY) throw fail("Payments are not configured. Please contact support.", 503);
+  if (!STRIPE_KEY) throw fail("Payments are not configured. Please contact support.", 503, PAUSED);
   await checkStripeMode();
   await checkStripePlatform();
   return stripeCall(method, path, body, opts);
@@ -347,7 +349,7 @@ async function moneyPost(scope, path, body) {
 // stripe_payouts_enabled, the live pair stripe_live_account_id / stripe_live_payouts_enabled (schema v28). Only the
 // pair of the current mode is ever read or written; the other one stays exactly as it is.
 export const acctCols = () => {
-  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503);
+  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503, PAUSED);
   return STRIPE_MODE === "live" ? { mode: "live", id: "stripe_live_account_id", ready: "stripe_live_payouts_enabled" }
                                 : { mode: "test", id: "stripe_account_id", ready: "stripe_payouts_enabled" };
 };
