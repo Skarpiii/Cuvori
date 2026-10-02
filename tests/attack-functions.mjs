@@ -29,8 +29,9 @@ const match = (row, f) => f.every(x => x.op === "eq" ? String(row[x.k]) === x.v 
 const res = (status, data) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
 function stripeHandle(path, method, p) {
+  if (path === "/account" && method === "GET") return [200, { id: "acct_1CuvoriPlatformAA", object: "account" }];
   if (path === "/account_links") return [200, { url: "https://connect.stripe.com/setup/" + p.get("account") }];
-  if (path.startsWith("/accounts/") && method === "GET") return STRIPE.accounts[path.split("/")[2]] ? [200, STRIPE.accounts[path.split("/")[2]]] : [404, { error: { message: "No such account" } }];
+  if (path.startsWith("/accounts/") && method === "GET") return STRIPE.accounts[path.split("/")[2]] ? [200, STRIPE.accounts[path.split("/")[2]]] : [404, { error: { message: "No such account", code: "resource_missing", type: "invalid_request_error" } }];
   if (path === "/transfers" && method === "GET") return [200, { data: STRIPE.transfers.filter(t => t.transfer_group === p.get("transfer_group")) }];
   if (path === "/refunds" && method === "GET") return [200, { data: STRIPE.refunds.filter(r => r.payment_intent === p.get("payment_intent")) }];
   if (/^\/checkout\/sessions\/[^/]+\/expire$/.test(path)) return [200, {}];

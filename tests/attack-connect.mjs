@@ -2,12 +2,15 @@
 // safeguards around setting one aside: only when Stripe confirms it is gone, only in test mode, only while it is still
 // the saved one, kept in the history, with a fresh retry key for a genuinely new account. Live mode is never replaced
 // automatically, and keys of the other mode never move money (the database says which mode it belongs to).
+// K1–K4: only Stripe's precise "account gone" answers mean "the freelancer is not ready"; a problem on Cuvori's side says
+// "something went wrong", is noted on the Order for the admin and cleared once it works again; and Cuvori remembers which
+// Stripe account its keys belong to, pausing every payment for keys of another Stripe account.
 // The test-mode part runs here; the file then runs itself again with live keys for the live-mode part.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const LIVE = process.env.HARNESS_STRIPE_KEY === "sk_live_fake";
 const H = await import("./fn-harness.mjs");
-const { DB, STRIPE, users, hooks, urls, req, call, mk, reset, fns, signed, F } = H;
+const { DB, STRIPE, users, hooks, urls, req, call, mk, reset, fns, signed, F, fund, past, onlyDue } = H;
 const lib = await import(F + "../lib/cuvori.mjs");
 const fx = await fns();
 const out = [];
@@ -133,6 +136,78 @@ if (!LIVE) {
     setMode("test");
     const ok = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: mk().id } }));
     vuln(ok.status !== 200, `C9 back to test mode, Fund works again -> ${ok.status} ${ok.json && ok.json.error || ""}`);
+  }
+
+  // ---------- K1: Fund: the right reason for the right person ----------
+  const keyProblem = (path, method) => path === `/accounts/${ORIGINAL}` && method === "GET"
+    ? [403, { error: { type: "invalid_request_error", message: "The provided key 'rk_test_***' does not have the required permissions for this endpoint" } }] : null;
+  const fundIt = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  {
+    const c = mk(); const pages = Object.keys(STRIPE.sessions).length;
+    hooks.stripe = keyProblem; const r = await fundIt(c); reset();
+    vuln(r.status !== 500 || /Stripe setup/.test(r.json && r.json.error || "") || !String(c.money_error || "").startsWith("Stripe check failed: ") || !/required permissions/.test(c.money_error) || Object.keys(STRIPE.sessions).length !== pages,
+      `K1 Cuvori's own key can't read Stripe accounts, the client clicks Fund -> ${r.status} ${r.json && r.json.error}; note for the admin: ${c.money_error} (must be "Something went wrong", never "ask the freelancer", no Stripe page)`);
+    const again = await fundIt(c);
+    vuln(again.status !== 200 || c.money_error, `K1 once Cuvori's key works again -> Fund ${again.status}; the note is gone: ${!c.money_error}`);
+    const c2 = mk({ money_error: "top-up pi_x may not be recorded — check by hand" });
+    hooks.stripe = keyProblem; await fundIt(c2); reset();
+    vuln(c2.money_error !== "top-up pi_x may not be recorded — check by hand", `K1 an Order that already has a note for the admin keeps it -> ${c2.money_error}`);
+    const c3 = mk();
+    hooks.stripe = gone403(ORIGINAL); const g = await fundIt(c3); reset();
+    vuln(g.status !== 409 || !/Stripe setup under Account/.test(g.json && g.json.error || "") || c3.money_error, `K1 Stripe confirms the freelancer's account is gone -> ${g.status} ${g.json && g.json.error}; no note: ${!c3.money_error}`);
+    for (const [name, hook] of [["Stripe not answering", (path) => { if (path === `/accounts/${ORIGINAL}`) throw new Error("network down"); return null; }],
+                                ["a Stripe outage (500)", (path) => path === `/accounts/${ORIGINAL}` ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null]]) {
+      const c4 = mk(); hooks.stripe = hook; const x = await fundIt(c4); reset();
+      vuln(x.status !== 500 || /Stripe setup/.test(x.json && x.json.error || "") || !String(c4.money_error || "").startsWith("Stripe check failed: "), `K1 ${name}, the client clicks Fund -> ${x.status} ${x.json && x.json.error}; note: ${c4.money_error}`);
+    }
+  }
+  // ---------- K2: releases: the real reason on the Order, gone once it is paid out ----------
+  {
+    const c = mk(); await fund(fx, c); c.status = "delivered";
+    hooks.stripe = keyProblem;
+    const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    reset();
+    vuln(r.status !== 500 || !String(c.money_error || "").startsWith("Stripe check failed: ") || c.status !== "delivered",
+      `K2 Cuvori's key problem, the client clicks Approve & release -> ${r.status} ${r.json && r.json.error}; Order ${c.status}, note: ${c.money_error}`);
+    const ok = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(ok.status !== 200 || c.status !== "completed" || c.money_error, `K2 once fixed -> release ${ok.status}, Order ${c.status}, note gone: ${!c.money_error}`);
+    const d = mk(); await fund(fx, d); d.status = "delivered"; d.auto_release_at = past(1); onlyDue(d);
+    hooks.stripe = keyProblem;
+    const a = await call(fx.autoRelease, req("POST", "x", {}));
+    reset();
+    const why = ((a.json && a.json.failures) || []).find(f => f.id === d.id);
+    vuln(!why || !/required permissions/.test(why.why) || !String(d.money_error || "").startsWith("Stripe check failed: ") || d.status !== "delivered",
+      `K2 the hourly automatic release with Cuvori's key problem -> reason in the log: ${why && why.why}; note on the Order: ${d.money_error}`);
+    await call(fx.autoRelease, req("POST", "x", {}));
+    vuln(d.status !== "completed" || d.money_error, `K2 once fixed, the next hourly run pays out -> Order ${d.status}, note gone: ${!d.money_error}`);
+  }
+  // ---------- K3: Cuvori remembers which Stripe account its keys belong to ----------
+  {
+    const rec = () => (DB.site_settings.find(r => r.key === "stripe_platform_test") || {}).value;
+    vuln(rec() !== STRIPE.platform, `K3 the first time, Cuvori remembers the Stripe account of its keys -> ${rec()}`);
+    const was = STRIPE.platform;
+    STRIPE.platform = "acct_1OtherCompanyBB"; lib.forgetStripeMode();          // keys of a different Stripe account (a new deploy)
+    const pages = Object.keys(STRIPE.sessions).length, accounts = Object.keys(STRIPE.accounts).length, before = snap();
+    const f = await fundIt(mk());
+    const g = await connect("GET"), p = await connect("POST");
+    vuln(f.status !== 503 || !/belong to a different Stripe account/.test(f.json && f.json.error || "") || g.status !== 503 || p.status !== 503
+      || Object.keys(STRIPE.sessions).length !== pages || Object.keys(STRIPE.accounts).length !== accounts || snap() !== before || rec() !== was,
+      `K3 keys of a different Stripe account -> Fund ${f.status} ${f.json && f.json.error}; Payout details ${g.status}/${p.status}; nothing changed: ${snap() === before && Object.keys(STRIPE.accounts).length === accounts}; still remembers ${rec()}`);
+    // the owner confirms the move in Supabase (stripe_platform_switch): the new account is remembered, payments work again
+    DB.site_settings.splice(DB.site_settings.findIndex(r => r.key === "stripe_platform_test"), 1); lib.forgetStripeMode();
+    const ok = await fundIt(mk());
+    vuln(ok.status !== 200 || rec() !== "acct_1OtherCompanyBB", `K3 after the owner confirms the move -> Fund ${ok.status}; remembers now ${rec()}`);
+    STRIPE.platform = was; DB.site_settings.splice(DB.site_settings.findIndex(r => r.key === "stripe_platform_test"), 1); lib.forgetStripeMode();
+  }
+  // ---------- K4: if Stripe can't say which account the keys belong to, nothing is paid ----------
+  {
+    lib.forgetStripeMode();
+    const pages = Object.keys(STRIPE.sessions).length;
+    hooks.stripe = (path) => path === "/account" ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null;
+    const f = await fundIt(mk()); reset();
+    vuln(f.status !== 500 || Object.keys(STRIPE.sessions).length !== pages, `K4 Stripe doesn't answer which account the keys belong to -> Fund ${f.status} ${f.json && f.json.error}; no Stripe page: ${Object.keys(STRIPE.sessions).length === pages}`);
+    const ok = await fundIt(mk());
+    vuln(ok.status !== 200, `K4 once Stripe answers again -> Fund ${ok.status}`);
   }
 
   // ---------- the live-mode part: the same file with live keys ----------

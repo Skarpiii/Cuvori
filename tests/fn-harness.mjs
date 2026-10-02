@@ -12,7 +12,7 @@ export const conv = uuid();
 export const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [], site_settings: [],
   payout_details: [{ id: users.ed.id, methods: [], note: "", stripe_account_id: "acct_1EditorAAAAAAAA", stripe_payouts_enabled: true },
                    { id: users.ed2.id, methods: [], note: "", stripe_account_id: "acct_1SecondBBBBBBBB", stripe_payouts_enabled: true }] };
-export const STRIPE = { sessions: {}, charges: {}, intents: {}, transfers: [], refunds: [], reversals: [], disputes: {}, idem: new Map(), balance: 0, settleDelay: false,
+export const STRIPE = { platform: "acct_1CuvoriPlatformAA", sessions: {}, charges: {}, intents: {}, transfers: [], refunds: [], reversals: [], disputes: {}, idem: new Map(), balance: 0, settleDelay: false,
   accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
               acct_1SecondBBBBBBBB: { id: "acct_1SecondBBBBBBBB", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
 export const hooks = { stripe: null, db: null, rpc: null };
@@ -44,6 +44,7 @@ export function pay(sessionId, opts = {}) {
 
 export function stripeHandle(path, method, p) {
   const seg = path.split("/");
+  if (path === "/account" && method === "GET") return [200, { id: STRIPE.platform, object: "account" }];   // the Stripe account the keys belong to
   if (path === "/account_links") return [200, { url: "https://connect.stripe.com/setup/" + p.get("account") }];
   if (path === "/accounts" && method === "POST") { const id = rid("acct"); STRIPE.accounts[id] = { id, payouts_enabled: false, charges_enabled: false, requirements: { currently_due: ["external_account"] }, metadata: { cuvori_user: p.get("metadata[cuvori_user]") } }; return [200, STRIPE.accounts[id]]; }
   if (seg[1] === "accounts" && method === "GET") return STRIPE.accounts[seg[2]] ? [200, STRIPE.accounts[seg[2]]] : err(404, "No such account: " + seg[2], "resource_missing");
@@ -130,7 +131,7 @@ globalThis.fetch = async (url, init = {}) => {
     if ((method === "POST" || method === "PATCH") && body) { const bad = (v) => typeof v === "string" ? !v.isWellFormed() : v && typeof v === "object" ? Object.values(v).some(bad) : false; if (bad(JSON.parse(body))) return res(400, { code: "22P05", message: "unsupported Unicode escape sequence" }); }
     if (method === "GET") return res(200, rows.filter(r => match(r, f)));
     if (method === "PATCH") { const patch = JSON.parse(body); const o = rows.filter(r => match(r, f)); o.forEach(r => Object.assign(r, patch)); return res(200, o); }
-    if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); if (table === "payout_details" && rows.some(r => r.id === row.id)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"payout_details_pkey\"" }); rows.push(row); return res(201, [row]); }
+    if (method === "POST") { const row = { id: uuid(), created_at: new Date().toISOString(), ...JSON.parse(body) }; if (table === "money_keys" && rows.some(r => r.scope === row.scope)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"money_keys_pkey\"" }); if (table === "payout_details" && rows.some(r => r.id === row.id)) return res(409, { code: "23505", message: "duplicate key value violates unique constraint \"payout_details_pkey\"" }); if (table === "site_settings" && rows.some(r => r.key === row.key)) return String((init.headers || {}).Prefer || "").includes("ignore-duplicates") ? res(201, []) : res(409, { code: "23505", message: "duplicate key value violates unique constraint \"site_settings_pkey\"" }); rows.push(row); return res(201, [row]); }
     if (method === "DELETE") { const keep = rows.filter(r => !match(r, f)); const gone = rows.length - keep.length; rows.length = 0; rows.push(...keep); return res(200, []); }
   }
   throw new Error("unexpected fetch " + url);
