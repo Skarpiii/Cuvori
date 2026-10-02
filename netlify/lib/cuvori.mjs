@@ -261,6 +261,23 @@ export async function userFromRequest(req) {
 }
 export const isBanned = async (uid) => { const p = await db.one("profiles", `id=eq.${uid}&select=banned`); return !p || !!p.banned; };
 
+// How often one person may make a payment function ask Stripe. Stripe takes only so many requests a second from Cuvori
+// as a whole (25 a second for one kind, such as checking a freelancer's account); without a limit, one person or a small
+// script pressing a button over and over could use it all, and Stripe would then refuse Cuvori for everyone — nobody
+// could pay, and payouts would wait. Past the limit the person is asked to wait a minute and Stripe is not asked at all.
+// Normal use never comes close. Counted in the database (schema v30), so every running copy of a function shares one count.
+export const TRY_WINDOW_S = 60;
+export async function limitTries(me, kind, max = 10) {
+  let ok;
+  try { ok = await db.rpc("rate_limit_for", { p_user: me.id, p_kind: kind, p_max: max, p_seconds: TRY_WINDOW_S }); }
+  catch (e) {
+    // schema v30 not run yet: payments keep working without the limit, and the log says what is missing
+    if (e && e.status === 404) { console.error("the limit on tries is not set up yet: run supabase/schema_v30.sql", e.message); return; }
+    throw e;
+  }
+  if (ok !== true) throw fail("Too many tries in a short time. Please wait a minute and try again.", 429, "too_many_tries");
+}
+
 // ---- the price the client pays: from the fee table in the database, never a number in code ----
 export async function quoteFor(priceCents, currency = "EUR", country = null, customer = "any", method = "any") {
   // a whole Order starts at €1 (MIN_CENTS, checked by the caller); a top-up for an agreed amendment may be smaller.
