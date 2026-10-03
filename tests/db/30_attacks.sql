@@ -505,6 +505,17 @@ select t.try('client','reads a stranger''s milestones', t.u('501'), $$select cou
 select t.try('visitor','asks for a quote on a negative amount', null, $$select public.order_quote(-5)::text$$, $$select $1 is not null$$);
 select t.try('visitor','gets a quote: €500 costs €507.87 with the freelancer still getting €500 (normal)', null, $$select public.order_quote(50000, 'EUR', 'DE')::text$$, $$select ($1::jsonb->>'total_cents')::int = 50787 and ($1::jsonb->>'processing_cents')::int = 787 and ($1::jsonb->>'cuvori_cents')::int = 0 and floor(50787 - 50787 * 0.015 - 25) >= 50000$$, 'allow');
 select t.try('visitor','gets a quote for a non-European card (normal)', null, $$select public.order_quote(50000, 'EUR', 'US')::text$$, $$select ($1::jsonb->>'region') = 'INTL' and ($1::jsonb->>'total_cents')::int > 50787$$, 'allow');
+-- v33: a fee row for another provider (only possible by hand: the admin panel makes Stripe rows) never decides a quote,
+-- however specific it is; without any Stripe row the quote says "Cuvori would pay", which the payment functions refuse
+insert into public.fee_schedules (provider, region, country, customer_kind, method, percent, fixed_cents, currency, payer, active, note)
+  values ('otherpay', 'ANY', null, 'any', 'card', 0.1, 1, 'EUR', 'client', true, 'test: another provider, more specific than the Stripe row');
+select t.try('visitor','gets a quote decided by another provider''s more specific row', null, $$select public.order_quote(50000, 'EUR', null, 'any', 'card')::text$$,
+  $$select ($1::jsonb->>'provider') is distinct from 'stripe' or ($1::jsonb->>'processing_cents')::int < 1000$$);
+update public.fee_schedules set active = false where provider = 'stripe';
+select t.try('visitor','gets a quote from another provider''s row when every Stripe row is off', null, $$select public.order_quote(50000, 'EUR', null, 'any', 'card')::text$$,
+  $$select ($1::jsonb->>'payer') <> 'platform'$$);
+update public.fee_schedules set active = true where provider = 'stripe';
+delete from public.fee_schedules where provider = 'otherpay';
 select t.try('client','changes the processing cost table', t.u('101'), $$select public.admin_set_fee_schedule('{"id":1,"percent":90}')$$, $$select (select percent from public.fee_schedules where id = 1) = 90$$);
 select t.try('client','edits the processing cost table directly', t.u('101'), $$with x as (update public.fee_schedules set percent = 0 returning 1) select count(*)::text from x$$, $$select $1::int > 0$$);
 select t.try('admin','sets a 90% processing cost', t.u('401'), $$select public.admin_set_fee_schedule('{"id":1,"percent":90}')$$, $$select (select percent from public.fee_schedules where id = 1) = 90$$);
