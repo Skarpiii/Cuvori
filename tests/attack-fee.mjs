@@ -160,8 +160,8 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
     hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, answer(args.p_price_cents)] : null;
     const c = mk({ amount_cents: 10000 }); const sessionsBefore = Object.keys(STRIPE.sessions).length;
     const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-    vuln(r.status === 200 || Object.keys(STRIPE.sessions).length !== sessionsBefore || c.stripe_checkout_id,
-      `F12 ${name} -> HTTP ${r.status} ${r.json && r.json.error || ""} (must refuse, no Stripe page made)`);
+    vuln(r.status !== 503 || (r.json && r.json.code) !== "payments_paused" || Object.keys(STRIPE.sessions).length !== sessionsBefore || c.stripe_checkout_id,
+      `F12 ${name} -> HTTP ${r.status} ${r.json && r.json.code || ""}: ${r.json && r.json.error || ""} (must refuse as "payments paused", with the code the page translates; no Stripe page made)`);
     reset();
   }
   const ok = mk({ amount_cents: 10000 }); const f = await fund(fx, ok);
