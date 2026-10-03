@@ -192,6 +192,10 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   const blank = mk({ title: "" });
   await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: blank.id } }));
   vuln(nameOf(blank) !== "Order: Cuvori order", `R-P an Order with no title -> ${JSON.stringify(nameOf(blank))}`);
+  // a title of nothing but tabs and line breaks (the page trims titles, but the database's own trim only removes spaces)
+  const blank2 = mk({ title: "\t\n \t" });
+  await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: blank2.id } }));
+  vuln(nameOf(blank2) !== "Order: Cuvori order", `R-P an Order whose title is only tabs and line breaks -> ${JSON.stringify(nameOf(blank2))}`);
   reset();
 }
 
