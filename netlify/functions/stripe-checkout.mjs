@@ -83,7 +83,7 @@ export default safe(async (req) => {
   // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to. The title is
   // cut by whole characters as people see them (cut): never half an emoji, which would stop the payment, and never part of
   // a flag or a family emoji, which would show as a stray symbol.
-  const title = cut(c.title, 180) || L.untitled;
+  const title = cut(c.title, 180).trim() || L.untitled;   // a title of nothing but spaces, tabs or line breaks counts as no title
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: kind === "topup" ? `${L.increase}${title}` : `${L.order}${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: L.fee, description: L.feeDesc } } });
   // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
