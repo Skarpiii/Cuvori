@@ -398,20 +398,28 @@ export async function lookupAccount(id) {
 // account) always say "payments are paused" — also for a freelancer with nothing saved yet in the keys' mode.
 // why.reason says when a person has to look: a live account Stripe says is gone (only Cuvori can sort that out), or a
 // saved account that belongs to someone else.
+// The one rule for "this account can be paid": Stripe lets it take charges and payouts, and the transfers capability
+// Cuvori's payouts use is active (a capability must be active for the account to do what it covers). Every place that
+// looks at a freelancer's account uses it: this check, Payout details, the account webhook and the database's "ready" mark.
+export const accountReady = (a) => !!(a && a.charges_enabled === true && a.payouts_enabled === true && a.capabilities?.transfers === "active");
 export async function payoutAccount(editorId, why = {}) {
   await checkStripeMode();
   await checkStripePlatform();
   const col = acctCols();
   const p = await db.one("payout_details", `id=eq.${editorId}&select=${col.id},${col.ready}`);
-  if (!p || !isAcct(p[col.id])) return null;
-  const acct = await lookupAccount(p[col.id]);
-  if (!acct) { if (col.mode === "live") why.reason = "Stripe says the saved live account is gone"; return null; }
-  if (!acct.metadata || acct.metadata.cuvori_user !== editorId) { why.reason = "the saved Stripe account belongs to someone else"; return null; }
-  // The "ready" mark the page shows the Fund button by follows what Stripe just said (the same rule as Payout details and
-  // the account webhook use), so a Stripe update that never arrived cannot leave a Fund button that always ends in
-  // "can't receive payments". Only this saved account's mark, and only when it differs; a failure here changes nothing else.
-  const ready = !!(acct.payouts_enabled && acct.charges_enabled);
-  if (ready !== !!p[col.ready]) await db.update("payout_details", `id=eq.${editorId}&${col.id}=eq.${p[col.id]}`, { [col.ready]: ready }).catch(() => {});
+  if (!p) return null;
+  // The "ready" mark the page shows the Fund button by follows what this check just found (the same rule as Payout details
+  // and the account webhook use), so a Stripe update that never arrived, an account Stripe says is gone or one that belongs
+  // to someone else cannot leave a Fund button that always ends in "can't receive payments". Only the mark of the saved
+  // account this check looked at, only when it differs; the account itself and its history are never touched here, and a
+  // failure to write it changes nothing else.
+  const saved = p[col.id];
+  const mark = async (ready) => { if (ready !== !!p[col.ready]) await db.update("payout_details", `id=eq.${editorId}&${saved == null ? `${col.id}=is.null` : `${col.id}=eq.${q(saved)}`}`, { [col.ready]: ready }).catch(() => {}); };
+  if (!isAcct(saved)) { await mark(false); return null; }
+  const acct = await lookupAccount(saved);
+  if (!acct) { await mark(false); if (col.mode === "live") why.reason = "Stripe says the saved live account is gone"; return null; }
+  if (!acct.metadata || acct.metadata.cuvori_user !== editorId) { await mark(false); why.reason = "the saved Stripe account belongs to someone else"; return null; }
+  await mark(accountReady(acct));
   return acct;
 }
 // The same for an Order. A problem on Cuvori's side is written on the Order, so the admin panel shows it under "Needs a
@@ -422,11 +430,14 @@ export async function payoutAccount(editorId, why = {}) {
 // function log under the ref the note gives, and only the owner sees that log.
 const CHECK_FAILED = "Stripe check failed: ", CHECK_NEEDED = "Stripe account check: ";
 const ownNote = (c) => [CHECK_FAILED, CHECK_NEEDED].find(p => String(c.money_error || "").startsWith(p));
-// written over an empty note or over this check's own older note (its time and reason then stay current), never over another
+// Written over an empty note or over this check's own older note (its time and reason then stay current), never over
+// another — and only while the note still reads exactly what this request read: two checks of the same Order can overlap,
+// and the one that finishes last must not wipe out or replace what the other just found.
+const noteStill = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${q(c.money_error)}`);
 async function writeCheckNote(c, text) {
   const mine = ownNote(c);
   if (c.money_error && !mine) return;
-  await db.update("contracts", `id=eq.${c.id}&${mine ? `money_error=like.${q(mine.trim())}*` : "money_error=is.null"}`, { money_error: text }).catch(() => {});
+  await db.update("contracts", `id=eq.${c.id}&${noteStill(c)}`, { money_error: text }).catch(() => {});
 }
 function checkNote(e) {
   const s = e && e.status;
@@ -461,14 +472,10 @@ export async function orderPayoutAccount(c) {
     await writeCheckNote(c, `${CHECK_NEEDED}the freelancer's Stripe account needs a check by hand (Netlify log ref ${ref})`);
     return acct;
   }
-  // the check works again: its own note goes (only that one, never another note)
-  const mine = ownNote(c);
-  if (mine) await db.update("contracts", `id=eq.${c.id}&money_error=like.${q(mine.trim())}*`, { money_error: null }).catch(() => {});
+  // the check works again: its own note goes (only that one, never another note, and not one written since this request read)
+  if (ownNote(c)) await db.update("contracts", `id=eq.${c.id}&${noteStill(c)}`, { money_error: null }).catch(() => {});
   return acct;
 }
-// Keep the existing charge/payout restrictions and explicitly require the capability
-// used by Cuvori's separate transfers. Review requested capabilities with stripe-connect.mjs.
-export const accountReady = (a) => !!(a && a.charges_enabled === true && a.payouts_enabled === true && a.capabilities?.transfers === "active");
 
 // ---- money movements ----
 export async function transfersOf(c) { const r = await stripe("GET", "/transfers", { transfer_group: `contract_${c.id}`, limit: 100 }); return (r.data || []).filter(t => t.metadata && t.metadata.contract_id === c.id); }
