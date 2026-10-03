@@ -3,7 +3,7 @@
 // other one is never read, changed or removed, so switching the keys (on launch day, or by mistake and back) loses
 // nothing. The only thing that ever sets a saved account aside is Stripe confirming it is gone, and only in test mode;
 // it then moves to the history, never deleted. A live account is never replaced automatically.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, safe, isAcct, acctCols, lookupAccount, limitTries } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, safe, isAcct, acctCols, lookupAccount, limitTries, accountReady } from "../lib/cuvori.mjs";
 
 const BROKEN = "Stripe connection is broken, contact support";
 const CHANGED = "Your Stripe setup changed a moment ago. Reload the page and try again.";
@@ -30,7 +30,7 @@ export default safe(async (req) => {
       // someone else's account is never treated as unfinished setup
       if (!found.metadata || found.metadata.cuvori_user !== me.id) { console.error("account owner mismatch", me.id); return bad(BROKEN, 409); }
       acct = found;
-      const enabled = !!(acct.payouts_enabled && acct.charges_enabled);
+      const enabled = accountReady(acct);                  // the one rule, the same as Fund and releases use
       if (enabled !== payout[col.ready]) await db.update("payout_details", `id=eq.${me.id}&${col.id}=eq.${saved}`, { [col.ready]: enabled });
     } else if (col.mode === "live") {
       // only Cuvori can remove a live account, or the keys belong to another Stripe account: a person decides, nothing is replaced
@@ -46,7 +46,7 @@ export default safe(async (req) => {
   }
   if (req.method === "GET") {
     if (!acct) return json(200, { connected: false, payouts_enabled: false });
-    return json(200, { connected: true, payouts_enabled: !!(acct.payouts_enabled && acct.charges_enabled), requirements: acct.requirements && acct.requirements.currently_due || [] });
+    return json(200, { connected: true, payouts_enabled: accountReady(acct), requirements: acct.requirements && acct.requirements.currently_due || [] });
   }
   if (!acct) {
     // A new account. Its retry key names the account it replaces (or "first"): a retry of this attempt gets the same
