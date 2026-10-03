@@ -539,6 +539,22 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await fundWith(SERVER);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Cuvori pusėje kažkas nepavyko. Nieko nebuvo nuskaičiuota. Pabandykite dar kartą po kelių minučių. (kodas 1a2b3c4d)")),"a problem on Cuvori's side, client using Cuvori in Lithuanian: told in Lithuanian, with the ref");
   await p.evaluate(()=>{ window.__mockFnFail=null; document.querySelector('[data-lang="en"]').click(); });
+  // the check at Fund has just set the freelancer's "ready" mark off (Stripe restricted the account): the page refreshes the
+  // Order by itself, so the Fund button is gone at once, and the note under the Fund box says why in words that also fit a
+  // freelancer who did set up — never "has not set up payouts yet"
+  await openOrders();
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=false; });
+  await fundWith(NOT_READY);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This freelancer's Stripe account can't receive payments right now")) && await until(async()=>await p.locator('[data-caction="fund"]').count()===0)
+     && (await modal()).includes("This freelancer can't receive payments right now — ask them in the chat to check Settings → Payout details.") && !(await modal()).includes('has not set up payouts yet') && await unpaid(),
+     "the freelancer's account can't take money right now: the Order refreshes at once without the Fund button, and the note says why in words that fit a freelancer who did set up");
+  await p.evaluate(()=>{ window.__mockFnFail=null; document.querySelector('[data-lang="lt"]').click(); });
+  await openOrders();
+  ok(await until(async()=>(await modal()).includes("Šis specialistas šiuo metu negali gauti mokėjimų — paprašykite jo pokalbyje pasitikrinti skiltį Nustatymai → Apmokėjimo rekvizitai.")) && await p.locator('[data-caction="fund"]').count()===0,
+     "the same note, client using Cuvori in Lithuanian: told in Lithuanian, with the Lithuanian menu names");
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=true; document.querySelector('[data-lang="en"]').click(); });
+  await openOrders();
+  ok(await until(async()=>await p.locator('[data-caction="fund"]').count()===1) && !(await modal()).includes("can't receive payments right now — ask them"), "once the freelancer's account can take money again, the Fund button is back and the note is gone");
   // a stale page: the Order was paid meanwhile (another tab). Fund is refused in the page's language and the Order reloads without the button
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={status:c.status,funded_cents:c.funded_cents}; c.status='funded'; c.funded_cents=c.amount_cents; });
   await p.click('[data-caction="fund"]');
