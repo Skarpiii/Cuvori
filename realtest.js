@@ -608,6 +608,15 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   const inc=await modal();
   if(process.env.SHOT){ await p.locator('#modalRoot .modal').first().screenshot({path:process.env.SHOT+'-increase.png',timeout:5000}).catch(e=>console.log('screenshot skipped: '+e.message.split('\n')[0])); await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(400); await p.screenshot({path:process.env.SHOT+'-increase-phone.png',fullPage:false}).catch(()=>{}); await p.setViewportSize({width:1400,height:900}); await p.waitForTimeout(300); }
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='delivered' && c.amount_cents===25000 && c.funded_cents===20000; }) && await p.locator('[data-caction="release"]').count()===0 && (await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50') && inc.includes('Fund the extra €50 first, then you can approve it and pay the editor'),'an accepted +€50 not paid yet: no Approve & release, the client is told to fund the extra first');
+  // while the freelancer's account can't receive money (the "ready" mark is off), the button that pays the extra follows the same
+  // rule as Fund: it is not shown, the note under the money box says why, and it comes back once the account can receive again
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=false; });
+  await openOrders();
+  ok(await p.locator('[data-caction="topup"]').count()===0 && (await modal()).includes('added €50') && (await modal()).includes("This freelancer can't receive payments right now — ask them in the chat to check Settings → Payout details.") && await p.locator('[data-caction="release"]').count()===0,
+     "the freelancer's account can't receive money: the button that pays the extra €50 is not shown, the note says why, and nothing can be released");
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=true; });
+  await openOrders();
+  ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50') && !(await modal()).includes("can't receive payments right now — ask them"),'once the account can receive again, the button that pays the extra €50 is back and the note is gone');
   await p.click('[data-caction="topup"]'); await p.waitForTimeout(2500); await openOrders();
   ok(await db(()=>window.__mockdb.contracts.at(-1).funded_cents===25000) && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €250'),'once the €50 is funded, the client can approve and release all €250');
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo'); await p.waitForTimeout(1200);
