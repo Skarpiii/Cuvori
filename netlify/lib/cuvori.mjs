@@ -30,6 +30,7 @@ export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
 // Provider limits also depend on currency/payment method and must be checked at Checkout.
 export const MAX_PAYMENT_CENTS = 99999999;
 export const MIN_CENTS = 100, MAX_CENTS = 95000000, MIN_TOPUP_CENTS = 50;
+export const FEE_SANITY_PERCENT = 10, FEE_SANITY_FIXED_CENTS = 100;   // a quoted fee above 10% + €1 can only be a slip in the fee table (quoteFor)
 export const HOLDING = ["funded", "delivered", "disputed"];
 const holdsFunds = (c) => !!c && [...HOLDING, "releasing", "resolving"].includes(c.status);
 
@@ -314,6 +315,14 @@ export async function quoteFor(priceCents, currency = "EUR", country = null, cus
   if (qte.payer !== "client" || !Number.isSafeInteger(qte.processing_cents) || qte.processing_cents <= 0) {
     console.error("fee table: no client-paid processing fee for this payment — payments paused", JSON.stringify({ payer: qte.payer, schedule_id: qte.schedule_id, processing_cents: qte.processing_cents, region: qte.region }));
     throw fail("Payments through Cuvori are paused: the processing fee is not set up. Please contact Cuvori support.", 503, PAUSED);   // code: the page says "payments are paused" in the client's language; the admin also sees this sentence
+  }
+  // A slip in the fee table (32.5 instead of 3.25, €25 instead of €0.25) must never reach a card: the database allows any
+  // rate under 50%, so this is the ceiling — far above any real card rate, with room for the fixed part on the smallest
+  // payments. Above it no payment is taken until the table is corrected; the surplus would come back after payment, but
+  // nobody should see a fee like that on Stripe's page in the first place.
+  if (qte.processing_cents > Math.ceil(priceCents * FEE_SANITY_PERCENT / 100) + FEE_SANITY_FIXED_CENTS) {
+    console.error("fee table: the processing fee is far above any card rate — payments paused", JSON.stringify({ schedule_id: qte.schedule_id, percent: qte.percent, fixed_cents: qte.fixed_cents, price_cents: priceCents, processing_cents: qte.processing_cents, region: qte.region }));
+    throw fail(`Payments through Cuvori are paused: the fee table charges ${qte.percent}% + ${qte.fixed_cents} cents, which is far above any card rate. Correct it under Payment costs in the admin panel.`, 503, PAUSED);
   }
   if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400);
   return qte;
