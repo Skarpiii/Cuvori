@@ -11,6 +11,8 @@
 // "something went wrong", is noted on the Order for the admin in plain words (never Stripe's own text, which can name
 // Cuvori's Stripe account or end with part of its key) and cleared once it works again; and Cuvori remembers which
 // Stripe account its keys belong to, pausing every payment for keys of another Stripe account.
+// K5–K6: the database's "ready" mark (the page's Fund button) follows every check, under the one rule all four places use;
+// two overlapping checks of the same Order never wipe out or replace what the other just found.
 // The test-mode part runs here; the file then runs itself again with live keys for the live-mode part.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -210,6 +212,7 @@ if (!LIVE) {
     await call(fx.autoRelease, req("POST", "x", {}));
     vuln(d.status !== "completed" || d.money_error, `K2 once fixed, the next hourly run pays out -> Order ${d.status}, note gone: ${!d.money_error}`);
   }
+  const NEEDED = /^Stripe account check: the freelancer's Stripe account needs a check by hand \(Netlify log ref [0-9a-f]{8}\)$/;
   // ---------- K5: the page's "ready" mark follows what Stripe says, so the Fund button and the refusal agree ----------
   // The page shows the Fund button by the database's mark (editor_can_receive). Stripe normally keeps it current through the
   // account webhook; when that update never arrived, the check at Fund puts it right, in the mode's own column only.
@@ -228,6 +231,53 @@ if (!LIVE) {
     const writes = urls.slice(n0).filter(u => u.startsWith("PATCH ") && u.includes("/payout_details?")).map(u => decodeURIComponent(u));
     row().stripe_account_id = saved; row().stripe_payouts_enabled = true; delete row().stripe_live_payouts_enabled;
     vuln(writes.length !== 1 || !writes[0].includes(`id=eq.${users.ed.id}`) || !writes[0].includes(`stripe_account_id=eq.${other}`), `K5 the mark is written for the freelancer and the account the check looked at only -> ${writes.length ? writes.join(" | ") : "no write"}`);
+    // Stripe confirms the saved account is gone: the mark says no, but the account stays saved (only Payout details sets one aside, and only in test mode)
+    const hist = JSON.stringify(row().stripe_account_history || []);
+    hooks.stripe = gone403(ORIGINAL); const g = await fundIt(mk()); reset();
+    vuln(g.status !== 409 || row().stripe_payouts_enabled !== false || row().stripe_account_id !== ORIGINAL || JSON.stringify(row().stripe_account_history || []) !== hist,
+      `K5 Stripe says the saved account is gone -> Fund ${g.status}; mark now ${row().stripe_payouts_enabled}; account still saved: ${row().stripe_account_id === ORIGINAL}; history untouched: ${JSON.stringify(row().stripe_account_history || []) === hist}`);
+    row().stripe_payouts_enabled = true;
+    // the saved account belongs to someone else: the same
+    STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed2.id; const o = await fundIt(mk()); STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed.id;
+    vuln(o.status !== 409 || row().stripe_payouts_enabled !== false || row().stripe_account_id !== ORIGINAL, `K5 the saved account belongs to someone else -> Fund ${o.status}; mark now ${row().stripe_payouts_enabled}; account still saved: ${row().stripe_account_id === ORIGINAL}`);
+    row().stripe_payouts_enabled = true;
+    // a mark that says yes with nothing saved (only possible by hand): put right too
+    row().stripe_account_id = null; const n = await fundIt(mk()); row().stripe_account_id = ORIGINAL;
+    vuln(n.status !== 409 || row().stripe_payouts_enabled !== false, `K5 a "ready" mark with no account saved -> Fund ${n.status}; mark now ${row().stripe_payouts_enabled}`);
+    row().stripe_payouts_enabled = true;
+    // one rule everywhere: the transfers capability not active while Stripe's two flags say yes -> Fund, Payout details,
+    // the account webhook and the mark all say "not ready", none of them "ready"
+    STRIPE.accounts[ORIGINAL].capabilities.transfers = "pending";
+    const f1 = await fundIt(mk()); const m1 = row().stripe_payouts_enabled;
+    row().stripe_payouts_enabled = true; const g1 = await connect("GET"); const m2 = row().stripe_payouts_enabled;
+    row().stripe_payouts_enabled = true;
+    const w1 = await call(fx.webhook, req("POST", "x", signed({ type: "account.updated", data: { object: { id: ORIGINAL } } }))); const m3 = row().stripe_payouts_enabled;
+    STRIPE.accounts[ORIGINAL].capabilities.transfers = "active"; row().stripe_payouts_enabled = true;
+    vuln(f1.status !== 409 || (f1.json && f1.json.code) !== "freelancer_not_ready" || m1 !== false || g1.status !== 200 || g1.json.payouts_enabled !== false || m2 !== false || w1.status !== 200 || m3 !== false,
+      `K5 the transfers capability not active, Stripe's two flags yes -> Fund ${f1.status} ${f1.json && f1.json.code}, mark ${m1}; Payout details says ready: ${g1.json && g1.json.payouts_enabled}, mark ${m2}; after the webhook mark ${m3} (all must say not ready)`);
+  }
+  // ---------- K6: two checks of the same Order overlapping: the one that finishes last never wipes out or replaces what the other just found ----------
+  {
+    const quiet = console.error; console.error = () => {};
+    const OLD_FAILED = "Stripe check failed: Stripe did not answer (Netlify log ref 00000000)";
+    const OLD_NEEDED = "Stripe account check: the freelancer's Stripe account needs a check by hand (Netlify log ref 00000000)";
+    const during = (inner) => { let once = false; return async (path, method) => {   // while request A waits for Stripe, request B runs on the same Order
+      if (path === `/accounts/${ORIGINAL}` && method === "GET" && !once) { once = true; const outer = hooks.stripe; const r = await inner(); hooks.stripe = outer; return r; }
+      return null; }; };
+    // A reads an old failure note, Stripe is slow for A; meanwhile B fails and writes a newer note; A then succeeds and must not clear B's note
+    const c = mk({ money_error: OLD_FAILED }); let b = null;
+    hooks.stripe = during(async () => { hooks.stripe = (p2, m2) => p2 === `/accounts/${ORIGINAL}` && m2 === "GET" ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null; b = await fundIt(c); return null; });
+    const a = await fundIt(c); reset();
+    vuln(a.status !== 200 || !b || b.status !== 500 || !/^Stripe check failed: Stripe had a problem on its side \(Netlify log ref [0-9a-f]{8}\)$/.test(c.money_error || ""),
+      `K6 an older check succeeds after a newer one failed -> A ${a.status}, B ${b && b.status}; the Order's note: ${c.money_error || "none"} (must still be B's "Stripe had a problem")`);
+    // A reads an old "needs a check" note; meanwhile B finds the account belongs to someone else and writes a newer one; A then fails and must not replace it
+    const d = mk({ money_error: OLD_NEEDED }); let b2 = null;
+    hooks.stripe = during(async () => { STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed2.id; b2 = await fundIt(d); STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed.id;
+      return [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }]; });
+    const a2 = await fundIt(d); reset(); row().stripe_payouts_enabled = true;
+    vuln(a2.status !== 500 || !b2 || b2.status !== 409 || !NEEDED.test(d.money_error || "") || d.money_error === OLD_NEEDED,
+      `K6 an older check fails after a newer one found the account belongs to someone else -> A ${a2.status}, B ${b2 && b2.status}; the Order's note: ${d.money_error || "none"} (must still be B's "needs a check by hand")`);
+    console.error = quiet;
   }
   // ---------- K3: Cuvori remembers which Stripe account its keys belong to ----------
   {
@@ -257,7 +307,6 @@ if (!LIVE) {
     const ok = await fundIt(mk());
     vuln(ok.status !== 200, `K4 once Stripe answers again -> Fund ${ok.status}`);
   }
-  const NEEDED = /^Stripe account check: the freelancer's Stripe account needs a check by hand \(Netlify log ref [0-9a-f]{8}\)$/;
   // ---------- M1: keys and database in different modes say "paused", even when the freelancer has nothing saved yet ----------
   {
     const keep = row().stripe_account_id; row().stripe_account_id = null;
