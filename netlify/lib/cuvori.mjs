@@ -214,17 +214,23 @@ async function sbFetch(path, init = {}) {
     r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, { ...init, signal: AbortSignal.timeout(8000), headers: { apikey: SERVICE_KEY, ...auth, "content-type": "application/json", Prefer: init.prefer || "return=representation", ...(init.headers || {}) } });
     text = await r.text();
   } catch (e) { try { e.db = true; } catch {} throw e; }       // marked as the database's, so a note can say so (checkNote)
-  let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!r.ok) { const e = new Error((data && data.message) || `Supabase ${r.status}`); e.status = r.status; e.db = true; throw e; }
+  let data = null, unreadable = false; try { data = text ? JSON.parse(text) : null; } catch { data = text; unreadable = true; }
+  if (!r.ok) { const e = new Error((!unreadable && data && data.message) || `Supabase ${r.status}`); e.status = r.status; e.db = true; throw e; }
+  // The database always answers in JSON (or with nothing). A "success" that cannot be read is a broken answer — something
+  // in between replaced it, or it was cut off — and it must never pass for a real one: a check could take it for "no, not banned".
+  if (unreadable) throw dbError("Unreadable database response", r.status);
   return data;
 }
+const dbError = (msg, status) => { const e = new Error(msg); e.db = true; if (status) e.status = status; return e; };
+// a table answer is a list of rows (or nothing, with return=minimal): anything else is a broken answer, never a row
+const rowsOf = async (p) => { const d = await p; if (d != null && !Array.isArray(d)) throw dbError("Unexpected database response"); return d; };
 const q = encodeURIComponent;
 export const db = {
-  select: (table, query) => sbFetch(`/${table}?${query}`),
-  one: async (table, query) => { const rows = await sbFetch(`/${table}?${query}&limit=1`); return rows && rows[0] || null; },
-  update: (table, query, patch) => sbFetch(`/${table}?${query}`, { method: "PATCH", body: JSON.stringify(patch) }),
-  insert: (table, row) => sbFetch(`/${table}`, { method: "POST", body: JSON.stringify(row) }),
-  remove: (table, query) => sbFetch(`/${table}?${query}`, { method: "DELETE" }),
+  select: (table, query) => rowsOf(sbFetch(`/${table}?${query}`)),
+  one: async (table, query) => { const rows = await rowsOf(sbFetch(`/${table}?${query}&limit=1`)); return rows && rows[0] || null; },
+  update: (table, query, patch) => rowsOf(sbFetch(`/${table}?${query}`, { method: "PATCH", body: JSON.stringify(patch) })),
+  insert: (table, row) => rowsOf(sbFetch(`/${table}`, { method: "POST", body: JSON.stringify(row) })),
+  remove: (table, query) => rowsOf(sbFetch(`/${table}?${query}`, { method: "DELETE" })),
   rpc: (fn, args) => sbFetch(`/rpc/${fn}`, { method: "POST", body: JSON.stringify(args || {}) }),
   contract: (id) => { if (!isUuid(id)) throw fail("Bad order id", 400); return db.one("contracts", `id=eq.${id}&select=*`); },
   milestone: (id) => { if (!isUuid(id)) throw fail("Bad milestone id", 400); return db.one("order_milestones", `id=eq.${id}&select=*`); },
@@ -267,7 +273,14 @@ export async function userFromRequest(req) {
   if (!u || !isUuid(u.id)) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503);
   return db.one("profiles", `id=eq.${u.id}&select=id,email,first_name,role,is_admin,banned`);
 }
-export const isBanned = async (uid) => { const p = await db.one("profiles", `id=eq.${uid}&select=banned`); return !p || !!p.banned; };
+// No profile counts as banned. The mark must be a real yes or no (the column is boolean not null): a row without one is a
+// broken answer and stops the request, never "not banned".
+export const isBanned = async (uid) => {
+  const p = await db.one("profiles", `id=eq.${uid}&select=banned`);
+  if (!p) return true;
+  if (typeof p.banned !== "boolean") throw dbError("profile answer without a banned mark");
+  return p.banned;
+};
 
 // How often one person may make a payment function ask Stripe. Stripe takes only so many requests a second from Cuvori
 // as a whole (25 a second for one kind, such as checking a freelancer's account), and only so many checks a month
