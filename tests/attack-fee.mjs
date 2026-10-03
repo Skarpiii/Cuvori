@@ -167,6 +167,24 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   const ok = mk({ amount_cents: 10000 }); const f = await fund(fx, ok);
   vuln(!f.checkout || f.checkout.status !== 200 || ok.status !== "funded", `F12 with a proper client-paid fee row, payment works as before -> HTTP ${f.checkout && f.checkout.status}, status=${ok.status}`);
   reset();
+  // a slip while editing the fee table (the database allows any rate under 50%): no card is ever charged a fee like that
+  const slip = (pct, fixed) => (p) => { const total = Math.ceil((p + fixed) / (1 - pct / 100)); return { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: fixed, schedule_id: 3, region: "ANY" }; };
+  for (const [name, pct, fixed, price] of [["32.5% instead of 3.25%", 32.5, 25, 10000], ["€25 fixed instead of €0.25", 3.25, 2500, 10000], ["a €25 fixed part on a €10 Order", 3.25, 2500, 1000]]) {
+    hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, slip(pct, fixed)(args.p_price_cents)] : null;
+    const c = mk({ amount_cents: price }); const sessionsBefore = Object.keys(STRIPE.sessions).length;
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status !== 503 || (r.json && r.json.code) !== "payments_paused" || !/far above any card rate/.test(r.json && r.json.error || "") || Object.keys(STRIPE.sessions).length !== sessionsBefore || c.stripe_checkout_id,
+      `F12 the fee table slipped to ${name} -> HTTP ${r.status} ${r.json && r.json.code || ""}: ${r.json && r.json.error || ""} (must pause, no Stripe page made)`);
+    reset();
+  }
+  // the real ceiling row (3.25% + €0.25) keeps working on every size of payment, the smallest included
+  for (const [name, price] of [["a €1 Order", 100], ["a €0.50 price increase", 50], ["a €950,000 Order", 95000000]]) {
+    hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, slip(3.25, 25)(args.p_price_cents)] : null;
+    const c = price === 50 ? mk({ amount_cents: 10050, status: "funded", funded_cents: 10000, stripe_payment_intent: "pi_fundedbefore" }) : mk({ amount_cents: price });
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    vuln(r.status !== 200, `F12 the real ceiling row on ${name} -> HTTP ${r.status} ${r.json && r.json.error || ""} (must work)`);
+    reset();
+  }
 }
 
 // ---------- F13: hold first, charge after — a payment that comes in after its Order changed is never charged ----------
