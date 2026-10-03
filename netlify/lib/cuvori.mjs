@@ -313,7 +313,7 @@ export async function quoteFor(priceCents, currency = "EUR", country = null, cus
   // whole fee to Cuvori, so no payment is taken until the fee table is fixed.
   if (qte.payer !== "client" || !Number.isSafeInteger(qte.processing_cents) || qte.processing_cents <= 0) {
     console.error("fee table: no client-paid processing fee for this payment — payments paused", JSON.stringify({ payer: qte.payer, schedule_id: qte.schedule_id, processing_cents: qte.processing_cents, region: qte.region }));
-    throw fail("Payments through Cuvori are paused: the processing fee is not set up. Please contact Cuvori support.", 503);
+    throw fail("Payments through Cuvori are paused: the processing fee is not set up. Please contact Cuvori support.", 503, PAUSED);   // code: the page says "payments are paused" in the client's language; the admin also sees this sentence
   }
   if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400);
   return qte;
