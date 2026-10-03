@@ -13,6 +13,7 @@
 // Stripe account its keys belong to, pausing every payment for keys of another Stripe account.
 // K5–K6: the database's "ready" mark (the page's Fund button) follows every check, under the one rule all four places use;
 // two overlapping checks of the same Order never wipe out or replace what the other just found.
+// K7: a broken answer from the database (not JSON, cut off, a row without its yes/no) stops a payment, never passes for "not banned".
 // The test-mode part runs here; the file then runs itself again with live keys for the live-mode part.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -277,6 +278,40 @@ if (!LIVE) {
     const a2 = await fundIt(d); reset(); row().stripe_payouts_enabled = true;
     vuln(a2.status !== 500 || !b2 || b2.status !== 409 || !NEEDED.test(d.money_error || "") || d.money_error === OLD_NEEDED,
       `K6 an older check fails after a newer one found the account belongs to someone else -> A ${a2.status}, B ${b2 && b2.status}; the Order's note: ${d.money_error || "none"} (must still be B's "needs a check by hand")`);
+    console.error = quiet;
+  }
+  // ---------- K7: a broken answer from the database never passes for a real one ----------
+  // "Is this freelancer banned?" reads one row. The database always answers in JSON; an answer that isn't (something in
+  // between replaced it, or it was cut off), a row without the yes/no, or a yes/no that isn't one must stop the payment —
+  // never count as "not banned". The real answers keep working exactly as before.
+  {
+    const quiet = console.error; console.error = () => {};
+    const dbSays = (body, status = 200) => async (method, table, search) => method === "GET" && table === "profiles" && String(search).includes(users.ed.id)   // the freelancer's row only
+      ? new Response(body, { status, headers: { "content-type": "application/json" } }) : null;
+    for (const [name, body, want, code] of [
+      ["a success answer that isn't JSON (a proxy's HTML page)", "<html><body>Bad gateway</body></html>", 500, "server_error"],
+      ["a cut-off answer", '[{"banned":fa', 500, "server_error"],
+      ["a row without the banned mark", "[{}]", 500, "server_error"],
+      ["a banned mark that isn't yes or no", '[{"banned":"false"}]', 500, "server_error"],
+      ["one object instead of a list", '{"banned":false}', 500, "server_error"],
+      ["banned: true", '[{"banned":true}]', 409, "freelancer_unavailable"],
+      ["banned: false", '[{"banned":false}]', 200, undefined],
+      ["no profile at all", "[]", 409, "freelancer_unavailable"],
+    ]) {
+      const c = mk(); const pages = Object.keys(STRIPE.sessions).length;
+      hooks.db = dbSays(body); const r = await fundIt(c); reset();
+      vuln(r.status !== want || (r.json && r.json.code) !== code || (want !== 200 && Object.keys(STRIPE.sessions).length !== pages),
+        `K7 the database answers ${name} -> Fund ${r.status} ${r.json && r.json.code || ""} (must be ${want}${code ? " " + code : ""})`);
+    }
+    // the same broken answer while the Order itself is read: "something went wrong", not a made-up "not your order"
+    const c2 = mk(); hooks.db = async (method, table) => method === "GET" && table === "contracts" ? new Response("<html>oops</html>", { status: 200 }) : null;
+    const r2 = await fundIt(c2); reset();
+    vuln(r2.status !== 500 || (r2.json && r2.json.code) !== "server_error", `K7 the database answers with a non-JSON page while the Order is read -> Fund ${r2.status} ${r2.json && r2.json.error}`);
+    // a real database error (status 503) still stops the payment as before, and a check that fails this way is noted on the Order
+    const c3 = mk(); hooks.db = async (method, table) => method === "GET" && table === "payout_details" ? new Response("<html>oops</html>", { status: 200 }) : null;
+    const r3 = await fundIt(c3); reset();
+    vuln(r3.status !== 500 || !/^Stripe check failed: Cuvori's database had a problem \(Netlify log ref [0-9a-f]{8}\)$/.test(c3.money_error || ""),
+      `K7 a non-JSON page while the freelancer's saved account is read -> Fund ${r3.status}; note: ${c3.money_error || "none"}`);
     console.error = quiet;
   }
   // ---------- K3: Cuvori remembers which Stripe account its keys belong to ----------
