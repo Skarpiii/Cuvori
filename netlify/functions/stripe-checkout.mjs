@@ -104,7 +104,9 @@ export default safe(async (req) => {
     cancel_url: `${SITE_URL}/#orders?cancelled=${c.id}`,
     line_items: items,
     payment_intent_data: { capture_method: "manual", transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
-    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind },
+    // the breakdown travels with the page (Stripe keeps up to 500 characters per value): when this page's payment is confirmed,
+    // this breakdown — not the one from a page made later with a changed fee table — is the one saved on the Order
+    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
   }, { idempotency: `checkout_hold_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}` });
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
