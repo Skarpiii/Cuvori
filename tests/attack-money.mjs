@@ -459,6 +459,17 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const pages = Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id), open = pages.filter(s => s.status === "open");
   vuln(a.status !== 200 || b.status !== 200 || open.length !== 1 || !a.json || !b.json || a.json.url !== b.json.url || open[0].id !== c.stripe_checkout_id,
     `B30a two Fund clicks at the same moment -> ${a.status}/${b.status}; pages made ${pages.length}, still open ${open.length}, both tabs got the same page: ${!!(a.json && b.json && a.json.url === b.json.url)} (must be one live page, handed to both)`);
+  // two tabs in the same language: Stripe hands both the same page (the same request twice). The second tab read the Order
+  // before the first one saved the page; its save then fails, and it must hand the same page back, never close it.
+  const e = mk({ amount_cents: 10000 }); const before = { ...e };
+  const t1 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: e.id, lang: "en" } }));
+  let first = true;
+  hooks.db = async (method, table, search) => { if (method === "GET" && table === "contracts" && search.includes(`id=eq.${e.id}`) && first) { first = false; return new Response(JSON.stringify([before]), { status: 200 }); } return null; };   // tab 2 read the Order a moment earlier
+  const t2 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: e.id, lang: "en" } }));
+  reset();
+  const shared = STRIPE.sessions[e.stripe_checkout_id];
+  vuln(t1.status !== 200 || t2.status !== 200 || !t1.json || !t2.json || t1.json.url !== t2.json.url || !shared || shared.status !== "open" || Object.values(STRIPE.sessions).filter(x => x.client_reference_id === e.id).length !== 1,
+    `B30c two tabs in the same language a moment apart -> ${t1.status}/${t2.status}; same page for both: ${!!(t1.json && t2.json && t1.json.url === t2.json.url)}; the page is ${shared && shared.status} (must be one page, still open, handed to both)`);
   // two holds for one Order (only possible before this check existed, or by hand): confirmed together, charged once
   const d = mk({ amount_cents: 10000 });
   await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: d.id } }));
