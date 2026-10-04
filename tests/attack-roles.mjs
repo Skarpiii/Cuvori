@@ -179,7 +179,7 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
 // client's language and reloads the Order. Nothing is charged.
 {
   const c = mk({ amount_cents: 10000, price: 100 });
-  hooks.db = async (method, table, search) => { if (method === "PATCH" && table === "contracts" && search.includes(`id=eq.${c.id}`) && search.includes("stripe_checkout_id") === false) { c.amount_cents = 12000; c.price = 120; } return null; };   // the price changes just before the save
+  hooks.db = async (method, table, search, body) => { if (method === "PATCH" && table === "contracts" && search.includes(`id=eq.${c.id}`) && String(body || "").includes("stripe_checkout_id")) { c.amount_cents = 12000; c.price = 120; } return null; };   // the price changes just before the save
   const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
   reset();
   const made = Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id);

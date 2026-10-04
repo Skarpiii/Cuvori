@@ -445,5 +445,35 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(moneyOut(c).transferred !== 8000 || ms[0].status !== "released" || c.released_cents !== 8000 || c.status !== "funded", `B29b the same milestone approved three times at once -> ${rs.map(r => r.status).join("/")}, transferred=${moneyOut(c).transferred}, milestone=${ms[0].status}, released_cents=${c.released_cents}, order=${c.status}`);
   reset();
 }
+// ---------- B30: two Fund requests at the same moment, and two paid pages at the same moment ----------
+// Two tabs (here: two page languages, so Stripe makes two different pages) click Fund together. One Order must never end
+// up with two pages that could both be paid: the second request finds the first one's page on the Order and hands that
+// page back. And if two paid pages for one Order ever arrive together, only one may be charged: the other hold is
+// released, nothing refunded minus a card fee.
+{
+  const c = mk({ amount_cents: 10000 });
+  const [a, b] = await Promise.all([
+    call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } })),
+    call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "lt" } })),
+  ]);
+  const pages = Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id), open = pages.filter(s => s.status === "open");
+  vuln(a.status !== 200 || b.status !== 200 || open.length !== 1 || !a.json || !b.json || a.json.url !== b.json.url || open[0].id !== c.stripe_checkout_id,
+    `B30a two Fund clicks at the same moment -> ${a.status}/${b.status}; pages made ${pages.length}, still open ${open.length}, both tabs got the same page: ${!!(a.json && b.json && a.json.url === b.json.url)} (must be one live page, handed to both)`);
+  // two holds for one Order (only possible before this check existed, or by hand): confirmed together, charged once
+  const d = mk({ amount_cents: 10000 });
+  await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: d.id } }));
+  const A = STRIPE.sessions[d.stripe_checkout_id], B = { ...A, id: "cs_second" + Math.random().toString(36).slice(2, 8), status: "open", payment_status: "unpaid", payment_intent: null };
+  STRIPE.sessions[B.id] = B;
+  const sA = pay(A.id), sB = pay(B.id);
+  const [wa, wb] = await Promise.all([
+    call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: sA } }))),
+    call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: sB } }))),
+  ]);
+  const charged = [sA, sB].filter(s => STRIPE.intents[s.payment_intent].status === "succeeded").length, released = [sA, sB].filter(s => STRIPE.intents[s.payment_intent].status === "canceled").length;
+  const back = moneyOut(d).refunded + moneyOut(d).orphans;                                   // Order money or a late payment sent back (the card-fee surplus going back is normal)
+  vuln(charged !== 1 || released !== 1 || d.status !== "funded" || d.funded_cents !== 10000 || back !== 0 || ledger(d, "fund").length !== 1,
+    `B30b two paid pages for one Order confirmed together -> webhooks ${wa.status}/${wb.status}; charged ${charged}, holds released ${released}, Order ${d.status} with ${d.funded_cents}, money sent back ${back}, ledger lines ${ledger(d, "fund").length} (must be charged once, the other released, nothing sent back)`);
+  reset();
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
