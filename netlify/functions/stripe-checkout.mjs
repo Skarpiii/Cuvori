@@ -1,7 +1,7 @@
 // POST { contract_id, lang } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -110,10 +110,24 @@ export default safe(async (req) => {
   }, { idempotency: `checkout_hold_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}` });
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
-  const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&amount_cents=eq.${price}`, patch);
-  // code: the page says it in the client's language and reloads the Order, so they see the new details
-  if (!rows || !rows.length) { await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {}); return json(409, { error: "The order changed, reload", code: "order_changed" }); }
+  // Saved only if the Order is still exactly as this request read it: same status, same price, same money paid in, and the
+  // same page on record. Two Fund requests at the same moment (two tabs) then cannot both save a page: the second finds
+  // the first one's page on the Order and hands that page back, so one Order never has two pages that could both be paid.
+  const prev = c.stripe_checkout_id;
+  const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&${moneyUnchanged(c)}&${prev ? `stripe_checkout_id=eq.${encodeURIComponent(prev)}` : "stripe_checkout_id=is.null"}`, patch);
+  if (!rows || !rows.length) {
+    await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {});
+    const now = await db.contract(c.id);
+    if (now && now.status === c.status && now.amount_cents === c.amount_cents && (now.funded_cents ?? null) === (c.funded_cents ?? null) && now.stripe_checkout_id && now.stripe_checkout_id !== prev && isSession(now.stripe_checkout_id)) {
+      const other = await stripe("GET", `/checkout/sessions/${now.stripe_checkout_id}`).catch(() => null);
+      const om = other && other.metadata || {};
+      if (other && other.status === "open" && other.url && other.client_reference_id === c.id && om.kind === kind && Number(om.amount_cents) === amount && Number.isSafeInteger(Number(om.fee_cents)))
+        return json(200, { url: other.url, amount, fee: Number(om.fee_cents), total: amount + Number(om.fee_cents), cuvori_fee: 0, kind, held: heldCents(c) });
+    }
+    // code: the page says it in the client's language and reloads the Order, so they see the new details
+    return json(409, { error: "The order changed, reload", code: "order_changed" });
+  }
   // only one live Checkout per Order: the previous page (another tab, an old link) can no longer be paid
-  if (c.stripe_checkout_id && c.stripe_checkout_id !== session.id && isSession(c.stripe_checkout_id)) await stripe("POST", `/checkout/sessions/${c.stripe_checkout_id}/expire`).catch(() => {});
+  if (prev && prev !== session.id && isSession(prev)) await stripe("POST", `/checkout/sessions/${prev}/expire`).catch(() => {});
   return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
 });
