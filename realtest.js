@@ -560,6 +560,19 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('[data-caction="fund"]');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This Order isn't waiting for a payment right now — it may already be paid.")) && await until(async()=>await p.locator('[data-caction="fund"]').count()===0),'Fund on a stale page: the client is told the Order is not waiting for a payment, and the Order reloads without the Fund button');
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.status=c.__was.status; c.funded_cents=c.__was.funded_cents; delete c.__was; });
+  // the Order changed in the moment of clicking (an amendment accepted just then): said in the client's language, and the
+  // Order reloads so the client sees the new price before trying again
+  await openOrders();
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={amount_cents:c.amount_cents,price:c.price}; window.__mockFnFail={"stripe-checkout":[409,{error:"The order changed, reload",code:"order_changed"}]}; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('[data-caction="fund"]');
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.amount_cents+=5000; c.price=c.amount_cents/100; });
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This Order changed a moment ago (for example its price). It has been refreshed — please check it and try again. Nothing was charged.")) && await until(async()=>(await modal()).includes('€250.00')) && await unpaid(),'the Order changed in the moment of clicking Fund: the client is told in plain words, nothing is charged, and the Order reloads with the new price');
+  await p.evaluate(()=>{ window.__mockFnFail=null; const c=window.__mockdb.contracts.at(-1); c.amount_cents=c.__was.amount_cents; c.price=c.__was.price; delete c.__was; document.querySelector('[data-lang="lt"]').click(); });
+  await openOrders();
+  await p.evaluate(()=>{ window.__mockFnFail={"stripe-checkout":[409,{error:"The order changed, reload",code:"order_changed"}]}; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('[data-caction="fund"]');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Šis užsakymas ką tik pasikeitė (pavyzdžiui, jo kaina). Jis atnaujintas — peržiūrėkite jį ir pabandykite dar kartą. Nieko nebuvo nuskaičiuota.")) && !(await p.textContent('#toastWrap')).includes('order changed, reload'),'the same, client using Cuvori in Lithuanian: told in Lithuanian');
+  await p.evaluate(()=>{ window.__mockFnFail=null; document.querySelector('[data-lang="en"]').click(); });
   await openOrders();
   await p.click('[data-caction="fund"]'); await p.waitForTimeout(2500);
   await signin('maya@test.com'); await openOrders();
