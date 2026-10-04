@@ -467,6 +467,7 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('[data-caction="fund"]'); await p.waitForTimeout(2500);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); const ch=window.__fakeStripe.charges.at(-1); return c.status==='funded' && c.funded_cents===50000 && ch.total===50787 && ch.amount===50000 && ch.fee===787; }),'funded: the provider charged €507.87, the Order holds exactly €500');
   ok((await modal()).includes('€500 secured for this project') && (await modal()).includes('Cuvori fee: €0'),'client sees €500 secured, Cuvori fee €0');
+  ok(await p.evaluate(()=>{ const b=window.__lastConfirm, c=window.__mockdb.contracts.at(-1); return !!b && b.contract_id===c.id && /^cs_test_mock[a-z0-9]+$/.test(b.session_id||''); }),'back from Stripe: the check is asked about the very page that was paid (its id comes back in the return link)');
   ok(await db(()=>window.__mockdb.messages.filter(m=>m.kind==='contract').at(-1).payload.event==='funded') && (await p.evaluate(()=>{ const m=window.__mockdb.messages.filter(x=>x.kind==='contract').at(-1); return m.payload.amount_cents; }))===50000,'chat card: payment secured — €500');
   await signin('maya@test.com'); await openOrders();
   ok((await modal()).includes('€500 secured — you can begin work') && await p.locator('[data-caction="deliver"]').count()===1,'freelancer: €500 secured, can begin');
@@ -644,6 +645,14 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#orders?paid='+promoId);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order could no longer take the payment, so your card was not charged.'),4000),'back from Stripe after the Order could no longer take the payment: the client is told the card was not charged');
   await p.evaluate(()=>{ delete window.__mockdb.contracts.at(-1).__holdReleased; document.querySelector('#modalRoot').innerHTML=''; });
+  ok(await p.evaluate((id)=>!!window.__lastConfirm && window.__lastConfirm.contract_id===id && window.__lastConfirm.session_id===undefined,promoId),'a return link without a page id: the check falls back to the Order\'s own page');
+  // the way Stripe sends the client back: the page id before the #, the Order after it
+  await p.evaluate((id)=>{ history.replaceState(null,'',location.pathname+'?cs=cs_test_fromquery123#orders'); location.hash='orders?paid='+id; },promoId); await p.waitForTimeout(900);
+  ok(await p.evaluate((id)=>!!window.__lastConfirm && window.__lastConfirm.contract_id===id && window.__lastConfirm.session_id==='cs_test_fromquery123' && !location.search.includes('cs='),promoId),'back from Stripe with the page id before the #: that page is checked, and the id is taken out of the address');
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
+  await p.evaluate((id)=>{ history.replaceState(null,'',location.pathname+'?cs={CHECKOUT_SESSION_ID}#orders'); location.hash='orders?paid='+id; },promoId); await p.waitForTimeout(900);
+  ok(await p.evaluate((id)=>!!window.__lastConfirm && window.__lastConfirm.contract_id===id && window.__lastConfirm.session_id===undefined,promoId),'a return link where Stripe did not fill in the page id: nothing made-up is sent, the check falls back to the Order\'s own page');
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   // scenario: €1,000 in three milestones — partial release, the rest stays secured
   await signin('maya@test.com');

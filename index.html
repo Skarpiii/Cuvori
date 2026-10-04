@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-I7KFZQBcGEE0QQVrndQ6PMhhFJnd5luNsTD8rnSaVvA=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-034U3wdx636wTrPWx9lWWaQcgeJL6dZd1FV/BjNBgRY=' 'sha256-55g2VujpRka1rUJCWZLYxfb1ueUtJtsUKAAW5vcUcTk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -7301,13 +7301,18 @@
   // ---------- return from Stripe Checkout ----------
   async function handleContractsReturn(q){
     if(!q) return;
+    // the id of the page just paid: Stripe puts it in the return link, before the # — read once, then taken out of the address
+    const sq=new URLSearchParams(location.search), cs=q.get("cs")||sq.get("cs");
+    if(sq.has("cs")){ sq.delete("cs"); const rest=sq.toString(); history.replaceState(null,"",location.pathname+(rest?"?"+rest:"")+location.hash); }
     const paid=q.get("paid"), cancelled=q.get("cancelled");
     if(cancelled){ toast(t("es_cancelled")); return; }
     if(!paid) return;
     toast(t("es_confirming"));
     // 1) ask the payment functions to check with the provider directly (a lost or late webhook then changes nothing)
     let ok=false, released=false;
-    try{ const j=await fnCall("stripe-confirm",{ contract_id:paid }); ok=!!j&&(j.result==="funded"||j.result==="already"); released=!!j&&j.result==="released"; }catch(e){}
+    // that very page is checked, even if another tab made a newer one
+    const sid=typeof cs==="string"&&/^cs_[A-Za-z0-9_]{4,120}$/.test(cs)?cs:undefined;
+    try{ const j=await fnCall("stripe-confirm",{ contract_id:paid, session_id:sid }); ok=!!j&&(j.result==="funded"||j.result==="already"); released=!!j&&j.result==="released"; }catch(e){}
     // hold first, charge after: the Order could no longer take the payment, so the hold on the card was released and nothing was charged
     if(released){ toast(t("es_holdReleased")); refreshOrdersPage(); openOrder(paid); return; }
     // 2) then wait for the row, in case the webhook is the one that lands first
