@@ -380,7 +380,8 @@ export async function lockOrder(id) {
   } while (Date.now() < until);
   throw fail("Another payment step on this order is still running. Please try again in a moment.", 409);
 }
-async function moneyPost(scope, path, body) {
+// Also used to make payment pages (stripe-checkout): one key per exact request, renewed after a definite Stripe failure.
+export async function moneyPost(scope, path, body) {
   const key = await moneyKey(scope);
   try { return await stripe("POST", path, body, { idempotency: key }); }
   catch (e) {
