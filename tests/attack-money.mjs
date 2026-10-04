@@ -486,5 +486,74 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
     `B30b two paid pages for one Order confirmed together -> webhooks ${wa.status}/${wb.status}; charged ${charged}, holds released ${released}, Order ${d.status} with ${d.funded_cents}, money sent back ${back}, ledger lines ${ledger(d, "fund").length} (must be charged once, the other released, nothing sent back)`);
   reset();
 }
+// ---------- B31: the payment page a click gets, and the page the return checks ----------
+// Every Fund click must end on a page that can be paid and is the Order's page: after switching language and back, after
+// the request changed in some detail (a new version, a changed title), after Stripe failed once. And when the client comes
+// back from the page they paid, that very page is confirmed, even if another tab has made a newer one meanwhile.
+{
+  const click = (c, lang) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang } }));
+  const confirm = (c, session_id) => call(fx.confirm, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, session_id } }));
+  const pagesOf = (c) => Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id);
+  const urlOk = (r, c) => !!(r.json && STRIPE.sessions[c.stripe_checkout_id] && r.json.url === STRIPE.sessions[c.stripe_checkout_id].url && STRIPE.sessions[c.stripe_checkout_id].status === "open");
+  // a) English, Lithuanian, English again within the half hour: the third click must get a page that can be paid
+  const a = mk({ amount_cents: 10000 });
+  const a1 = await click(a, "en"), a2 = await click(a, "lt"), a3 = await click(a, "en");
+  const aOpen = pagesOf(a).filter(s => s.status === "open");
+  vuln(a1.status !== 200 || a2.status !== 200 || a3.status !== 200 || !urlOk(a3, a) || aOpen.length !== 1,
+    `B31a English, Lithuanian, then English again -> ${a1.status}/${a2.status}/${a3.status}; the client is sent to a page that is ${a3.json && Object.values(STRIPE.sessions).find(s => s.url === a3.json.url)?.status}, the Order's page is ${STRIPE.sessions[a.stripe_checkout_id]?.status}, open pages ${aOpen.length} (must be one open page: the Order's, and the one the client gets)`);
+  const back = (STRIPE.sessions[a.stripe_checkout_id]?.params || {}).success_url || "";
+  vuln(!back.endsWith(`/?cs={CHECKOUT_SESSION_ID}#orders?paid=${a.id}`),
+    `B31a1 the return link carries the paid page's id where Stripe fills it in -> ${back} (must end in /?cs={CHECKOUT_SESSION_ID}#orders?paid=<the Order>)`);
+  // ...and the same click once more (Back, then Fund again): the same page again, still open, no new one
+  const before = pagesOf(a).length, a4 = await click(a, "en");
+  vuln(a4.status !== 200 || !a3.json || !a4.json || a4.json.url !== a3.json.url || !urlOk(a4, a) || pagesOf(a).length !== before,
+    `B31a2 the same click again -> ${a4.status}; same page ${!!(a3.json && a4.json && a4.json.url === a3.json.url)}, pages made ${pagesOf(a).length - before} (must be the same open page, none made)`);
+  // b) the request changed in a detail that is not the amount (here the Order's title; a new version changing a page text
+  // is the same thing) between two clicks in the same half hour
+  const b = mk({ amount_cents: 10000, title: "First title" });
+  const b1 = await click(b, "en"); b.title = "Second title"; const b2 = await click(b, "en");
+  vuln(b1.status !== 200 || b2.status !== 200 || !urlOk(b2, b) || pagesOf(b).filter(s => s.status === "open").length !== 1,
+    `B31b the request changed between two clicks -> ${b1.status}/${b2.status} ${b2.status !== 200 ? JSON.stringify(b2.json) : ""} (must be a new open page, the old one closed)`);
+  // c) Stripe fails once while making the page (an error it saves for its key), then works again
+  const c = mk({ amount_cents: 10000 });
+  let fails = 1;
+  hooks.stripe = async (path, method) => (path === "/checkout/sessions" && method === "POST" && fails-- > 0 ? [500, { error: { type: "api_error", message: "An unknown error occurred" } }] : null);
+  const c1 = await click(c, "en"), c2 = await click(c, "en");
+  reset();
+  vuln(c1.status < 500 || c2.status !== 200 || !urlOk(c2, c),
+    `B31c Stripe failed once, then works -> first ${c1.status}, second ${c2.status} ${c2.status !== 200 ? JSON.stringify(c2.json) : ""} (the second click must get a page)`);
+  // d) Fund clicked again after paying, before the payment was confirmed: the paid page is handed back, no new page is made
+  const d = mk({ amount_cents: 10000 });
+  const d1 = await click(d, "en"); pay(d.stripe_checkout_id); const dn = pagesOf(d).length; const d2 = await click(d, "en");
+  vuln(d2.status !== 200 || !d1.json || !d2.json || d2.json.url !== d1.json.url || pagesOf(d).length !== dn,
+    `B31d Fund again after paying, before the confirmation -> ${d2.status}; same page ${!!(d1.json && d2.json && d1.json.url === d2.json.url)}, new pages ${pagesOf(d).length - dn} (must be the paid page, no new one)`);
+  // e) paid in one tab, a newer page made in another tab before the confirmation; back from the paid page
+  const e = mk({ amount_cents: 10000 });
+  await click(e, "en"); const paidId = e.stripe_checkout_id; pay(paidId);
+  await click(e, "lt"); const replaced = e.stripe_checkout_id !== paidId;  // the other tab: a new page now on the Order
+  const e1 = await confirm(e, paidId);
+  const eIntent = STRIPE.intents[STRIPE.sessions[paidId].payment_intent];
+  vuln(!replaced || e1.status !== 200 || e.status !== "funded" || e.funded_cents !== 10000 || ledger(e, "fund").length !== 1 || eIntent.status !== "succeeded",
+    `B31e back from the paid page while another tab made a newer one -> ${e1.status} ${JSON.stringify(e1.json)}; Order ${e.status} with ${e.funded_cents}, the card hold is ${eIntent.status} (must be funded, the payment taken)`);
+  // f) the return names a page of another Order (paid): never applied through this Order; this Order's own page is checked
+  const f = mk({ amount_cents: 10000 }), g = mk({ amount_cents: 10000 });
+  await click(f, "en"); await click(g, "en"); pay(g.stripe_checkout_id);
+  const f1 = await confirm(f, g.stripe_checkout_id);
+  vuln(f1.status !== 200 || f.status !== "accepted" || g.status !== "accepted" || ledger(g, "fund").length !== 0 || STRIPE.intents[STRIPE.sessions[g.stripe_checkout_id].payment_intent].status !== "requires_capture",
+    `B31f the return names another Order's paid page -> ${f1.status} ${JSON.stringify(f1.json)}; this Order ${f.status}, the other Order ${g.status} (must change neither)`);
+  // g) a made-up page id, a page that does not exist, a page id Stripe did not fill in: the Order's own page is checked as before
+  const h = mk({ amount_cents: 10000 }); await click(h, "en"); pay(h.stripe_checkout_id);
+  const h1 = await confirm(h, "{CHECKOUT_SESSION_ID}"), h1s = h.status;
+  const k = mk({ amount_cents: 10000 }); await click(k, "en"); pay(k.stripe_checkout_id);
+  const k1 = await confirm(k, "cs_does_not_exist_123");
+  vuln(h1.status !== 200 || h1s !== "funded" || k1.status !== 200 || k.status !== "funded",
+    `B31g the return has no usable page id -> ${h1.status} (${h1s}), ${k1.status} (${k.status}) (the Order's own page must be confirmed)`);
+  // h) the return names a page of this Order that was not paid (an old, closed one): the Order's own page is checked
+  const m = mk({ amount_cents: 10000 }); await click(m, "en"); const oldId = m.stripe_checkout_id; await click(m, "lt"); pay(m.stripe_checkout_id);
+  const m1 = await confirm(m, oldId);
+  vuln(m1.status !== 200 || m.status !== "funded" || ledger(m, "fund").length !== 1,
+    `B31h the return names an unpaid page of this Order while its current page is paid -> ${m1.status} ${JSON.stringify(m1.json)}; Order ${m.status} (must be funded from the paid page)`);
+  reset();
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
