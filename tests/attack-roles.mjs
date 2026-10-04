@@ -174,6 +174,18 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-Y: the Order changes between the check and the save (an amendment accepted at that moment, a stale tab) ----------
+// The page Stripe just made is closed before anyone could use it, and the refusal carries a code so the page says it in the
+// client's language and reloads the Order. Nothing is charged.
+{
+  const c = mk({ amount_cents: 10000, price: 100 });
+  hooks.db = async (method, table, search) => { if (method === "PATCH" && table === "contracts" && search.includes(`id=eq.${c.id}`) && search.includes("stripe_checkout_id") === false) { c.amount_cents = 12000; c.price = 120; } return null; };   // the price changes just before the save
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  reset();
+  const made = Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id);
+  vuln(r.status !== 409 || (r.json && r.json.code) !== "order_changed" || made.length !== 1 || made[0].status !== "expired" || c.stripe_checkout_id,
+    `R-Y the price changes between the check and the save -> HTTP ${r.status} ${r.json && r.json.code || ""}; pages made: ${made.length}, the page: ${made[0] && made[0].status}; saved on the Order: ${c.stripe_checkout_id || "nothing"} (must refuse with order_changed, the page closed, nothing saved)`);
+}
 // ---------- R-P: the Order title on Stripe's page — a title can never stop the client from paying ----------
 {
   const nameOf = (c) => { const s = STRIPE.sessions[c.stripe_checkout_id]; return (s && s.params && s.params["line_items[0][price_data][product_data][name]"]) || ""; };
