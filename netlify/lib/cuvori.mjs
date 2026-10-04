@@ -793,7 +793,16 @@ export async function dropHold(s) {
   return r === "charged" ? "charged" : "none";
 }
 
+// One payment step per Order at a time, from the moment a hold is checked until the payment is recorded: the webhook and
+// the page's own check deliver the same payment at the same moment, and two paid pages for one Order (two tabs) can both
+// arrive — serialized, the second one finds the Order paid and releases its hold instead of charging the card twice.
 export async function applyPaidSession(s) {
+  const id = s && s.client_reference_id;
+  if (!isUuid(id)) return applyPaidSessionNow(s);
+  const unlock = await lockOrder(id);
+  try { return await applyPaidSessionNow(s); } finally { await unlock(); }
+}
+async function applyPaidSessionNow(s) {
   if (!s || (s.mode !== undefined && s.mode !== "payment")) return "ignored";
   // test and live never mix: right before a payment is taken or counted, the database's mode is asked again, not the
   // answer from up to a minute ago (on launch day the database may have just been switched)
