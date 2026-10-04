@@ -1,6 +1,7 @@
 // POST { contract_id, lang } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
+import { createHash } from "node:crypto";
 import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
@@ -93,6 +94,11 @@ export default safe(async (req) => {
   // a moment later by applyPaidSession, and only if the Order can still take it; otherwise the hold is released and
   // nothing is charged, so nobody pays a card fee on money that has to go back.
   const slot = Math.floor(Date.now() / 1800e3);
+  // Stripe accepts a repeated key only for a request that is identical in every detail. The breakdown on the page (below)
+  // can change while the amount and the fee stay the same (a fee row replaced by an identical new one): its fingerprint is
+  // part of the key, so such a request is a new one and gets a new page instead of being refused. Identical requests (two
+  // tabs in one language) still share one key and one page.
+  const qkey = kind === "fund" ? "_" + createHash("sha256").update(JSON.stringify(quote)).digest("hex").slice(0, 12) : "";
   const session = await stripe("POST", "/checkout/sessions", {
     mode: "payment",
     client_reference_id: c.id,
@@ -107,7 +113,7 @@ export default safe(async (req) => {
     // the breakdown travels with the page (Stripe keeps up to 500 characters per value): when this page's payment is confirmed,
     // this breakdown — not the one from a page made later with a changed fee table — is the one saved on the Order
     metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
-  }, { idempotency: `checkout_hold_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}` });
+  }, { idempotency: `checkout_hold_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}${qkey}` });
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
   // Saved only if the Order is still exactly as this request read it: same status, same price, same money paid in, and the
