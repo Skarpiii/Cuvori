@@ -109,7 +109,8 @@ export default safe(async (req) => {
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
   const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&amount_cents=eq.${price}`, patch);
-  if (!rows || !rows.length) { await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {}); return bad("The order changed, reload", 409); }
+  // code: the page says it in the client's language and reloads the Order, so they see the new details
+  if (!rows || !rows.length) { await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {}); return json(409, { error: "The order changed, reload", code: "order_changed" }); }
   // only one live Checkout per Order: the previous page (another tab, an old link) can no longer be paid
   if (c.stripe_checkout_id && c.stripe_checkout_id !== session.id && isSession(c.stripe_checkout_id)) await stripe("POST", `/checkout/sessions/${c.stripe_checkout_id}/expire`).catch(() => {});
   return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
