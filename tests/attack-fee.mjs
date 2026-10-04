@@ -207,6 +207,23 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   reset();
 }
 
+// ---------- F12c: the fee table changes but the fee in cents stays the same (a row replaced by an identical new one) ----------
+// The page carries its breakdown, so the second click is a different request: it must get a new page, never "something
+// went wrong". Two identical clicks still share one page.
+{
+  const quoteRow = (sid) => (p) => { const total = Math.ceil((p + 25) / (1 - 3.25 / 100)); return { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: 3.25, fixed_cents: 25, schedule_id: sid, region: "ANY" }; };
+  const c = mk({ amount_cents: 10000 });
+  hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, quoteRow(3)(args.p_price_cents)] : null;
+  const r1 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const again = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, quoteRow(9)(args.p_price_cents)] : null;   // same rate, new row
+  const r2 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  reset();
+  const open = Object.values(STRIPE.sessions).filter(x => x.client_reference_id === c.id && x.status === "open");
+  vuln(r1.status !== 200 || again.status !== 200 || again.json.url !== r1.json.url || r2.status !== 200 || r2.json.url === r1.json.url || open.length !== 1 || open[0].url !== r2.json.url || (c.quote || {}).schedule_id !== 9,
+    `F12c the same click twice, then a fee row replaced by an identical one -> ${r1.status}/${again.status}/${r2.status}; the repeat got the same page: ${!!(again.json && r1.json && again.json.url === r1.json.url)}; after the change a new page: ${!!(r2.json && r1.json && r2.json.url !== r1.json.url)}; open pages ${open.length} (must never be "something went wrong")`);
+}
+
 // ---------- F13: hold first, charge after — a payment that comes in after its Order changed is never charged ----------
 // Its hold is released: the client keeps every cent, nobody pays a card fee, and the history says so once, however often
 // Stripe sends it. Only if the Order changes in the moment between the check and the charge is it charged and then
