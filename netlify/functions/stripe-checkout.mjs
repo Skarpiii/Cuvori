@@ -2,7 +2,7 @@
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
 import { createHash } from "node:crypto";
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKey } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -87,39 +87,52 @@ export default safe(async (req) => {
   const title = cut(c.title, 180).trim() || L.untitled;   // a title of nothing but spaces, tabs or line breaks counts as no title
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: kind === "topup" ? `${L.increase}${title}` : `${L.order}${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: L.fee, description: L.feeDesc } } });
-  // One Checkout page per half hour and amount: a second click within it gets the same page back (Stripe
-  // replays the answer for the same idempotency key). That needs the same request each time, so the expiry
-  // is a fixed point 60–90 min ahead rather than "now + 30 min".
+  // One Checkout page per half hour and request: a second identical click within it gets the same page back (the
+  // stored key below). That needs the same request each time, so the expiry is a fixed point 60–90 min ahead rather
+  // than "now + 30 min".
   // Hold first, charge after: the page only places a hold on the card (capture_method manual). The money is charged
   // a moment later by applyPaidSession, and only if the Order can still take it; otherwise the hold is released and
   // nothing is charged, so nobody pays a card fee on money that has to go back.
   const slot = Math.floor(Date.now() / 1800e3);
-  // Stripe accepts a repeated key only for a request that is identical in every detail. The breakdown on the page (below)
-  // can change while the amount and the fee stay the same (a fee row replaced by an identical new one): its fingerprint is
-  // part of the key, so such a request is a new one and gets a new page instead of being refused. Identical requests (two
-  // tabs in one language) still share one key and one page.
-  const qkey = kind === "fund" ? "_" + createHash("sha256").update(JSON.stringify(quote)).digest("hex").slice(0, 12) : "";
-  const session = await stripe("POST", "/checkout/sessions", {
+  const prev = c.stripe_checkout_id;
+  const params = {
     mode: "payment",
     client_reference_id: c.id,
     customer_email: me.email,
     expires_at: (slot + 3) * 1800,
     payment_method_types: ["card"],
     locale: L.locale || undefined,
-    success_url: `${SITE_URL}/#orders?paid=${c.id}`,
+    // Stripe puts the id of the page that was paid into the return link (where its guide shows it: in the part before the
+    // #), so the check on return looks at that very page
+    success_url: `${SITE_URL}/?cs={CHECKOUT_SESSION_ID}#orders?paid=${c.id}`,
     cancel_url: `${SITE_URL}/#orders?cancelled=${c.id}`,
     line_items: items,
     payment_intent_data: { capture_method: "manual", transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
     // the breakdown travels with the page (Stripe keeps up to 500 characters per value): when this page's payment is confirmed,
     // this breakdown — not the one from a page made later with a changed fee table — is the one saved on the Order
     metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
-  }, { idempotency: `checkout_hold_${c.id}_${kind}_${amount}_${fee}_${lng}_${me.id}_${slot}${qkey}` });
+  };
+  // One key per exact request, kept in the database like the keys of payouts and refunds. It is tied to everything sent to
+  // Stripe, so the same request again (two tabs in one language, Back and Fund again, a retry after a slow answer) gets the
+  // same page back, and anything different (another language, a fee table or a page text changed by a new version) is a
+  // new request with its own key, never one Stripe refuses. After a definite failure at Stripe the key is dropped, so the
+  // next click is a fresh try instead of Stripe repeating that failure for the rest of the half hour.
+  const scope = `checkout:${c.id}:${createHash("sha256").update(JSON.stringify(params)).digest("hex").slice(0, 16)}`;
+  let session = await moneyPost(scope, "/checkout/sessions", params);
+  // For a repeated key Stripe hands back its saved answer, even when that page has been closed since (a page in another
+  // language replaced it, and the client switched back). So the page's state now is asked for: a closed page is never
+  // handed out — its key is dropped and one new page is made. A paid page is handed out as it is: Stripe shows it as paid
+  // and sends the client back to Cuvori, where the payment is confirmed.
+  const live = await stripe("GET", `/checkout/sessions/${session.id}`);
+  if (live.status === "expired") {
+    await dropKey(scope);
+    session = await moneyPost(scope, "/checkout/sessions", params);
+  }
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
   // Saved only if the Order is still exactly as this request read it: same status, same price, same money paid in, and the
   // same page on record. Two Fund requests at the same moment (two tabs) then cannot both save a page: the second finds
   // the first one's page on the Order and hands that page back, so one Order never has two pages that could both be paid.
-  const prev = c.stripe_checkout_id;
   const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&${moneyUnchanged(c)}&${prev ? `stripe_checkout_id=eq.${encodeURIComponent(prev)}` : "stripe_checkout_id=is.null"}`, patch);
   if (!rows || !rows.length) {
     const now = await db.contract(c.id);
