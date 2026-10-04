@@ -187,6 +187,26 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   }
 }
 
+// ---------- F12b: the breakdown saved on the Order is the one of the page that was paid ----------
+// Page A is paid; before Cuvori confirms it, the fee table changes and the client makes page B (A cannot be closed: it is
+// already complete). A's confirmation must keep A's amounts, A's fee and A's breakdown on the Order, not B's.
+{
+  const quoteAt = (pct, fixed) => (p) => { const total = Math.ceil((p + fixed) / (1 - pct / 100)); return { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: fixed, schedule_id: 3, region: "ANY" }; };
+  const c = mk({ amount_cents: 10000 });
+  hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, quoteAt(3.25, 25)(args.p_price_cents)] : null;
+  const rA = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const A = c.stripe_checkout_id, feeA = rA.json && rA.json.fee;
+  const sA = pay(A);                                                   // the client pays on page A; Cuvori has not confirmed it yet
+  hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, quoteAt(3.5, 30)(args.p_price_cents)] : null;   // the fee table changes
+  const rB = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const B = c.stripe_checkout_id, feeB = rB.json && rB.json.fee;
+  const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: sA } })));   // A's confirmation arrives
+  const q = c.quote || {};
+  vuln(rA.status !== 200 || rB.status !== 200 || B === A || feeB === feeA || w.status !== 200 || c.status !== "funded" || c.stripe_checkout_id !== A || c.fee_cents !== feeA || q.processing_cents !== feeA || q.price_cents !== 10000 || q.percent !== 3.25,
+    `F12b page A paid, fee table changed, page B made, then A confirmed -> Order ${c.status}, page kept ${c.stripe_checkout_id === A ? "A" : c.stripe_checkout_id === B ? "B" : "?"}, fee ${c.fee_cents} (A: ${feeA}, B: ${feeB}), saved breakdown fee ${q.processing_cents} at ${q.percent}% (must all be A's)`);
+  reset();
+}
+
 // ---------- F13: hold first, charge after — a payment that comes in after its Order changed is never charged ----------
 // Its hold is released: the client keeps every cent, nobody pays a card fee, and the history says so once, however often
 // Stripe sends it. Only if the Order changes in the moment between the check and the charge is it charged and then

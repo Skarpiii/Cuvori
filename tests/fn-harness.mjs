@@ -57,7 +57,7 @@ export function stripeHandle(path, method, p) {
   if (path === "/checkout/sessions") {
     const id = rid("cs"); const a0 = +p.get("line_items[0][price_data][unit_amount]"), a1 = +(p.get("line_items[1][price_data][unit_amount]") || 0);
     STRIPE.sessions[id] = { id, object: "checkout.session", mode: "payment", status: "open", payment_status: "unpaid", payment_intent: null, url: "https://checkout.stripe.com/" + id, client_reference_id: p.get("client_reference_id"), amount_total: a0 + a1, currency: p.get("line_items[0][price_data][currency]"), amounts: [a0, a1],
-      metadata: { contract_id: p.get("metadata[contract_id]"), amount_cents: p.get("metadata[amount_cents]"), fee_cents: p.get("metadata[fee_cents]"), kind: p.get("metadata[kind]") }, params: Object.fromEntries(p) };
+      metadata: { contract_id: p.get("metadata[contract_id]"), amount_cents: p.get("metadata[amount_cents]"), fee_cents: p.get("metadata[fee_cents]"), kind: p.get("metadata[kind]"), ...(p.get("metadata[quote]") != null ? { quote: p.get("metadata[quote]") } : {}) }, params: Object.fromEntries(p) };
     return [200, STRIPE.sessions[id]];
   }
   if (seg[1] === "charges" && seg[2] && method === "GET") { const ch = STRIPE.charges[seg[2]]; return ch ? [200, ch] : err(404, "No such charge", "resource_missing"); }
