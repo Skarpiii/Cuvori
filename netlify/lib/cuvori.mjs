@@ -833,7 +833,11 @@ export async function applyPaidSession(s) {
   const bt = charge && charge.balance_transaction && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
   let u;
   if (kind === "fund") {
-    try { u = await db.claim(id, ["accepted"], { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, paid_mode: STRIPE_MODE }); }
+    // the breakdown the client saw on this very page (its metadata, since v34 of the functions): saved only when it describes
+    // this payment's amounts; a page from before, or a damaged value, leaves the Order's record as it is
+    let quote;
+    try { const qd = md.quote ? JSON.parse(md.quote) : null; if (qd && typeof qd === "object" && !Array.isArray(qd) && qd.price_cents === amount && qd.processing_cents === fee) quote = qd; } catch {}
+    try { u = await db.claim(id, ["accepted"], { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, paid_mode: STRIPE_MODE, ...(quote ? { quote } : {}) }); }
     catch (e) { if (MODE_REFUSED.test(String(e && e.message))) return refundOrphan(s, "test and live were switched while this payment came in"); throw e; }
     if (!u) {
       const now = await db.contract(id);
