@@ -116,9 +116,14 @@ export default safe(async (req) => {
   const prev = c.stripe_checkout_id;
   const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}&${moneyUnchanged(c)}&${prev ? `stripe_checkout_id=eq.${encodeURIComponent(prev)}` : "stripe_checkout_id=is.null"}`, patch);
   if (!rows || !rows.length) {
-    await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {});
     const now = await db.contract(c.id);
-    if (now && now.status === c.status && now.amount_cents === c.amount_cents && (now.funded_cents ?? null) === (c.funded_cents ?? null) && now.stripe_checkout_id && now.stripe_checkout_id !== prev && isSession(now.stripe_checkout_id)) {
+    const same = !!now && now.status === c.status && now.amount_cents === c.amount_cents && (now.funded_cents ?? null) === (c.funded_cents ?? null);
+    // Stripe handed this request the very page another request has just saved (the same request twice: two tabs in one
+    // language): it is the Order's page, so this tab gets it too, and it is never closed here
+    if (same && now.stripe_checkout_id === session.id) return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
+    // a page of this request's own that the Order is not using is closed, so it can never be paid
+    if (!now || now.stripe_checkout_id !== session.id) await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {});
+    if (same && now.stripe_checkout_id && now.stripe_checkout_id !== prev && isSession(now.stripe_checkout_id)) {
       const other = await stripe("GET", `/checkout/sessions/${now.stripe_checkout_id}`).catch(() => null);
       const om = other && other.metadata || {};
       if (other && other.status === "open" && other.url && other.client_reference_id === c.id && om.kind === kind && Number(om.amount_cents) === amount && Number.isSafeInteger(Number(om.fee_cents)))
