@@ -72,35 +72,70 @@ async function makePage(scope, params) {
   }
 }
 
+// A refusal with a code: the page says it in the client's language (fnPlain in index.html) and that nothing was charged;
+// the sentence here stays for the owner.
+const refuse = (status, error, code) => json(status, { error, code });
+// An Order whose payment record looks wrong is never paid until a person has looked at it. The owner sees it under "Needs a
+// hand" in the admin panel: the note is written over an empty note or over this check's own older note, never over
+// another, and only while the note still reads what this request read. It goes once the record checks out again.
+// Both people on the Order can read its notes, so it says in plain words what looks wrong, nothing else.
+const RECORD_NOTE = "Payment record needs checking: ";
+const ownRecordNote = (c) => String(c.money_error || "").startsWith(RECORD_NOTE);
+const noteFilter = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${encodeURIComponent(c.money_error)}`);
+async function needsCheck(c, why) {
+  const text = (RECORD_NOTE + why).slice(0, 300);
+  if ((c.money_error == null || ownRecordNote(c)) && c.money_error !== text)
+    await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: text }).catch(() => {});
+  return refuse(409, "This order's payment record needs checking before another payment can be taken. Cuvori support has been told.", "needs_check");
+}
+const euro = (cents) => `€${(cents / 100).toFixed(2)}`;
+
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
-  if (!escrowEnabled()) return bad("Protected payments are not configured yet", 503);
+  if (!escrowEnabled()) return refuse(503, "Protected payments are not configured yet", "payments_paused");
   const me = await userFromRequest(req);
-  if (!me) return bad("Sign in first", 401);
-  if (me.banned) return bad("Account suspended", 403);
+  if (!me) return refuse(401, "Sign in first", "signed_out");
+  if (me.banned) return refuse(403, "Account suspended", "account_suspended");
   await limitTries(me, "pay_checkout");          // at most about 10 tries a minute and 50 a day: nobody can use up Stripe's limits for everyone
   const { contract_id: id, lang } = await readJson(req);
   const lng = typeof lang === "string" && Object.prototype.hasOwnProperty.call(STRIPE_TEXT, lang) ? lang : "en", L = STRIPE_TEXT[lng];
   const c = await db.contract(id);
-  if (!c || c.client !== me.id) return bad("Not your order", 403);
-  if (c.payment_mode !== "escrow") return bad("This order is paid directly, not through Cuvori", 409);
+  if (!c || c.client !== me.id) return refuse(403, "Not your order", "not_your_order");
+  if (c.payment_mode !== "escrow") return refuse(409, "This order is paid directly, not through Cuvori", "paid_directly");
   const price = centsOf(c);
-  if (!price || price < MIN_CENTS || price > MAX_CENTS) return bad("Amount out of range", 409);
+  if (!price || price < MIN_CENTS || price > MAX_CENTS) return refuse(409, "Amount out of range", "amount_out_of_range");
   // what still needs funding: the whole price on an accepted Order, or the part an amendment added
   let amount, kind;
   // what has been paid in. No guessing: an unpaid Order must show nothing paid, a paid one a real positive amount.
   // Anything else (missing, negative, a fraction) means the payment record needs checking by hand before more money moves.
   const fc = c.funded_cents;
-  const RECONCILE = "This order's payment record needs checking before another payment can be taken. Please contact Cuvori support.";
   if (c.status === "accepted") {
-    // a first payment only when nothing at all says this Order was paid: no counters (paid in, paid out, refunded),
-    // no payment time, no payment or charge on the row, no ledger line
+    // a first payment only when nothing at all says money ever moved on this Order: no counters (paid in, paid out,
+    // refunded, a refund or a split decided on its money), no payment time, no card payment or charge on the row, no
+    // payout, refund or reversal at Stripe, no mark of the mode it was paid in, no ledger line. (A card chargeback is not
+    // on this list: one can come for a late payment that was sent back without ever funding the Order; while it is open,
+    // the check further down refuses, and once decided it says nothing about this Order's own money.)
     const zeroOrEmpty = (v) => v == null || v === 0;
-    if (!zeroOrEmpty(fc) || !zeroOrEmpty(c.released_cents) || !zeroOrEmpty(c.refunded_cents) || c.funded_at || c.stripe_payment_intent || c.stripe_charge_id) return bad(RECONCILE, 409);
-    const paidRows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&select=id&limit=1`);
-    if (paidRows && paidRows.length) return bad(RECONCILE, 409);
+    const shows = [
+      [!zeroOrEmpty(fc), "money paid in"], [!zeroOrEmpty(c.released_cents), "money paid out"], [!zeroOrEmpty(c.refunded_cents), "money refunded"],
+      [!zeroOrEmpty(c.refund_cents) || !zeroOrEmpty(c.split_editor_cents), "a decision on its money"], [!!c.funded_at, "a payment time"],
+      [!!(c.stripe_payment_intent || c.stripe_charge_id), "a card payment"], [!!c.stripe_transfer_id, "a payout to the freelancer"],
+      [!!c.stripe_refund_id, "a refund"], [!!c.stripe_reversal_id, "a reversal"], [!!c.paid_mode, "the mode it was paid in"],
+    ].filter(([yes]) => yes).map(([, what]) => what);
+    if (!shows.length) {
+      const paidRows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&select=id&limit=1`);
+      if (paidRows && paidRows.length) shows.push("a payment in its ledger");
+    }
+    if (shows.length) return needsCheck(c, `this Order is waiting for its first payment, but its record shows ${shows.join(", ")}.`);
   }
-  if (["funded", "delivered"].includes(c.status) && !(Number.isSafeInteger(fc) && fc > 0)) return bad(RECONCILE, 409);
+  if (["funded", "delivered"].includes(c.status) && !(Number.isSafeInteger(fc) && fc > 0))
+    return needsCheck(c, "this Order is paid, but the amount paid in is missing or not a whole number of cents.");
+  // a price can't go down once money is in (an amendment that lowers it is refused), so more paid in than the price only
+  // happens if the record was changed by hand
+  if (["funded", "delivered"].includes(c.status) && fc > price)
+    return needsCheck(c, `more was paid in (${euro(fc)}) than the Order's price (${euro(price)}).`);
+  // the record checks out: a note this check wrote earlier goes
+  if (ownRecordNote(c)) await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: null }).catch(() => {});
   const paidIn = c.status === "accepted" ? 0 : fc;
   if (c.status === "accepted") { amount = price; kind = "fund"; }
   else if (["funded", "delivered"].includes(c.status) && price > paidIn) { amount = price - paidIn; kind = "topup"; }
@@ -112,8 +147,8 @@ export default safe(async (req) => {
   // Only a price increase may be as small as €0.50: anything else (a first payment, or any kind of payment added
   // later) needs the €1, so the stricter minimum is what applies unless someone decides otherwise.
   const minFor = kind === "topup" ? MIN_TOPUP_CENTS : MIN_CENTS;
-  if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return bad("Payment amount out of range", 409);
-  if (chargebackOpen(c)) return bad("A card chargeback is open on this order; nothing can be paid until the bank decides", 409);
+  if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return refuse(409, "Payment amount out of range", "amount_out_of_range");
+  if (chargebackOpen(c)) return refuse(409, "A card chargeback is open on this order; nothing can be paid until the bank decides", "chargeback_open");
   sameMode(c);                                   // an Order paid in test mode takes no real money, and the other way round
   // code: the page says it in the client's language (the Fund button shows even then: the page only knows whether the
   // freelancer finished their Stripe setup, not whether they were banned after the Order was accepted)
