@@ -208,6 +208,27 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   const blank2 = mk({ title: "\t\n \t" });
   await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: blank2.id } }));
   vuln(nameOf(blank2) !== "Order: Cuvori order", `R-P an Order whose title is only tabs and line breaks -> ${JSON.stringify(nameOf(blank2))}`);
+  // titles the site's title box can't make, but a title made directly on the server can: what reaches Stripe is plain text
+  const pay1 = async (title, lang, extra = {}) => { const o = mk({ title, ...extra }); const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: o.id, lang } })); return { r, name: nameOf(o) }; };
+  for (const [what, title, want] of [
+    ["line breaks, tabs and control characters inside", "Logo\r\ndesign\t\u0007final\u0085cut", "Order: Logo design final cut"],
+    ["185 tabs before the words", "\t".repeat(185) + "Logo design", "Order: Logo design"],
+    ["hidden marks that flip the text's direction", "Logo \u202Eemit\u202C design \u2067x\u2069", "Order: Logo emit design x"],
+    ["nothing but control characters", "\u0007\u0008\u001b", "Order: Cuvori order"],
+    ["a long run of blanks of several kinds", "Logo\u00a0\u2003\u3000 \u2028design", "Order: Logo design"],
+  ]) {
+    const { r, name } = await pay1(title, "en");
+    vuln(r.status !== 200 || name !== want, `R-P title with ${what} -> HTTP ${r.status}, the line on Stripe's page ${JSON.stringify(name)} (must be ${JSON.stringify(want)})`);
+  }
+  // a title of emoji only: the whole line fits Stripe's 250 characters even if Stripe counts every emoji as two
+  for (const [what, lang, extra] of [["a first payment in English", "en", {}], ["a top-up in Russian (the longest words in front)", "ru", { status: "funded", amount_cents: 13000, price: 130, funded_cents: 10000 }]]) {
+    const { r, name } = await pay1("🎬".repeat(200), lang, extra);
+    vuln(r.status !== 200 || name.length > 250 || !name.isWellFormed() || !name.endsWith("🎬") || name.length < 240,
+      `R-P a title of 200 emoji, ${what} -> HTTP ${r.status}, the line on Stripe's page is ${name.length} long as JavaScript counts, ${Array.from(name).length} as characters (must be at most 250 either way, whole emoji, as many as fit)`);
+  }
+  // a normal title from the site is unchanged
+  const { name: normal } = await pay1("Logo animation  — final cut (v2)", "en");
+  vuln(normal !== "Order: Logo animation — final cut (v2)", `R-P a normal title -> ${JSON.stringify(normal)} (only the double space becomes one)`);
   reset();
 }
 
