@@ -189,11 +189,16 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
 // ---------- R-P: the Order title on Stripe's page — a title can never stop the client from paying ----------
 {
   const nameOf = (c) => { const s = STRIPE.sessions[c.stripe_checkout_id]; return (s && s.params && s.params["line_items[0][price_data][product_data][name]"]) || ""; };
-  // an emoji exactly where the title is cut (the database allows titles up to 200 characters)
+  // a long title with an emoji in it (the database allows titles up to 200 characters): it fits, so it is shown whole
   const long = mk({ title: "a".repeat(179) + "🎬 final cut" });
   const r1 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: long.id } }));
   const n1 = nameOf(long);
-  vuln(r1.status !== 200 || !n1.isWellFormed() || !n1.startsWith("Order: ") || !n1.endsWith("a🎬"), `R-P a 191-character title with an emoji where it is cut -> HTTP ${r1.status} ${r1.json && r1.json.error || ""}, the line on Stripe's page ends ${JSON.stringify(n1.slice(-4))}`);
+  vuln(r1.status !== 200 || n1 !== "Order: " + long.title, `R-P a 191-character title with an emoji -> HTTP ${r1.status} ${r1.json && r1.json.error || ""}, the line on Stripe's page ends ${JSON.stringify(n1.slice(-14))} (must be the whole title)`);
+  // the longest title the site's title box allows (200 characters): shown whole, never cut mid-sentence
+  const t200 = "Wedding film for Anna and Tom, ".repeat(7).slice(0, 200);
+  const site = mk({ title: t200 });
+  const r2 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: site.id } }));
+  vuln(r2.status !== 200 || nameOf(site) !== "Order: " + t200.trim(), `R-P a 200-character title typed on the site -> HTTP ${r2.status}, the line on Stripe's page ends ${JSON.stringify(nameOf(site).slice(-20))} (must be the whole title)`);
   // a first payment is named after the Order; a top-up says it is the price increase both sides agreed to
   const first = mk({ title: "Logo animation" });
   await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: first.id } }));
@@ -216,6 +221,17 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
     ["hidden marks that flip the text's direction", "Logo \u202Eemit\u202C design \u2067x\u2069", "Order: Logo emit design x"],
     ["nothing but control characters", "\u0007\u0008\u001b", "Order: Cuvori order"],
     ["a long run of blanks of several kinds", "Logo\u00a0\u2003\u3000 \u2028design", "Order: Logo design"],
+    ["only zero-width spaces (they can be pasted into the site's title box)", "\u200B\u200B\u200B", "Order: Cuvori order"],
+    ["only invisible direction marks", "\u200E\u200F\u061C", "Order: Cuvori order"],
+    ["only the Korean filler character", "\u3164\u3164", "Order: Cuvori order"],
+    ["only braille blanks", "\u2800\u2800", "Order: Cuvori order"],
+    ["zero-width spaces, a soft hyphen and a word joiner between letters", "Lo\u200Bgo\u00AD de\u2060sign", "Order: Logo design"],
+    ["codes that are never text", "Logo\uFFFE\uFFFF\u{10FFFF} design", "Order: Logo design"],
+    ["hidden text in tag characters", "Logo\u{E0068}\u{E0069}\u{E0064}\u{E0065} design", "Order: Logo design"],
+    ["a letter with 200 accents stacked on it, first", "e" + "\u0301".repeat(200) + " Logo design", "Order: e Logo design"],
+    ["a letter with 200 accents stacked on it, in the middle", "Logo " + "e" + "\u0301".repeat(190) + " design", "Order: Logo e design"],
+    ["real emoji: a family, England's flag, a keycap, a red heart, a skin tone", "👨‍👩‍👧 🏴󠁧󠁢󠁥󠁮󠁧󠁿 1️⃣ ❤️ 👍🏽 Logo", "Order: 👨‍👩‍👧 🏴󠁧󠁢󠁥󠁮󠁧󠁿 1️⃣ ❤️ 👍🏽 Logo"],
+    ["accented letters of the site's languages", "Užsakymas – vaizdo įrašų montavimas, Größe, Łódź, Ёжик, ґанок, España", "Order: Užsakymas – vaizdo įrašų montavimas, Größe, Łódź, Ёжик, ґанок, España"],
   ]) {
     const { r, name } = await pay1(title, "en");
     vuln(r.status !== 200 || name !== want, `R-P title with ${what} -> HTTP ${r.status}, the line on Stripe's page ${JSON.stringify(name)} (must be ${JSON.stringify(want)})`);
@@ -223,8 +239,8 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   // a title of emoji only: the whole line fits Stripe's 250 characters even if Stripe counts every emoji as two
   for (const [what, lang, extra] of [["a first payment in English", "en", {}], ["a top-up in Russian (the longest words in front)", "ru", { status: "funded", amount_cents: 13000, price: 130, funded_cents: 10000 }]]) {
     const { r, name } = await pay1("🎬".repeat(200), lang, extra);
-    vuln(r.status !== 200 || name.length > 250 || !name.isWellFormed() || !name.endsWith("🎬") || name.length < 240,
-      `R-P a title of 200 emoji, ${what} -> HTTP ${r.status}, the line on Stripe's page is ${name.length} long as JavaScript counts, ${Array.from(name).length} as characters (must be at most 250 either way, whole emoji, as many as fit)`);
+    vuln(r.status !== 200 || name.length > 250 || !name.isWellFormed() || !name.endsWith("🎬…") || name.length < 248,
+      `R-P a title of 200 emoji, ${what} -> HTTP ${r.status}, the line on Stripe's page is ${name.length} long as JavaScript counts, ${Array.from(name).length} as characters, ends ${JSON.stringify(name.slice(-3))} (must be at most 250 either way, whole emoji, as many as fit, then "…")`);
   }
   // a normal title from the site is unchanged
   const { name: normal } = await pay1("Logo animation  — final cut (v2)", "en");
@@ -259,15 +275,18 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
 // ---------- R-R: an emoji built from several pieces (a flag, a skin tone, a family) is kept whole or left out, never cut ----------
 {
   const nameOf = (c) => { const s = STRIPE.sessions[c.stripe_checkout_id]; return (s && s.params && s.params["line_items[0][price_data][product_data][name]"]) || ""; };
+  // "Order: " leaves 243 for the title; a title that doesn't fit is cut to 242 and ends with "…". 120 emoji take 240 of it,
+  // so each piece below lands exactly where the cut falls.
+  const E = "🎬".repeat(120);
   for (const [what, title, want] of [
-    ["a flag", "a".repeat(179) + "🇱🇹", "a".repeat(179)],                 // 181 characters as the database counts them; the cut at 180 falls inside the flag
-    ["a family emoji", "a".repeat(178) + "👨‍👩‍👧", "a".repeat(178)],        // the cut falls inside the family
-    ["a skin tone", "a".repeat(179) + "👍🏽", "a".repeat(179)],            // the cut falls between the thumb and its skin tone
-    ["a flag that fits", "a".repeat(178) + "🇱🇹", "a".repeat(178) + "🇱🇹"], // exactly 180: kept whole
+    ["a flag", E + "a" + "🇱🇹" + "b", E + "a…"],                       // 240 + 1 + 4 + 1: the cut at 242 falls inside the flag
+    ["a family emoji", E + "a" + "👨‍👩‍👧", E + "a…"],                       // the cut falls inside the family
+    ["a skin tone", E + "a" + "👍🏽", E + "a…"],                           // the cut falls between the thumb and its skin tone
+    ["a flag that fits", "🎬".repeat(119) + "a" + "🇱🇹", "🎬".repeat(119) + "a🇱🇹"], // exactly 243: kept whole, nothing cut
   ]) {
     const c = mk({ title });
     const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-    vuln(r.status !== 200 || nameOf(c) !== "Order: " + want, `R-R title with ${what} where it is cut -> HTTP ${r.status}, the line on Stripe's page ends ${JSON.stringify(nameOf(c).slice(-6))} (must end ${JSON.stringify(("Order: " + want).slice(-6))})`);
+    vuln(r.status !== 200 || nameOf(c) !== "Order: " + want || nameOf(c).length > 250, `R-R title with ${what} where it is cut -> HTTP ${r.status}, the line on Stripe's page ends ${JSON.stringify(nameOf(c).slice(-6))} (must end ${JSON.stringify(("Order: " + want).slice(-6))}, at most 250)`);
   }
   // the same for a note: the freelancer cancels with a family emoji where the note is cut (500)
   const a = mk(); await fund(fx, a);
