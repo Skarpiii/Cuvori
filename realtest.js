@@ -527,6 +527,17 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries today. Nothing was charged. Please try again tomorrow.")) && await unpaid(),"too many Fund tries in a day: the client is asked to try again tomorrow and told nothing was charged");
   await fundWith([409,{error:"This Order was paid in test mode, so its money cannot move with the live keys. Cuvori support needs to look at it.",code:"other_mode"}]);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments on this Order are on hold. Please contact Cuvori support.")) && !(await p.textContent('#toastWrap')).includes('test mode') && await unpaid(),"an Order paid in the other mode: the client is told payments are on hold, without the technical reason");
+  // the payment page's other refusals: said in plain words in the client's language, never the server's English sentence
+  for (const [code, want] of [["needs_check","This Order's payment record needs checking before another payment can be taken. Nothing was charged. Cuvori has been told and will look at it."],
+    ["chargeback_open","A card chargeback is open on this Order, so nothing can be paid until the bank decides. Nothing was charged."],
+    ["not_your_order","Only the client on this Order can pay it. Nothing was charged."],
+    ["paid_directly","This Order is paid directly to the freelancer, not through Cuvori. Nothing was charged."],
+    ["amount_out_of_range","This amount can't be paid through Cuvori. Nothing was charged. Please contact Cuvori support."],
+    ["account_suspended","Your account is suspended, so you can't make payments. Nothing was charged. Please contact Cuvori support."],
+    ["signed_out","Please sign in again, then try once more. Nothing was charged."]]) {
+    await fundWith([409,{error:"SERVER SENTENCE "+code,code}]);
+    ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE') && await unpaid(),`the payment page refuses (${code}): the client reads it in plain words and is told nothing was charged`);
+  }
   // the freelancer's Stripe account can't take money right now (Stripe asked them for something, or restricted it): said in the
   // client's language, with where the freelancer looks (Settings → Payout details), and nothing is charged
   const NOT_READY=[409,{error:"The freelancer's Stripe account can't receive payments right now. Ask them to check Payout details under Settings on Cuvori.",code:"freelancer_not_ready"}];
@@ -539,6 +550,8 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Mokėjimai šiuo metu sustabdyti. Nieko nebuvo nuskaičiuota. Pabandykite vėliau.")) && !(await p.textContent('#toastWrap')).includes('Stripe keys'),"payments paused, client using Cuvori in Lithuanian: told in Lithuanian");
   await fundWith(SERVER);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Cuvori pusėje kažkas nepavyko. Nieko nebuvo nuskaičiuota. Pabandykite dar kartą po kelių minučių. (kodas 1a2b3c4d)")),"a problem on Cuvori's side, client using Cuvori in Lithuanian: told in Lithuanian, with the ref");
+  await fundWith([409,{error:"This order's payment record needs checking before another payment can be taken. Cuvori support has been told.",code:"needs_check"}]);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Prieš priimant kitą mokėjimą, reikia patikrinti šio užsakymo mokėjimų įrašus. Nieko nebuvo nuskaičiuota. Cuvori apie tai žino ir tai patikrins.")) && !(await p.textContent('#toastWrap')).includes('payment record'),"a payment record that needs checking, client using Cuvori in Lithuanian: told in Lithuanian");
   await p.evaluate(()=>{ window.__mockFnFail=null; document.querySelector('[data-lang="en"]').click(); });
   // the check at Fund has just set the freelancer's "ready" mark off (Stripe restricted the account): the page refreshes the
   // Order by itself, so the Fund button is gone at once, and the note under the Fund box says why in words that also fit a
@@ -631,6 +644,13 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=true; });
   await openOrders();
   ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50') && !(await modal()).includes("can't receive payments right now — ask them"),'once the account can receive again, the button that pays the extra €50 is back and the note is gone');
+  // a card chargeback is open: nothing can be paid until the bank decides, so the button that pays the extra is not shown, and the Order says why
+  await p.evaluate(()=>{ window.__mockdb.contracts.at(-1).chargeback_status='open'; });
+  await openOrders();
+  ok(await p.locator('[data-caction="topup"]').count()===0 && (await modal()).includes("The client's bank has opened a chargeback on this payment."),'a card chargeback is open: no button to pay the extra, and the Order says a chargeback is open');
+  await p.evaluate(()=>{ window.__mockdb.contracts.at(-1).chargeback_status=null; });
+  await openOrders();
+  ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50'),'the chargeback decided: the button that pays the extra is back');
   await p.click('[data-caction="topup"]'); await p.waitForTimeout(2500); await openOrders();
   ok(await db(()=>window.__mockdb.contracts.at(-1).funded_cents===25000) && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €250'),'once the €50 is funded, the client can approve and release all €250');
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo'); await p.waitForTimeout(1200);
