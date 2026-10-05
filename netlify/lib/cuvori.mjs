@@ -165,6 +165,9 @@ export async function stripe(method, path, body, opts = {}) {
   return stripeCall(method, path, body, opts);
 }
 export const STRIPE_VERSION = "2024-06-20";
+// Marks on what a Stripe call returns (symbols: never sent anywhere, never saved): REPLAYED when Stripe handed back its
+// saved answer to an earlier request with the same key (its Idempotent-Replayed header), IDEM_KEY the key moneyPost used
+export const REPLAYED = Symbol("stripe replayed"), IDEM_KEY = Symbol("idempotency key");
 // the call itself, without the checks: only for the checks and through stripe()
 async function stripeCall(method, path, body, opts = {}) {
   if (!/^\/[a-z_]+(\/[A-Za-z0-9_]+)*$/.test(path)) throw new Error("bad Stripe path");
@@ -182,6 +185,7 @@ async function stripeCall(method, path, body, opts = {}) {
   catch { const e = new Error("Unreadable payment provider response"); e.outcomeUnknown = true; e.status = r.status; throw e; }
   if (!data || typeof data !== "object" || Array.isArray(data)) { const e = new Error("Invalid payment provider response"); e.outcomeUnknown = true; throw e; }
   if (!r.ok) { const e = new Error((data.error && data.error.message) || "Stripe error"); e.stripe = data.error || {}; e.status = r.status; e.shouldRetry = r.headers.get("Stripe-Should-Retry") === "true"; e.replayed = r.headers.get("Idempotent-Replayed") === "true"; throw e; }
+  if (r.headers.get("Idempotent-Replayed") === "true") data[REPLAYED] = true;
   return data;
 }
 const stripeCode = (e) => (e && e.stripe && (e.stripe.code || e.stripe.decline_code)) || "";
@@ -364,6 +368,8 @@ export async function moneyKey(scope) {
   catch (e) { const again = await db.one("money_keys", `scope=eq.${q(scope)}&select=key`); if (again && again.key) return again.key; throw e; }
 }
 export const dropKey = (scope) => db.remove("money_keys", `scope=eq.${q(scope)}`).catch(() => {});
+// forgets the key only if it is still the given one: a newer key another request has just stored is never removed
+export const dropKeyIf = (scope, key) => (key ? db.remove("money_keys", `scope=eq.${q(scope)}&key=eq.${q(key)}`).catch(() => {}) : Promise.resolve());
 // A one-time claim: the first caller gets it, every other caller is told no. Postgres decides (the scope is
 // the table's primary key), so two functions running at the same moment cannot both win.
 async function claimScope(scope) {
@@ -392,8 +398,9 @@ export async function lockOrder(id) {
 // Also used to make payment pages (stripe-checkout): one key per exact request, renewed after a definite Stripe failure.
 export async function moneyPost(scope, path, body) {
   const key = await moneyKey(scope);
-  try { return await stripe("POST", path, body, { idempotency: key }); }
+  try { const out = await stripe("POST", path, body, { idempotency: key }); out[IDEM_KEY] = key; return out; }
   catch (e) {
+    if (e && typeof e === "object") e.idemKey = key;
     // Keep the key only when the outcome is unknown (no answer, unreadable answer, Stripe says "retry with the
     // same key", or the same key is still in flight). Any other answer is final for this key — including a 500,
     // which Stripe saves and would replay for 24 h. The next attempt gets a fresh key; the Stripe-side lookups
