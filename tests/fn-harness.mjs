@@ -56,7 +56,7 @@ export function stripeHandle(path, method, p) {
   if (seg[1] === "checkout" && seg[2] === "sessions" && seg[3] && method === "GET") return STRIPE.sessions[seg[3]] ? [200, STRIPE.sessions[seg[3]]] : err(404, "No such checkout.session", "resource_missing");
   if (path === "/checkout/sessions") {
     const id = rid("cs"); const a0 = +p.get("line_items[0][price_data][unit_amount]"), a1 = +(p.get("line_items[1][price_data][unit_amount]") || 0);
-    STRIPE.sessions[id] = { id, object: "checkout.session", mode: "payment", status: "open", payment_status: "unpaid", payment_intent: null, url: "https://checkout.stripe.com/" + id, client_reference_id: p.get("client_reference_id"), amount_total: a0 + a1, currency: p.get("line_items[0][price_data][currency]"), amounts: [a0, a1],
+    STRIPE.sessions[id] = { id, object: "checkout.session", created: Math.floor(Date.now() / 1000), mode: "payment", status: "open", payment_status: "unpaid", payment_intent: null, url: "https://checkout.stripe.com/" + id, client_reference_id: p.get("client_reference_id"), amount_total: a0 + a1, currency: p.get("line_items[0][price_data][currency]"), amounts: [a0, a1],
       metadata: { contract_id: p.get("metadata[contract_id]"), amount_cents: p.get("metadata[amount_cents]"), fee_cents: p.get("metadata[fee_cents]"), kind: p.get("metadata[kind]"), ...(p.get("metadata[quote]") != null ? { quote: p.get("metadata[quote]") } : {}) }, params: Object.fromEntries(p) };
     return [200, STRIPE.sessions[id]];
   }

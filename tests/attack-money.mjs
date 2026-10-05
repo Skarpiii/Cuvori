@@ -523,11 +523,14 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   reset();
   vuln(c1.status < 500 || c2.status !== 200 || !urlOk(c2, c),
     `B31c Stripe failed once, then works -> first ${c1.status}, second ${c2.status} ${c2.status !== 200 ? JSON.stringify(c2.json) : ""} (the second click must get a page)`);
-  // d) Fund clicked again after paying, before the payment was confirmed: the paid page is handed back, no new page is made
+  // d) Fund clicked again after paying, before the payment was confirmed: never the paid page's link again (Stripe gives a
+  // page's link only while it is open); the payment is confirmed right there and the client is told the Order isn't
+  // waiting for a payment, so the page reloads it and shows it paid. No new page.
   const d = mk({ amount_cents: 10000 });
   const d1 = await click(d, "en"); pay(d.stripe_checkout_id); const dn = pagesOf(d).length; const d2 = await click(d, "en");
-  vuln(d2.status !== 200 || !d1.json || !d2.json || d2.json.url !== d1.json.url || pagesOf(d).length !== dn,
-    `B31d Fund again after paying, before the confirmation -> ${d2.status}; same page ${!!(d1.json && d2.json && d1.json.url === d2.json.url)}, new pages ${pagesOf(d).length - dn} (must be the paid page, no new one)`);
+  const dIntent = STRIPE.intents[STRIPE.sessions[d.stripe_checkout_id].payment_intent];
+  vuln(d2.status !== 409 || !d2.json || d2.json.code !== "not_payable" || d.status !== "funded" || d.funded_cents !== 10000 || ledger(d, "fund").length !== 1 || dIntent.status !== "succeeded" || pagesOf(d).length !== dn,
+    `B31d Fund again after paying, before the confirmation -> ${d2.status} ${JSON.stringify(d2.json)}; Order ${d.status} with ${d.funded_cents}, the card hold ${dIntent.status}, new pages ${pagesOf(d).length - dn} (must be "not waiting for a payment", the payment confirmed, no new page)`);
   // e) paid in one tab, a newer page made in another tab before the confirmation; back from the paid page
   const e = mk({ amount_cents: 10000 });
   await click(e, "en"); const paidId = e.stripe_checkout_id; pay(paidId);
@@ -596,6 +599,42 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   reset();
   const handed = d3.status === 200 && d3.json && Object.values(STRIPE.sessions).find(s => s.url === d3.json.url);
   vuln(d3.status === 200 && (!handed || handed.status !== "open"), `B32d a closed page comes back while the database cannot forget its key -> ${d3.status}, page handed out: ${handed ? handed.status : "none"} (a closed page must never be handed out)`);
+  reset();
+}
+// ---------- B33: looking a page up at Stripe only when Stripe hands it back from memory ----------
+{
+  const click = (c, lang) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang } }));
+  const pagesOf = (c) => Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // a) a first click never depends on a second call to Stripe: even when looking a page up would fail, the page is handed out
+  const a = mk({ amount_cents: 10000 }); let lookups = 0;
+  hooks.stripe = async (path, method) => (method === "GET" && /^\/checkout\/sessions\/cs_/.test(path) ? (lookups++, [500, { error: { type: "api_error", message: "An unknown error occurred" } }]) : null);
+  const a1 = await click(a, "en"); reset();
+  vuln(a1.status !== 200 || lookups !== 0 || STRIPE.sessions[a.stripe_checkout_id]?.status !== "open",
+    `B33a a first click while looking pages up at Stripe fails -> ${a1.status}, look-ups ${lookups} (must be the new page, without a look-up)`);
+  // b) a page Stripe hands back from memory is still looked up (Back, Fund again): one look-up, the same open page
+  lookups = 0; hooks.stripe = async (path, method) => { if (method === "GET" && /^\/checkout\/sessions\/cs_/.test(path)) lookups++; return null; };
+  const a2 = await click(a, "en"); reset();
+  vuln(a2.status !== 200 || lookups !== 1 || !a1.json || !a2.json || a2.json.url !== a1.json.url,
+    `B33b the same click again -> ${a2.status}, look-ups ${lookups}, same page ${!!(a1.json && a2.json && a2.json.url === a1.json.url)} (must be looked up once and handed back)`);
+  // c) two tabs in one language click at the same moment right after a language switch and back (both get the closed
+  // English page back from Stripe's memory), then the client clicks once more: the page both tabs got must stay
+  const c = mk({ amount_cents: 10000 }); await click(c, "en"); await click(c, "lt");      // the English page is now closed
+  let gets = 0;
+  hooks.stripe = async (path, method) => { if (path === "/checkout/sessions" && method === "POST") await sleep(150); if (method === "GET" && /^\/checkout\/sessions\/cs_/.test(path) && ++gets === 2) await sleep(60); return null; };
+  const [c1, c2] = await Promise.all([click(c, "en"), click(c, "en")]); reset();
+  const shared = c.stripe_checkout_id; const c3 = await click(c, "en");
+  vuln(c1.status !== 200 || c2.status !== 200 || !c1.json || !c2.json || c1.json.url !== c2.json.url || c3.status !== 200 || c.stripe_checkout_id !== shared || STRIPE.sessions[shared].status !== "open" || !c3.json || c3.json.url !== c1.json.url,
+    `B33c two tabs at once on a closed page, then one more click -> ${c1.status}/${c2.status}/${c3.status}; the page both tabs got is ${STRIPE.sessions[shared]?.status}, the next click got ${c3.json && c3.json.url === (c1.json && c1.json.url) ? "the same page" : "another page"} (must stay open and be handed back)`);
+  // d) Stripe's "from memory" mark missing (never expected): a closed page made more than a minute ago is still caught
+  const d = mk({ amount_cents: 10000 }); await click(d, "en"); const old = d.stripe_checkout_id; await click(d, "lt");
+  STRIPE.sessions[old].created -= 3600;
+  const f0 = globalThis.fetch;
+  globalThis.fetch = async (u, i) => { const r = await f0(u, i); if (!r.headers.get("Idempotent-Replayed")) return r; const h = new Headers(r.headers); h.delete("Idempotent-Replayed"); return new Response(await r.text(), { status: r.status, headers: h }); };
+  const d3 = await click(d, "en"); globalThis.fetch = f0;
+  const handed = d3.json && Object.values(STRIPE.sessions).find(s => s.url === d3.json.url);
+  vuln(d3.status !== 200 || !handed || handed.status !== "open" || handed.id === old,
+    `B33d a closed page from an hour ago comes back without Stripe's mark -> ${d3.status}, the page handed out is ${handed ? handed.status : "none"} (must be a new open page)`);
   reset();
 }
 console.log(out.join("\n"));
