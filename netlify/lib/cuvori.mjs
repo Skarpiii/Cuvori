@@ -164,10 +164,11 @@ export async function stripe(method, path, body, opts = {}) {
   await checkStripePlatform();
   return stripeCall(method, path, body, opts);
 }
+export const STRIPE_VERSION = "2024-06-20";
 // the call itself, without the checks: only for the checks and through stripe()
 async function stripeCall(method, path, body, opts = {}) {
   if (!/^\/[a-z_]+(\/[A-Za-z0-9_]+)*$/.test(path)) throw new Error("bad Stripe path");
-  const headers = { Authorization: `Bearer ${STRIPE_KEY}`, "Stripe-Version": "2024-06-20" };
+  const headers = { Authorization: `Bearer ${STRIPE_KEY}`, "Stripe-Version": STRIPE_VERSION };
   if (opts.idempotency) headers["Idempotency-Key"] = opts.idempotency;
   let url = `https://api.stripe.com/v1${path}`;
   const init = { method, headers, signal: AbortSignal.timeout(8000) };
@@ -180,11 +181,19 @@ async function stripeCall(method, path, body, opts = {}) {
   try { data = await r.json(); }
   catch { const e = new Error("Unreadable payment provider response"); e.outcomeUnknown = true; e.status = r.status; throw e; }
   if (!data || typeof data !== "object" || Array.isArray(data)) { const e = new Error("Invalid payment provider response"); e.outcomeUnknown = true; throw e; }
-  if (!r.ok) { const e = new Error((data.error && data.error.message) || "Stripe error"); e.stripe = data.error || {}; e.status = r.status; e.shouldRetry = r.headers.get("Stripe-Should-Retry") === "true"; throw e; }
+  if (!r.ok) { const e = new Error((data.error && data.error.message) || "Stripe error"); e.stripe = data.error || {}; e.status = r.status; e.shouldRetry = r.headers.get("Stripe-Should-Retry") === "true"; e.replayed = r.headers.get("Idempotent-Replayed") === "true"; throw e; }
   return data;
 }
 const stripeCode = (e) => (e && e.stripe && (e.stripe.code || e.stripe.decline_code)) || "";
 const isIdemInFlight = (e) => e && e.stripe && e.stripe.type === "idempotency_error";
+// Stripe's two answers about a key itself rather than about the request: "still working on the first request with this
+// key" (409) and "this key was used for a different request" (400)
+export const idemBusy = (e) => isIdemInFlight(e) && e.status === 409;
+export const idemMismatch = (e) => isIdemInFlight(e) && e.status === 400;
+// What Stripe recognises a repeated request by: the exact text it receives, read under the API version sent with it. A
+// key named after this can never meet a request Stripe calls "different", whatever a later version changes in how
+// requests are written.
+export const stripeFingerprint = (path, body) => crypto.createHash("sha256").update(`${STRIPE_VERSION} POST ${path}\n${encode(body)}`).digest("hex").slice(0, 16);
 
 // Stripe-Signature: t=...,v1=...[,v1=...]  (several v1 during secret rotation)
 export function verifyWebhook(rawBody, sigHeader, secret = WEBHOOK_SECRET, toleranceSec = 300) {
