@@ -24,6 +24,7 @@ const STRIPE_TEXT = {
 };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const STRIPE_NAME_MAX = 250;                     // Stripe's limit for a product name, in characters
 // Makes the page under the request's stored key (moneyPost).
 // - Two tabs clicking at the same moment: Stripe is still making the first tab's page and tells the second to wait. The
 //   second waits a moment and asks again with the same key, and gets that very page (for up to about 4 seconds).
@@ -99,11 +100,17 @@ export default safe(async (req) => {
   const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card");
   const fee = quote.processing_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
-  // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to. The title is
-  // cut by whole characters as people see them (cut): never half an emoji, which would stop the payment, and never part of
-  // a flag or a family emoji, which would show as a stray symbol.
-  const title = cut(c.title, 180).trim() || L.untitled;   // a title of nothing but spaces, tabs or line breaks counts as no title
-  const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: kind === "topup" ? `${L.increase}${title}` : `${L.order}${title}` } } }];
+  // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to — named after
+  // the Order. Line breaks, tabs and other control characters in the title (the site's title box can't make them; a title
+  // made directly on the server can) become plain spaces, and the hidden marks that flip the direction of text are left
+  // out; then the blanks at both ends go, before the cut, so they never use up the title's room. The cut is by whole
+  // characters as people see them (cut): never half an emoji, which would stop the payment, and never part of a flag or a
+  // family emoji, which would show as a stray symbol. At most 180 characters, and short enough that the whole line, the
+  // fixed words in front included, fits Stripe's limit of 250 characters even if Stripe counts every emoji as two.
+  const prefix = kind === "topup" ? L.increase : L.order;
+  const plain = String(c.title ?? "").replace(/[\u202A-\u202E\u2066-\u2069]/g, "").replace(/[\p{Cc}\p{Zl}\p{Zp}\s]+/gu, " ").trim();
+  const title = cut(plain, 180, STRIPE_NAME_MAX - prefix.length).trim() || L.untitled;   // nothing left (only blanks or control characters) counts as no title
+  const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: `${prefix}${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: L.fee, description: L.feeDesc } } });
   // One Checkout page per half hour and request: a second identical click within it gets the same page back (the
   // stored key below). That needs the same request each time, so the expiry is a fixed point 60–90 min ahead rather
