@@ -58,13 +58,14 @@ const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 // (the database refuses it and Stripe cannot be sent it), and never part of an emoji built from several pieces (a flag, a
 // skin tone, a family), which would show as a stray symbol. Still never more than n characters as the database counts them.
 const GRAPHEMES = typeof Intl === "object" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
-export const cut = (text, n) => {
+// maxUnits (optional): also short enough for a limit counted the way JavaScript counts, where an emoji outside the basic
+// range counts as two — so the text fits a limit however the other side counts it
+export const cut = (text, n, maxUnits = Infinity) => {
   const s = String(text ?? "");
-  if (!GRAPHEMES) return Array.from(s).slice(0, n).join("");
   let out = "", used = 0;
-  for (const { segment } of GRAPHEMES.segment(s)) {
+  for (const segment of GRAPHEMES ? Array.from(GRAPHEMES.segment(s), x => x.segment) : Array.from(s)) {
     const size = Array.from(segment).length;
-    if (used + size > n) break;
+    if (used + size > n || out.length + segment.length > maxUnits) break;
     out += segment; used += size;
   }
   return out;
