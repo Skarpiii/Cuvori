@@ -1,6 +1,7 @@
 // Money attack suite: every way a payment can go wrong — bank delays, failed transfers and refunds,
 // chargebacks before and after release, top-ups, milestones under contention, missed webhooks,
 // tampering, stuck states. Each check names the scenario in plain words.
+import { createHash } from "node:crypto";
 import { DB, STRIPE, users, hooks, urls, req, signed, sigFor, call, mk, past, moneyOut, reset, onlyDue, fns, fund, pay, uuid } from "./fn-harness.mjs";
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
@@ -553,6 +554,48 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const m1 = await confirm(m, oldId);
   vuln(m1.status !== 200 || m.status !== "funded" || ledger(m, "fund").length !== 1,
     `B31h the return names an unpaid page of this Order while its current page is paid -> ${m1.status} ${JSON.stringify(m1.json)}; Order ${m.status} (must be funded from the paid page)`);
+  reset();
+}
+// ---------- B32: the stored key of a payment page meets Stripe's own answers about keys ----------
+{
+  const click = (c, lang) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang } }));
+  const pagesOf = (c) => Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const keyOf = (c) => DB.money_keys.find(k => k.scope.startsWith(`checkout:${c.id}:`));
+  // a) two tabs in one language click at the same moment, while Stripe is still making the first tab's page
+  const a = mk({ amount_cents: 10000 });
+  hooks.stripe = async (path, method) => { if (path === "/checkout/sessions" && method === "POST") await sleep(300); return null; };
+  const [a1, a2] = await Promise.all([click(a, "en"), (async () => { await sleep(100); return click(a, "en"); })()]);
+  reset();
+  vuln(a1.status !== 200 || a2.status !== 200 || !a1.json || !a2.json || a1.json.url !== a2.json.url || pagesOf(a).length !== 1 || pagesOf(a)[0].status !== "open",
+    `B32a two tabs in one language click while Stripe is still making the page -> ${a1.status}/${a2.status} ${a2.status !== 200 ? JSON.stringify(a2.json) : ""}; same page ${!!(a1.json && a2.json && a1.json.url === a2.json.url)}, pages ${pagesOf(a).length} (both tabs must get the one page)`);
+  // b) the key is named after the exact text Stripe receives, with the API version it is read under
+  const b = mk({ amount_cents: 10000 }); const f0 = globalThis.fetch; let sent = null;
+  globalThis.fetch = async (u, i = {}) => { if (String(u).endsWith("/v1/checkout/sessions") && i.method === "POST") sent = `${i.headers["Stripe-Version"]} POST /checkout/sessions\n${i.body}`; return f0(u, i); };
+  await click(b, "en"); globalThis.fetch = f0;
+  const want = sent && createHash("sha256").update(sent).digest("hex").slice(0, 16), got = (keyOf(b) || {}).scope || "";
+  vuln(!want || !got.endsWith(`:${want}`), `B32b the key is named after the exact request text -> key ${got.replace(b.id, "<order>")}, text's fingerprint ${want} (must match)`);
+  // ...and if Stripe ever says the key belongs to a different request, the client still gets a page
+  const saved = STRIPE.idem.get(keyOf(b).key); STRIPE.idem.set(keyOf(b).key, { ...saved, body: saved.body + "&changed=1" });
+  const b2 = await click(b, "en");
+  vuln(b2.status !== 200 || STRIPE.sessions[b.stripe_checkout_id]?.status !== "open" || pagesOf(b).filter(s => s.status === "open").length !== 1,
+    `B32b2 Stripe says the key belongs to a different request -> ${b2.status} ${b2.status !== 200 ? JSON.stringify(b2.json) : ""} (must be a new page, one open page)`);
+  // c) Stripe fails once, and at that moment the database cannot forget the key: the next click must not get the old failure
+  const c = mk({ amount_cents: 10000 }); let s500 = 1, delFail = 1;
+  hooks.stripe = async (path, method) => (path === "/checkout/sessions" && method === "POST" && s500-- > 0 ? [500, { error: { type: "api_error", message: "An unknown error occurred" } }] : null);
+  hooks.db = async (method, table) => (method === "DELETE" && table === "money_keys" && delFail-- > 0 ? new Response(JSON.stringify({ message: "timeout" }), { status: 503 }) : null);
+  const c1 = await click(c, "en"), c2 = await click(c, "en");
+  reset();
+  vuln(c1.status < 500 || c2.status !== 200 || STRIPE.sessions[c.stripe_checkout_id]?.status !== "open",
+    `B32c Stripe failed while the database could not forget the key -> first ${c1.status}, next ${c2.status} (the next click must get a page)`);
+  // d) a closed page comes back for its key, and the database cannot forget the key: the closed page is never handed out
+  const d = mk({ amount_cents: 10000 });
+  await click(d, "en"); await click(d, "lt");                                   // the English page is now closed
+  hooks.db = async (method, table) => (method === "DELETE" && table === "money_keys" ? new Response(JSON.stringify({ message: "timeout" }), { status: 503 }) : null);
+  const d3 = await click(d, "en");
+  reset();
+  const handed = d3.status === 200 && d3.json && Object.values(STRIPE.sessions).find(s => s.url === d3.json.url);
+  vuln(d3.status === 200 && (!handed || handed.status !== "open"), `B32d a closed page comes back while the database cannot forget its key -> ${d3.status}, page handed out: ${handed ? handed.status : "none"} (a closed page must never be handed out)`);
   reset();
 }
 console.log(out.join("\n"));

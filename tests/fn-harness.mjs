@@ -109,7 +109,7 @@ globalThis.fetch = async (url, init = {}) => {
       const prev = STRIPE.idem.get(key);
       if (prev && prev.inflight) return res(409, { error: { type: "idempotency_error", message: "There is currently another in-progress request using this Stripe-Idempotency-Key" } });
       if (prev && prev.body !== body) return res(400, { error: { type: "idempotency_error", message: "Keys for idempotent requests can only be used with the same parameters they were first used with." } });
-      if (prev) return res(prev.status, prev.data);
+      if (prev) return new Response(JSON.stringify(prev.data), { status: prev.status, headers: { "content-type": "application/json", "Idempotent-Replayed": "true" } });   // like Stripe: a replay says so
       STRIPE.idem.set(key, { inflight: true, body });
     }
     let status, data;
