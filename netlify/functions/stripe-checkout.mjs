@@ -1,8 +1,7 @@
 // POST { contract_id, lang } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { createHash } from "node:crypto";
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKey } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKey, idemBusy, idemMismatch, stripeFingerprint } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -23,6 +22,25 @@ const STRIPE_TEXT = {
   es: { locale: "es", order: "Pedido: ", increase: "Aumento de precio acordado — ", untitled: "Pedido de Cuvori", fee: "Comisión de tarjeta",
         feeDesc: "Se cobra con una tarifa que cubre incluso las tarjetas más caras. Todo lo que supere lo que realmente cuesta tu tarjeta vuelve a tu tarjeta automáticamente tras el pago. Cuvori no se queda con nada." },
 };
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Makes the page under the request's stored key (moneyPost).
+// - Two tabs clicking at the same moment: Stripe is still making the first tab's page and tells the second to wait. The
+//   second waits a moment and asks again with the same key, and gets that very page (for up to about 4 seconds).
+// - A failure Stripe repeats from its memory of the key (the database could not forget the key when that failure came),
+//   or Stripe saying the key belongs to a different request: the key is dropped and one fresh try is made, so the
+//   client never gets an old answer instead of a new try.
+async function makePage(scope, params) {
+  let waits = 0, fresh = false;
+  for (;;) {
+    try { return await moneyPost(scope, "/checkout/sessions", params); }
+    catch (e) {
+      if (idemBusy(e) && waits < 10) { waits++; await sleep(400); continue; }
+      if (!fresh && (idemMismatch(e) || (e && e.replayed && e.status >= 400 && !e.shouldRetry))) { fresh = true; await dropKey(scope); continue; }
+      throw e;
+    }
+  }
+}
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -112,13 +130,14 @@ export default safe(async (req) => {
     // this breakdown — not the one from a page made later with a changed fee table — is the one saved on the Order
     metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
   };
-  // One key per exact request, kept in the database like the keys of payouts and refunds. It is tied to everything sent to
-  // Stripe, so the same request again (two tabs in one language, Back and Fund again, a retry after a slow answer) gets the
-  // same page back, and anything different (another language, a fee table or a page text changed by a new version) is a
-  // new request with its own key, never one Stripe refuses. After a definite failure at Stripe the key is dropped, so the
-  // next click is a fresh try instead of Stripe repeating that failure for the rest of the half hour.
-  const scope = `checkout:${c.id}:${createHash("sha256").update(JSON.stringify(params)).digest("hex").slice(0, 16)}`;
-  let session = await moneyPost(scope, "/checkout/sessions", params);
+  // One key per exact request, kept in the database like the keys of payouts and refunds. It is named after the exact
+  // text Stripe receives, so the same request again (two tabs in one language, Back and Fund again, a retry after a slow
+  // answer) gets the same page back, and anything different (another language, a fee table or a page text changed by a
+  // new version, or a new version writing the request differently) is a new request with its own key, never one Stripe
+  // refuses. After a definite failure at Stripe the key is dropped, so the next click is a fresh try instead of Stripe
+  // repeating that failure for the rest of the half hour.
+  const scope = `checkout:${c.id}:${stripeFingerprint("/checkout/sessions", params)}`;
+  let session = await makePage(scope, params);
   // For a repeated key Stripe hands back its saved answer, even when that page has been closed since (a page in another
   // language replaced it, and the client switched back). So the page's state now is asked for: a closed page is never
   // handed out — its key is dropped and one new page is made. A paid page is handed out as it is: Stripe shows it as paid
@@ -126,7 +145,10 @@ export default safe(async (req) => {
   const live = await stripe("GET", `/checkout/sessions/${session.id}`);
   if (live.status === "expired") {
     await dropKey(scope);
-    session = await moneyPost(scope, "/checkout/sessions", params);
+    const renewed = await makePage(scope, params);
+    // the database could not forget the key, so Stripe handed back the closed page again: never sent to the client
+    if (renewed.id === session.id) throw new Error("the payment page's key could not be renewed");
+    session = renewed;
   }
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
