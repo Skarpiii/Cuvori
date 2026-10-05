@@ -25,6 +25,35 @@ const STRIPE_TEXT = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const STRIPE_NAME_MAX = 250;                     // Stripe's limit for a product name, in characters
+const GRAPHEMES = typeof Intl === "object" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu, TAGS = /[\u{E0000}-\u{E007F}]/gu;
+// The Order's title as plain text for Stripe's page, at most `room` long as JavaScript counts (an emoji outside the basic
+// range as two, so it fits Stripe's limit however Stripe counts). Titles come from the site's title box, but someone can
+// paste odd characters into it, and a title made directly on the server can hold anything:
+// - line breaks, tabs, control characters and every other kind of blank (the braille blank too) become one plain space;
+// - codes that are never text (noncharacters) and the hidden marks that flip the direction of text are left out;
+// - invisible characters (zero-width spaces, invisible direction marks, fillers, soft hyphens, …) are left out wherever
+//   they stand on their own. Inside an emoji some of them hold it together (the joiner in a family, the mark that makes a
+//   symbol colourful), so there they stay; the hidden letters that make England's or Scotland's flag stay only on the
+//   black flag they belong to, anywhere else they are hidden text and are left out;
+// - one character built from more than 16 pieces is a trick (a letter with hundreds of accents stacked on it, which would
+//   push the rest of the title off the page); the longest real emoji has 10, so such a character keeps only its letter;
+// - the whole title is shown when it fits; only when it doesn't is it cut by whole characters (never half an emoji, a
+//   flag or a letter with its accent) and ends with "…", so a cut title shows that it was cut.
+// Nothing visible left means no title (the caller then uses "Cuvori order" in the client's language).
+function stripeTitle(raw, room) {
+  const s = String(raw ?? "").replace(/\p{Noncharacter_Code_Point}/gu, "").replace(/[\u202A-\u202E\u2066-\u2069]/g, "").replace(/[\p{Cc}\p{Zl}\p{Zp}\u2800]/gu, " ");
+  let out = "";
+  for (const g of GRAPHEMES ? Array.from(GRAPHEMES.segment(s), x => x.segment) : Array.from(s)) {
+    const piece = g.codePointAt(0) === 0x1F3F4 ? g : g.replace(TAGS, "");
+    const seen = piece.replace(INVISIBLE, "");
+    if (!seen) continue;                                             // nothing visible: left out
+    if (/^\s+$/u.test(seen)) { out += " "; continue; }
+    out += Array.from(piece).length > 16 ? Array.from(seen)[0] : piece;
+  }
+  out = out.replace(/\s+/gu, " ").trim();
+  return out.length <= room ? out : cut(out, Infinity, room - 1).trimEnd() + "…";
+}
 // Makes the page under the request's stored key (moneyPost).
 // - Two tabs clicking at the same moment: Stripe is still making the first tab's page and tells the second to wait. The
 //   second waits a moment and asks again with the same key, and gets that very page (for up to about 4 seconds).
@@ -101,15 +130,9 @@ export default safe(async (req) => {
   const fee = quote.processing_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
   // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to — named after
-  // the Order. Line breaks, tabs and other control characters in the title (the site's title box can't make them; a title
-  // made directly on the server can) become plain spaces, and the hidden marks that flip the direction of text are left
-  // out; then the blanks at both ends go, before the cut, so they never use up the title's room. The cut is by whole
-  // characters as people see them (cut): never half an emoji, which would stop the payment, and never part of a flag or a
-  // family emoji, which would show as a stray symbol. At most 180 characters, and short enough that the whole line, the
-  // fixed words in front included, fits Stripe's limit of 250 characters even if Stripe counts every emoji as two.
+  // the Order. The whole line, the fixed words in front included, fits Stripe's 250 characters (stripeTitle).
   const prefix = kind === "topup" ? L.increase : L.order;
-  const plain = String(c.title ?? "").replace(/[\u202A-\u202E\u2066-\u2069]/g, "").replace(/[\p{Cc}\p{Zl}\p{Zp}\s]+/gu, " ").trim();
-  const title = cut(plain, 180, STRIPE_NAME_MAX - prefix.length).trim() || L.untitled;   // nothing left (only blanks or control characters) counts as no title
+  const title = stripeTitle(c.title, STRIPE_NAME_MAX - prefix.length) || L.untitled;
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: `${prefix}${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: L.fee, description: L.feeDesc } } });
   // One Checkout page per half hour and request: a second identical click within it gets the same page back (the
