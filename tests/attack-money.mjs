@@ -637,5 +637,52 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
     `B33d a closed page from an hour ago comes back without Stripe's mark -> ${d3.status}, the page handed out is ${handed ? handed.status : "none"} (must be a new open page)`);
   reset();
 }
+// ---------- B34: every refusal at Fund carries a code the page can say in the client's language; a payment record that
+// looks wrong is noted for the owner, and the note goes once the record checks out ----------
+{
+  const click = (c, token = "tok_cl") => call(fx.checkout, req("POST", "x", { token, body: { contract_id: c.id, lang: "lt" } }));
+  const pagesOf = (c) => Object.values(STRIPE.sessions).filter(s => s.client_reference_id === c.id);
+  // a) the codes
+  const plain = mk();
+  const rOut = await call(fx.checkout, req("POST", "x", { body: { contract_id: plain.id } }));
+  users.cl.banned = true; const rBan = await click(plain); users.cl.banned = false;
+  const rOther = await click(plain, "tok_cl2");
+  const rDirect = await click(mk({ payment_mode: "direct" }));
+  const rSmall = await click(mk({ amount_cents: 50, price: 0.5 }));
+  const rCb = await click(mk({ status: "funded", funded_cents: 10000, amount_cents: 13000, price: 130, chargeback_status: "open", chargeback_id: "dp_x" }));
+  for (const [what, r, status, code] of [["signed out", rOut, 401, "signed_out"], ["a suspended account", rBan, 403, "account_suspended"], ["someone else's Order", rOther, 403, "not_your_order"],
+    ["an Order paid directly", rDirect, 409, "paid_directly"], ["an amount under €1", rSmall, 409, "amount_out_of_range"], ["a top-up while a card chargeback is open", rCb, 409, "chargeback_open"]])
+    vuln(r.status !== status || !r.json || r.json.code !== code, `B34a Fund refused for ${what} -> ${r.status} ${JSON.stringify(r.json)} (must be ${status} with code ${code})`);
+  // b) each mark that only money moving leaves, alone on an Order waiting for its first payment: refused, noted for the owner
+  for (const [what, extra, words] of [
+    ["a payment time", { funded_at: new Date().toISOString() }, "a payment time"], ["a card payment", { stripe_payment_intent: "pi_x" }, "a card payment"],
+    ["money paid in", { funded_cents: 100 }, "money paid in"], ["money paid out", { released_cents: 100 }, "money paid out"], ["money refunded", { refunded_cents: 100 }, "money refunded"],
+    ["a payout to the freelancer", { stripe_transfer_id: "tr_1" }, "a payout to the freelancer"], ["a refund at Stripe", { stripe_refund_id: "re_1" }, "a refund"],
+    ["a reversal", { stripe_reversal_id: "trr_1" }, "a reversal"], ["the mode it was paid in", { paid_mode: "test" }, "the mode it was paid in"],
+    ["a refund decided on its money", { refund_cents: 5000 }, "a decision on its money"], ["a split decided on its money", { split_editor_cents: 5000 }, "a decision on its money"],
+  ]) {
+    const c = mk(extra); const r = await click(c);
+    vuln(r.status !== 409 || !r.json || r.json.code !== "needs_check" || pagesOf(c).length !== 0 || !String(c.money_error || "").startsWith("Payment record needs checking: ") || !String(c.money_error).includes(words),
+      `B34b an Order waiting for its first payment that shows ${what} -> ${r.status} ${r.json && r.json.code}, pages made ${pagesOf(c).length}, note ${JSON.stringify(c.money_error || null)} (must be refused with needs_check and a note naming it)`);
+  }
+  const led = mk(); DB.order_payments.push({ id: uuid(), order_id: led.id, kind: "fund", status: "succeeded", amount_cents: 10000, provider: "stripe", provider_ref: "pi_led" });
+  const rLed = await click(led);
+  vuln(rLed.status !== 409 || rLed.json?.code !== "needs_check" || !String(led.money_error || "").includes("a payment in its ledger"), `B34b an Order waiting for its first payment with a payment in its ledger -> ${rLed.status} ${rLed.json?.code}, note ${JSON.stringify(led.money_error || null)}`);
+  // c) a paid Order whose amount paid in is missing, and one with more paid in than its price: refused and noted
+  const f0 = mk({ status: "funded", funded_cents: 0, amount_cents: 13000, price: 130 }); const r0 = await click(f0);
+  const fx2 = mk({ status: "funded", funded_cents: 15000, amount_cents: 13000, price: 130 }); const r2 = await click(fx2);
+  vuln(r0.status !== 409 || r0.json?.code !== "needs_check" || !String(f0.money_error || "").includes("amount paid in is missing"), `B34c a paid Order without the amount paid in -> ${r0.status} ${r0.json?.code}, note ${JSON.stringify(f0.money_error || null)}`);
+  vuln(r2.status !== 409 || r2.json?.code !== "needs_check" || !String(fx2.money_error || "").includes("more was paid in (€150.00) than the Order's price (€130.00)"), `B34c more paid in than the price -> ${r2.status} ${r2.json?.code}, note ${JSON.stringify(fx2.money_error || null)}`);
+  // d) another note already on the Order is never written over; once the record checks out, this check's own note goes
+  const other = mk({ funded_at: new Date().toISOString(), money_error: "Stripe account check: something else" }); await click(other);
+  vuln(other.money_error !== "Stripe account check: something else", `B34d another note on the Order -> ${JSON.stringify(other.money_error)} (must stay as it was)`);
+  const fixed = mk({ funded_at: new Date().toISOString() }); await click(fixed); const noted = fixed.money_error;
+  fixed.funded_at = null; const rFixed = await click(fixed);                       // corrected by hand
+  vuln(!noted || rFixed.status !== 200 || fixed.money_error != null || pagesOf(fixed).length !== 1, `B34d the record corrected by hand -> ${rFixed.status}, note before ${JSON.stringify(noted)}, after ${JSON.stringify(fixed.money_error ?? null)} (must be paid normally, the note gone)`);
+  // e) a decided card chargeback alone (one can come for a late payment that was sent back) does not block the first payment
+  const cbd = mk({ chargeback_id: "dp_old", chargeback_status: "won", chargeback_cents: 10178 }); const rCbd = await click(cbd);
+  vuln(rCbd.status !== 200 || pagesOf(cbd).length !== 1 || cbd.money_error, `B34e an Order waiting for its first payment with only a decided chargeback on a sent-back payment -> ${rCbd.status} ${JSON.stringify(rCbd.json)} (must get its payment page)`);
+  reset();
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);

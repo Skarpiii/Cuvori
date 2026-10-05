@@ -419,9 +419,12 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
     vuln(r.status !== 409 || !r.json || r.json.code !== "not_payable" || r.json.error !== "This order is not waiting for payment" || Object.keys(STRIPE.sessions).length !== pages,
       `R-V ${status}: Fund on a stale page -> ${r.status} ${JSON.stringify(r.json)} (must be 409 with code not_payable, no Stripe page)`);
   }
-  // a stranger still learns nothing: the same "Not your order" as before, no code
+  // a stranger still learns nothing: someone else's paid Order gets exactly the answer an Order that doesn't exist gets
+  // (the code only lets the page say it in the person's language, never what state the Order is in)
   const c = mk({ status: "funded", funded_cents: 10000 }); const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl2", body: { contract_id: c.id } }));
-  vuln(r.status !== 403 || (r.json && r.json.code), `R-V a stranger asks about someone else's paid Order -> ${r.status} ${JSON.stringify(r.json)} (must be 403 Not your order, no code)`);
+  const none = await call(fx.checkout, req("POST", "x", { token: "tok_cl2", body: { contract_id: uuid() } }));
+  vuln(r.status !== 403 || JSON.stringify(r.json) !== JSON.stringify(none.json) || none.status !== 403 || !r.json || r.json.error !== "Not your order",
+    `R-V a stranger asks about someone else's paid Order -> ${r.status} ${JSON.stringify(r.json)}; an Order that doesn't exist -> ${none.status} ${JSON.stringify(none.json)} (must be the same 403 "Not your order")`);
   reset();
 }
 
