@@ -684,5 +684,14 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(rCbd.status !== 200 || pagesOf(cbd).length !== 1 || cbd.money_error, `B34e an Order waiting for its first payment with only a decided chargeback on a sent-back payment -> ${rCbd.status} ${JSON.stringify(rCbd.json)} (must get its payment page)`);
   reset();
 }
+// ---------- B35: the total with the card fee above Stripe's per-payment limit is refused with a code the page can translate ----------
+{
+  const c = mk({ amount_cents: 95000000, price: 950000 });
+  hooks.rpc = async (fn, args) => (fn === "order_quote" ? [200, { price_cents: args.p_price_cents, processing_cents: 9000000, cuvori_cents: 0, total_cents: args.p_price_cents + 9000000, currency: "EUR", payer: "client", percent: 9.47, fixed_cents: 0, schedule_id: 3, region: "ANY" }] : null);
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "lt" } }));
+  reset();
+  vuln(r.status !== 400 || !r.json || r.json.code !== "amount_out_of_range" || Object.values(STRIPE.sessions).some(s => s.client_reference_id === c.id),
+    `B35 a €950,000 Order whose total with the card fee passes Stripe's limit -> ${r.status} ${JSON.stringify(r.json)} (must be refused with code amount_out_of_range, no page made)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
