@@ -320,7 +320,7 @@ export async function limitTries(me, kind, perMinute = 10, perDay = 50) {
 export async function quoteFor(priceCents, currency = "EUR", country = null, customer = "any", method = "any") {
   // a whole Order starts at €1 (MIN_CENTS, checked by the caller); a top-up for an agreed amendment may be smaller.
   // €0.50 is the smallest card payment Stripe takes in euros, so nothing below it can ever be paid.
-  if (!Number.isSafeInteger(priceCents) || priceCents < MIN_TOPUP_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400);
+  if (!Number.isSafeInteger(priceCents) || priceCents < MIN_TOPUP_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400, "amount_out_of_range");
   const qte = await db.rpc("order_quote", { p_price_cents: priceCents, p_currency: currency, p_country: country, p_customer: customer, p_method: method });
   if (!qte || !Number.isSafeInteger(qte.total_cents) || qte.total_cents < priceCents) throw new Error("bad quote");
   // Cuvori never pays the card cost: the client pays it on top of the price. A quote in which the client pays no fee
@@ -338,7 +338,7 @@ export async function quoteFor(priceCents, currency = "EUR", country = null, cus
     console.error("fee table: the processing fee is far above any card rate — payments paused", JSON.stringify({ schedule_id: qte.schedule_id, percent: qte.percent, fixed_cents: qte.fixed_cents, price_cents: priceCents, processing_cents: qte.processing_cents, region: qte.region }));
     throw fail(`Payments through Cuvori are paused: the fee table charges ${qte.percent}% + ${qte.fixed_cents} cents, which is far above any card rate. Correct it under Payment costs in the admin panel.`, 503, PAUSED);
   }
-  if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400);
+  if (qte.total_cents > MAX_PAYMENT_CENTS) throw fail("The order total including fees exceeds the payment limit.", 400, "amount_out_of_range");   // code: the page says it in the client's language
   return qte;
 }
 
