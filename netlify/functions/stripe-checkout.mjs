@@ -134,8 +134,12 @@ export default safe(async (req) => {
   // happens if the record was changed by hand
   if (["funded", "delivered"].includes(c.status) && fc > price)
     return needsCheck(c, `more was paid in (${euro(fc)}) than the Order's price (${euro(price)}).`);
-  // the record checks out: a note this check wrote earlier goes
-  if (ownRecordNote(c)) await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: null }).catch(() => {});
+  // the record checks out: a note this check wrote earlier goes. The steps below then know it is gone, so the check of the
+  // freelancer's Stripe account can still note its own finding for you on this very click.
+  if (ownRecordNote(c)) {
+    const gone = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: null }).catch(() => null);
+    if (gone && gone.length) c.money_error = null;
+  }
   const paidIn = c.status === "accepted" ? 0 : fc;
   if (c.status === "accepted") { amount = price; kind = "fund"; }
   else if (["funded", "delivered"].includes(c.status) && price > paidIn) { amount = price - paidIn; kind = "topup"; }
