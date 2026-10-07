@@ -272,6 +272,7 @@
       return pr;
     },
     async rpcImpl(fn, args){
+      if(window.__mockRpcFail&&window.__mockRpcFail[fn]) return {data:null,error:{message:"Failed to fetch"}};   // tests: the database could not be reached
       if(fn==="my_profile"){ if(!uid()) return {data:[]}; return {data: db.profiles.filter(p=>p.id===uid()).map(p=>({...p}))}; }
       if(fn==="redeem_invite"){ const code=args.code; if(!uid()) return {data:"not_signed_in"}; if(!(code in invites)) return {data:"invalid"}; if(invites[code]) return {data:"used"}; invites[code]=uid(); const inv=db.invites.find(i=>i.code===code); if(inv){ inv.used_by=uid(); inv.used_at=new Date().toISOString(); } db.profiles.find(p=>p.id===uid()).role="editor"; return {data:"ok"}; }
       if(fn==="open_conversation"){ const other=args.other; if(!uid()) return {error:{message:"not signed in"}}; const [a,b]=[uid(),other].sort(); let c=db.conversations.find(c=>c.user_a===a&&c.user_b===b);

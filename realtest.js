@@ -464,6 +464,32 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(q.includes('covers even the most expensive cards') && !q.includes('highest card rate'),'the card fee is explained truthfully (a rate that covers even the most expensive cards)');
   if(process.env.SHOT) await p.locator('#modalRoot .o-quote').first().screenshot({path:process.env.SHOT+'-paybox.png',timeout:5000}).catch(e=>console.log('screenshot skipped: '+e.message.split('\n')[0]));
   ok((await p.textContent('[data-caction="fund"]')).includes('€507.87'),'the Fund button carries the full amount');
+  // the price with the card fee can't be loaded (no connection to the database): no amounts and no Fund button, never a €0 card fee
+  const totalFor=async(cents)=>p.evaluate((cents)=>{ const f=window.__mockdb.fee_schedules.filter(x=>x.active&&!x.country&&x.region==='ANY')[0]; return Math.ceil((cents+f.fixed_cents)/(1-f.percent/100)); },cents);
+  const eur=(c)=>'€'+(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const later=async(ms)=>p.evaluate((ms)=>{ if(!Date.__realNow){ Date.__realNow=Date.now; window.__skew=0; Date.now=()=>Date.__realNow()+window.__skew; } window.__skew+=ms; },ms);   // the page's clock moves on
+  await later(61000); await p.evaluate(()=>{ window.__mockRpcFail={ order_quote:true }; }); await openOrders();
+  const qf=await modal();
+  ok(qf.includes("The price with the card fee couldn't be loaded. Reload the page to try again.") && !qf.includes('€500.00') && !qf.includes('Card fee') && await p.locator('[data-caction="fund"]').count()===0,"the price with the card fee can't be loaded: the client sees no amounts and no Fund button, only a message to reload");
+  await p.evaluate(()=>{ window.__mockRpcFail=null; }); await openOrders();
+  ok((await p.textContent('[data-caction="fund"]')).includes('€507.87'),'the connection is back: the full price and the Fund button are back at once (a failed load is never remembered)');
+  // the fee table changes while the page is open: within a minute the page shows the new card fee, the same Stripe will charge
+  await p.evaluate(()=>{ const f=window.__mockdb.fee_schedules.find(x=>!x.country&&x.region==='ANY'&&x.active); window.__oldPct=f.percent; f.percent=3.5; });
+  await openOrders();
+  ok((await p.textContent('[data-caction="fund"]')).includes('€507.87'),'right after a change to the fee table the page may still show the fee it loaded a moment ago');
+  await later(61000); await openOrders();
+  ok((await p.textContent('[data-caction="fund"]')).includes('€518.40') && (await modal()).includes('€18.40'),'a minute later the page shows the new card fee (€18.40 at 3.5% + €0.25) and the new total');
+  // payments paused by the fee table (the card fee left to Cuvori, or a slip far above any card rate): the page says payments
+  // are paused and shows no Fund button, never a card fee of €0 or an absurd one
+  for (const [what, change] of [["no client-paid card fee", { payer: "platform" }], ["a slip in the rate (32.5% instead of 3.25%)", { percent: 32.5 }]]) {
+    await p.evaluate((ch)=>{ const f=window.__mockdb.fee_schedules.find(x=>!x.country&&x.region==='ANY'&&x.active); window.__was=JSON.stringify(f); Object.assign(f,ch); },change);
+    await later(61000); await openOrders();
+    const pm=await modal();
+    ok(pm.includes("Payments are paused at the moment, so this Order can't be paid right now. Please try again later.") && !pm.includes('Card fee') && await p.locator('[data-caction="fund"]').count()===0,`the fee table pauses payments (${what}): the client is told payments are paused, with no card fee shown and no Fund button`);
+    await p.evaluate(()=>{ const f=window.__mockdb.fee_schedules.find(x=>!x.country&&x.region==='ANY'&&x.active); Object.assign(f,JSON.parse(window.__was)); });
+  }
+  await p.evaluate(()=>{ window.__mockdb.fee_schedules.find(x=>!x.country&&x.region==='ANY'&&x.active).percent=window.__oldPct; }); await later(61000); await openOrders();
+  ok((await p.textContent('[data-caction="fund"]')).includes('€507.87'),'the fee table back as it was: the page shows €507.87 again');
   await p.click('[data-caction="fund"]'); await p.waitForTimeout(2500);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); const ch=window.__fakeStripe.charges.at(-1); return c.status==='funded' && c.funded_cents===50000 && ch.total===50787 && ch.amount===50000 && ch.fee===787; }),'funded: the provider charged €507.87, the Order holds exactly €500');
   ok((await modal()).includes('€500 secured for this project') && (await modal()).includes('Cuvori fee: €0'),'client sees €500 secured, Cuvori fee €0');
@@ -634,7 +660,7 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-amact="accept"]'); await p.waitForTimeout(900);
   const inc=await modal();
   if(process.env.SHOT){ await p.locator('#modalRoot .modal').first().screenshot({path:process.env.SHOT+'-increase.png',timeout:5000}).catch(e=>console.log('screenshot skipped: '+e.message.split('\n')[0])); await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(400); await p.screenshot({path:process.env.SHOT+'-increase-phone.png',fullPage:false}).catch(()=>{}); await p.setViewportSize({width:1400,height:900}); await p.waitForTimeout(300); }
-  ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='delivered' && c.amount_cents===25000 && c.funded_cents===20000; }) && await p.locator('[data-caction="release"]').count()===0 && (await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50') && inc.includes('Fund the extra €50 first, then you can approve it and pay the editor'),'an accepted +€50 not paid yet: no Approve & release, the client is told to fund the extra first');
+  ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.status==='delivered' && c.amount_cents===25000 && c.funded_cents===20000; }) && await p.locator('[data-caction="release"]').count()===0 && (await p.textContent('[data-caction="topup"]')).includes('Fund the extra '+eur(await totalFor(5000))) && inc.includes('Fund the extra €50 first, then you can approve it and pay the editor'),'an accepted +€50 not paid yet: no Approve & release, the client is told to fund the extra first');
   // while the freelancer's account can't receive money (the "ready" mark is off), the button that pays the extra follows the same
   // rule as Fund: it is not shown, the note under the money box says why, and it comes back once the account can receive again
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=false; });
@@ -643,14 +669,21 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
      "the freelancer's account can't receive money: the button that pays the extra €50 is not shown, the note says why, and nothing can be released");
   await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); window.__mockdb.payout_details.find(x=>x.id===c.editor).stripe_payouts_enabled=true; });
   await openOrders();
-  ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50') && !(await modal()).includes("can't receive payments right now — ask them"),'once the account can receive again, the button that pays the extra €50 is back and the note is gone');
+  ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra '+eur(await totalFor(5000))) && !(await modal()).includes("can't receive payments right now — ask them"),'once the account can receive again, the button that pays the extra €50 is back and the note is gone');
+  // the extra is shown like the first payment: the increase, the card fee, Cuvori's €0 and the total, which the button carries
+  const tqm=await modal(), t50=await totalFor(5000);
+  ok(tqm.includes('Agreed price increase') && tqm.includes('€50.00') && tqm.includes('Card fee') && tqm.includes(eur(t50-5000)) && tqm.includes('Cuvori fee') && tqm.includes('Total to fund') && tqm.includes(eur(t50)) && t50>5000,
+     `before paying the extra the client sees: Agreed price increase €50.00, Card fee ${eur(t50-5000)}, Cuvori fee €0, Total to fund ${eur(t50)}`);
+  await later(61000); await p.evaluate(()=>{ window.__mockRpcFail={ order_quote:true }; }); await openOrders();
+  ok((await modal()).includes("The price with the card fee couldn't be loaded. Reload the page to try again.") && await p.locator('[data-caction="topup"]').count()===0,"the price of the extra can't be loaded: no amounts and no button to pay it, only a message to reload");
+  await p.evaluate(()=>{ window.__mockRpcFail=null; }); await openOrders();
   // a card chargeback is open: nothing can be paid until the bank decides, so the button that pays the extra is not shown, and the Order says why
   await p.evaluate(()=>{ window.__mockdb.contracts.at(-1).chargeback_status='open'; });
   await openOrders();
   ok(await p.locator('[data-caction="topup"]').count()===0 && (await modal()).includes("The client's bank has opened a chargeback on this payment."),'a card chargeback is open: no button to pay the extra, and the Order says a chargeback is open');
   await p.evaluate(()=>{ window.__mockdb.contracts.at(-1).chargeback_status=null; });
   await openOrders();
-  ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra €50'),'the chargeback decided: the button that pays the extra is back');
+  ok((await p.textContent('[data-caction="topup"]')).includes('Fund the extra '+eur(await totalFor(5000))),'the chargeback decided: the button that pays the extra is back');
   await p.click('[data-caction="topup"]'); await p.waitForTimeout(2500); await openOrders();
   ok(await db(()=>window.__mockdb.contracts.at(-1).funded_cents===25000) && (await p.textContent('[data-caction="release"]')).includes('Approve work & release €250'),'once the €50 is funded, the client can approve and release all €250');
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo'); await p.waitForTimeout(1200);
@@ -706,7 +739,7 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok((await modal()).includes('Amendment proposed by Maya') && (await modal()).includes('+€100'),'the client sees the amendment with the extra money');
   await p.click('[data-amact="accept"]'); await p.waitForTimeout(900);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.amount_cents===110000 && c.amendments===1 && window.__mockdb.order_milestones.filter(m=>m.order_id===c.id).length===4 && window.__mockdb.order_events.some(e=>e.order_id===c.id&&e.event==='created'&&e.data.price_cents===100000); }),'accepted: €1,100, four milestones, the original €1,000 is still in the history');
-  ok((await modal()).includes('added €100') && (await p.textContent('[data-caction="topup"]')).includes('Fund the extra €100'),'the client is asked to fund the extra €100');
+  ok((await modal()).includes('added €100') && (await p.textContent('[data-caction="topup"]')).includes('Fund the extra '+eur(await totalFor(10000))),'the client is asked to fund the extra €100, the card fee included');
   await p.click('[data-caction="topup"]'); await p.waitForTimeout(2500);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.funded_cents===110000 && window.__mockdb.order_payments.filter(x=>x.order_id===c.id&&x.kind==='fund').length===2; }),'topped up: €1,100 secured, two funding rows in the ledger');
   // changes on a milestone keep the money where it is; a dispute stops releases
