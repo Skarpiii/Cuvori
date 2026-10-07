@@ -703,5 +703,17 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(!String(before || "").startsWith("Payment record needs checking: ") || r.status !== 500 || !String(c.money_error || "").startsWith("Stripe check failed: ") || !String(c.money_error).includes(r.json && r.json.ref),
     `B36 the record corrected, then Stripe can't be reached on the same click -> ${r.status} ref ${r.json && r.json.ref}; note before ${JSON.stringify(before)}, after ${JSON.stringify(c.money_error ?? null)} (must be the Stripe check note, with the same ref)`);
 }
+// ---------- B37: the ledger of an Order waiting for its first payment: which lines stop the payment ----------
+{
+  const click = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
+  for (const [kind, blocks, words] of [["fund", true, "a payment in its ledger"], ["release", true, "a payout in its ledger"], ["reversal", true, "a reversal in its ledger"],
+    ["refund", false, ""], ["chargeback", false, ""]]) {
+    const c = mk(); DB.order_payments.push({ id: uuid(), order_id: c.id, kind, status: "succeeded", amount_cents: 100, provider: "stripe", provider_ref: "x_" + kind });
+    const r = await click(c);
+    const made = Object.values(STRIPE.sessions).some(s => s.client_reference_id === c.id);
+    vuln(blocks ? (r.status !== 409 || r.json?.code !== "needs_check" || made || !String(c.money_error || "").includes(words)) : (r.status !== 200 || !made || c.money_error),
+      `B37 an Order waiting for its first payment with only a ${kind} line in its ledger -> ${r.status} ${r.json?.code || "page made"}, note ${JSON.stringify(c.money_error ?? null)} (must ${blocks ? "be stopped and noted" : "be paid normally: such a line can belong to a late payment that was sent back"})`);
+  }
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
