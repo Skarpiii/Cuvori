@@ -693,5 +693,15 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(r.status !== 400 || !r.json || r.json.code !== "amount_out_of_range" || Object.values(STRIPE.sessions).some(s => s.client_reference_id === c.id),
     `B35 a €950,000 Order whose total with the card fee passes Stripe's limit -> ${r.status} ${JSON.stringify(r.json)} (must be refused with code amount_out_of_range, no page made)`);
 }
+// ---------- B36: right after its own "needs checking" note goes, a failing check of the freelancer's account is still noted ----------
+{
+  const click = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
+  const c = mk({ funded_at: new Date().toISOString() }); await click(c); const before = c.money_error;
+  c.funded_at = null;                                                            // the record corrected by hand
+  hooks.stripe = async (path, method) => (method === "GET" && path.startsWith("/accounts/") ? [500, { error: { type: "api_error", message: "An unknown error occurred" } }] : null);
+  const r = await click(c); reset();
+  vuln(!String(before || "").startsWith("Payment record needs checking: ") || r.status !== 500 || !String(c.money_error || "").startsWith("Stripe check failed: ") || !String(c.money_error).includes(r.json && r.json.ref),
+    `B36 the record corrected, then Stripe can't be reached on the same click -> ${r.status} ref ${r.json && r.json.ref}; note before ${JSON.stringify(before)}, after ${JSON.stringify(c.money_error ?? null)} (must be the Stripe check note, with the same ref)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
