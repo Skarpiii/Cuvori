@@ -122,9 +122,15 @@ export default safe(async (req) => {
       [!!(c.stripe_payment_intent || c.stripe_charge_id), "a card payment"], [!!c.stripe_transfer_id, "a payout to the freelancer"],
       [!!c.stripe_refund_id, "a refund"], [!!c.stripe_reversal_id, "a reversal"], [!!c.paid_mode, "the mode it was paid in"],
     ].filter(([yes]) => yes).map(([, what]) => what);
+    // the ledger: a payment into the Order, a payout to the freelancer or a reversal of one can only be there once money moved.
+    // Refund and chargeback lines are not on this list: they can belong to a late payment that never went into the Order
+    // (sent back from the Stripe dashboard, or disputed by the client's bank), and must never stop its first payment.
     if (!shows.length) {
-      const paidRows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&select=id&limit=1`);
-      if (paidRows && paidRows.length) shows.push("a payment in its ledger");
+      const rows = await db.select("order_payments", `order_id=eq.${c.id}&kind=in.(fund,release,reversal)&select=kind&limit=3`);
+      const kinds = new Set((rows || []).map(r => r.kind));
+      if (kinds.has("fund")) shows.push("a payment in its ledger");
+      if (kinds.has("release")) shows.push("a payout in its ledger");
+      if (kinds.has("reversal")) shows.push("a reversal in its ledger");
     }
     if (shows.length) return needsCheck(c, `this Order is waiting for its first payment, but its record shows ${shows.join(", ")}.`);
   }
