@@ -736,5 +736,23 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const r = await call(fx.checkout, req("POST", "x", { token: "tok_nobody", body: { contract_id: c.id } }));
   vuln(r.status !== 401 || r.json?.code !== "signed_out", `B38 an expired sign-in -> ${r.status} ${JSON.stringify(r.json)} (must be 401 signed_out)`);
 }
+// ---------- B39: a payment record that needs checking is always on record for the owner, even when no note can be written ----------
+{
+  const click = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
+  const logged = []; const e0 = console.error; console.error = (...a) => { logged.push(a.map(String).join(" ")); };
+  const a = mk({ funded_at: new Date().toISOString() }); await click(a);                                              // an empty note: written
+  const b = mk({ funded_at: new Date().toISOString(), money_error: "Stripe account check: something else" }); await click(b);   // another note: kept
+  const d = mk({ funded_at: new Date().toISOString() });
+  hooks.db = async (method, table, search) => (method === "PATCH" && table === "contracts" && search.includes(`id=eq.${d.id}`) ? new Response(JSON.stringify({ message: "timeout" }), { status: 503 }) : null);
+  const rd = await click(d); reset();                                                                                    // the note can't be saved
+  console.error = e0;
+  const line = (c) => logged.find(l => l.startsWith("Payment record needs checking") && l.includes(c.id) && l.includes("a payment time"));
+  vuln(!line(a) || !line(a).includes("(noted on the Order)") || !String(a.money_error || "").startsWith("Payment record needs checking: "),
+    `B39 an empty note -> note ${JSON.stringify(a.money_error ?? null)}, log ${JSON.stringify(line(a) || null)} (must be noted and logged)`);
+  vuln(!line(b) || !line(b).includes("not noted: the Order already has another note") || b.money_error !== "Stripe account check: something else",
+    `B39 another note on the Order -> note ${JSON.stringify(b.money_error)}, log ${JSON.stringify(line(b) || null)} (the other note must stay, the problem must be logged)`);
+  vuln(rd.status !== 409 || rd.json?.code !== "needs_check" || !line(d) || !line(d).includes("the note could not be saved"),
+    `B39 the note can't be saved -> ${rd.status} ${rd.json?.code}, log ${JSON.stringify(line(d) || null)} (must still refuse, and be logged)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
