@@ -225,6 +225,8 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
     ["only invisible direction marks", "\u200E\u200F\u061C", "Order: Cuvori order"],
     ["only the Korean filler character", "\u3164\u3164", "Order: Cuvori order"],
     ["only braille blanks", "\u2800\u2800", "Order: Cuvori order"],
+    ["only the music sign that is drawn as nothing (null notehead)", "\u{1D159}\u{1D159}\u{1D159}", "Order: Cuvori order"],
+    ["the music sign that is drawn as nothing between words", "Logo\u{1D159}design", "Order: Logo design"],
     ["zero-width spaces, a soft hyphen and a word joiner between letters", "Lo\u200Bgo\u00AD de\u2060sign", "Order: Logo design"],
     ["codes that are never text", "Logo\uFFFE\uFFFF\u{10FFFF} design", "Order: Logo design"],
     ["hidden text in tag characters", "Logo\u{E0068}\u{E0069}\u{E0064}\u{E0065} design", "Order: Logo design"],
