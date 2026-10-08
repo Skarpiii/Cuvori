@@ -1,7 +1,7 @@
 // POST { contract_id, lang } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same two lines.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession, blankNote } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -81,8 +81,6 @@ const refuse = (status, error, code) => json(status, { error, code });
 // Both people on the Order can read its notes, so it says in plain words what looks wrong, nothing else.
 const RECORD_NOTE = "Payment record needs checking: ";
 const ownRecordNote = (c) => String(c.money_error || "").startsWith(RECORD_NOTE);
-// an empty note (or only spaces) says nothing and the admin list does not show it, so it counts as no note at all
-const blankNote = (c) => c.money_error == null || String(c.money_error).trim() === "";
 const noteFilter = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${encodeURIComponent(c.money_error)}`);
 async function needsCheck(c, why) {
   const text = (RECORD_NOTE + why).slice(0, 300);
