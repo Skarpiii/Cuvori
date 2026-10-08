@@ -81,14 +81,18 @@ const refuse = (status, error, code) => json(status, { error, code });
 // Both people on the Order can read its notes, so it says in plain words what looks wrong, nothing else.
 const RECORD_NOTE = "Payment record needs checking: ";
 const ownRecordNote = (c) => String(c.money_error || "").startsWith(RECORD_NOTE);
+// an empty note (or only spaces) says nothing and the admin list does not show it, so it counts as no note at all
+const blankNote = (c) => c.money_error == null || String(c.money_error).trim() === "";
 const noteFilter = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${encodeURIComponent(c.money_error)}`);
 async function needsCheck(c, why) {
   const text = (RECORD_NOTE + why).slice(0, 300);
   let noted = "already noted on the Order";
   if (c.money_error !== text) {
-    if (c.money_error == null || ownRecordNote(c)) {
+    if (blankNote(c) || ownRecordNote(c)) {
       const rows = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: text }).catch(() => null);
-      noted = rows && rows.length ? "noted on the Order" : "the note could not be saved";
+      noted = !rows ? "the note could not be saved: the database did not answer"
+        : rows.length ? "noted on the Order"
+        : "this click did not save the note: it changed at the same moment (another click may have just written it)";
     } else noted = "not noted: the Order already has another note";
   }
   // always in the Netlify log too (only the owner sees it), so the problem is on record even when no note could be written
