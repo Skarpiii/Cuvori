@@ -715,5 +715,26 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
       `B37 an Order waiting for its first payment with only a ${kind} line in its ledger -> ${r.status} ${r.json?.code || "page made"}, note ${JSON.stringify(c.money_error ?? null)} (must ${blocks ? "be stopped and noted" : "be paid normally: such a line can belong to a late payment that was sent back"})`);
   }
 }
+// ---------- B38: when the sign-in check itself can't be done, the answer carries a code the page can translate ----------
+{
+  const c = mk(); const f0 = globalThis.fetch;
+  for (const [what, resp, status, code] of [
+    ["Supabase's sign-in service down", () => new Response("{}", { status: 503 }), 503, "signin_unavailable"],
+    ["Supabase's sign-in service not reachable", () => { throw new TypeError("fetch failed"); }, 503, "signin_unavailable"],
+    ["an unreadable answer from the sign-in service", () => new Response("not json", { status: 200 }), 503, "signin_unavailable"],
+    ["the sign-in service too busy", () => new Response("{}", { status: 429 }), 429, "too_many_tries"],
+    ["the account banned at the sign-in level", () => new Response(JSON.stringify({ error_code: "user_banned", msg: "User is banned" }), { status: 403 }), 403, "account_suspended"],
+    ["Cuvori's own key refused by the sign-in service", () => new Response(JSON.stringify({ message: "Invalid API key" }), { status: 401 }), 503, "signin_unavailable"],
+  ]) {
+    globalThis.fetch = async (u, i) => (String(u).includes("/auth/v1/user") ? resp() : f0(u, i));
+    const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "lt" } }));
+    globalThis.fetch = f0;
+    vuln(r.status !== status || !r.json || r.json.code !== code || Object.values(STRIPE.sessions).some(s => s.client_reference_id === c.id),
+      `B38 ${what} -> ${r.status} ${JSON.stringify(r.json)} (must be ${status} with code ${code}, no page made)`);
+  }
+  // an expired or fake sign-in still just asks the person to sign in again
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_nobody", body: { contract_id: c.id } }));
+  vuln(r.status !== 401 || r.json?.code !== "signed_out", `B38 an expired sign-in -> ${r.status} ${JSON.stringify(r.json)} (must be 401 signed_out)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
