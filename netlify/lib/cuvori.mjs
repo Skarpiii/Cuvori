@@ -473,13 +473,16 @@ export async function payoutAccount(editorId, why = {}) {
 // function log under the ref the note gives, and only the owner sees that log.
 const CHECK_FAILED = "Stripe check failed: ", CHECK_NEEDED = "Stripe account check: ";
 const ownNote = (c) => [CHECK_FAILED, CHECK_NEEDED].find(p => String(c.money_error || "").startsWith(p));
+// An empty note, or one of only spaces, says nothing (the admin panel shows no text for it), so it counts as no note at
+// all. One rule for every note Cuvori writes on an Order: Fund's payment-record note uses it too.
+export const blankNote = (c) => c.money_error == null || String(c.money_error).trim() === "";
 // Written over an empty note or over this check's own older note (its time and reason then stay current), never over
 // another — and only while the note still reads exactly what this request read: two checks of the same Order can overlap,
 // and the one that finishes last must not wipe out or replace what the other just found.
 const noteStill = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${q(c.money_error)}`);
 async function writeCheckNote(c, text) {
   const mine = ownNote(c);
-  if (c.money_error && !mine) return;
+  if (!blankNote(c) && !mine) return;
   await db.update("contracts", `id=eq.${c.id}&${noteStill(c)}`, { money_error: text }).catch(() => {});
 }
 function checkNote(e) {
