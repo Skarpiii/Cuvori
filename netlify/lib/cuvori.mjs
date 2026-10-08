@@ -262,30 +262,33 @@ export async function contractByPi(pi) {
   return row ? db.contract(row.order_id) : null;
 }
 
+// Every answer of the sign-in check carries a code, so the page says it in the person's language (fnPlain in index.html),
+// never this English sentence, which stays for the owner. Every Cuvori button that needs a sign-in uses this check.
+const SIGNIN_DOWN = "signin_unavailable";
 export async function userFromRequest(req) {
   const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") || "");
   if (!m) return null;
   requireServiceKey();
   let r;
   try { r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${m[1]}` }, signal: AbortSignal.timeout(8000) }); }
-  catch { throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503); }
-  if (r.status === 429) throw fail("Too many sign-in checks. Please try again shortly.", 429);
-  if (r.status >= 500) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503);
+  catch { throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503, SIGNIN_DOWN); }
+  if (r.status === 429) throw fail("Too many sign-in checks. Please try again shortly.", 429, "too_many_tries");
+  if (r.status >= 500) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503, SIGNIN_DOWN);
   let u;
   try { u = await r.json(); }
-  catch { throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503); }
+  catch { throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503, SIGNIN_DOWN); }
   if (!r.ok) {
     // Supabase Auth: `error_code` is the name ("bad_jwt"); `code` is often just the HTTP status number
     const code = u && (u.error_code || (typeof u.code === "string" ? u.code : null));
-    if (code === "user_banned") throw fail("Account suspended", 403);
+    if (code === "user_banned") throw fail("Account suspended", 403, "account_suspended");
     if (["bad_jwt", "session_not_found", "session_expired", "user_not_found", "no_authorization", "invalid_credentials"].includes(code)) return null;
     // Older Auth responses may have no code. An API-key failure concerns the backend,
     // so signing in again would not help. Never send the provider's raw message back.
     const message = String(u && (u.message || u.msg || u.error_description || u.error) || "");
     if (!code && (r.status === 401 || r.status === 403) && /jwt|token|session|expired/i.test(message) && !/api.?key/i.test(message)) return null;
-    throw fail("Sign-in verification is unavailable. Please contact support if this continues.", 503);
+    throw fail("Sign-in verification is unavailable. Please contact support if this continues.", 503, SIGNIN_DOWN);
   }
-  if (!u || !isUuid(u.id)) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503);
+  if (!u || !isUuid(u.id)) throw fail("Sign-in verification is temporarily unavailable. Please try again shortly.", 503, SIGNIN_DOWN);
   return db.one("profiles", `id=eq.${u.id}&select=id,email,first_name,role,is_admin,banned`);
 }
 // No profile counts as banned. The mark must be a real yes or no (the column is boolean not null): a row without one is a
