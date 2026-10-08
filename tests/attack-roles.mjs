@@ -230,6 +230,9 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
     ["hidden text in tag characters", "Logo\u{E0068}\u{E0069}\u{E0064}\u{E0065} design", "Order: Logo design"],
     ["a letter with 200 accents stacked on it, first", "e" + "\u0301".repeat(200) + " Logo design", "Order: e Logo design"],
     ["a letter with 200 accents stacked on it, in the middle", "Logo " + "e" + "\u0301".repeat(190) + " design", "Order: Logo e design"],
+    ["accents split up by zero-width spaces, which would all land on one letter", "Logo e" + ("\u0301".repeat(15) + "\u200B").repeat(11) + " design", "Order: Logo e design"],
+    ["accents split up by soft hyphens, first", "e" + ("\u0301".repeat(15) + "\u00AD").repeat(12) + " Logo design", "Order: e Logo design"],
+    ["accents split up by invisible direction marks, after a space", "Logo " + ("\u0301".repeat(15) + "\u200E").repeat(8) + "design", "Order: Logo design"],
     ["real emoji: a family, England's flag, a keycap, a red heart, a skin tone", "👨‍👩‍👧 🏴󠁧󠁢󠁥󠁮󠁧󠁿 1️⃣ ❤️ 👍🏽 Logo", "Order: 👨‍👩‍👧 🏴󠁧󠁢󠁥󠁮󠁧󠁿 1️⃣ ❤️ 👍🏽 Logo"],
     ["accented letters of the site's languages", "Užsakymas – vaizdo įrašų montavimas, Größe, Łódź, Ёжик, ґанок, España", "Order: Užsakymas – vaizdo įrašų montavimas, Größe, Łódź, Ёжик, ґанок, España"],
   ]) {
