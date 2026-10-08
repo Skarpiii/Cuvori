@@ -443,6 +443,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>{ window.__mockFnFail={"stripe-connect":[429,{error:"Too many tries in a short time. Please wait a minute and try again.",code:"too_many_tries"}]}; document.querySelector('#toastWrap').innerHTML=''; });
   await p.click('#stripeConnectBtn');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries in a short time. Please wait a minute and try again.")) && !(await p.textContent('#toastWrap')).includes('Nothing was charged'),"too many tries at Payout details: asked to wait a minute");
+  // the sign-in check itself can't be done, or the account is suspended: said in plain words, on any button
+  for (const [code, want] of [["signin_unavailable","Cuvori couldn't check your sign-in just now. Please try again in a minute."],["account_suspended","Your account is suspended. Please contact Cuvori support."]]) {
+    await p.evaluate((code)=>{ window.__mockFnFail={"stripe-connect":[code==="account_suspended"?403:503,{error:"SERVER SENTENCE",code}]}; document.querySelector('#toastWrap').innerHTML=''; },code);
+    await p.click('#stripeConnectBtn');
+    ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE') && !(await p.textContent('#toastWrap')).includes('Nothing was charged'),`Payout details, ${code}: the freelancer reads it in plain words`);
+  }
   await p.evaluate(()=>{ window.__mockFnFail=null; });
   await p.click('#stripeConnectBtn'); await p.waitForTimeout(1200);
   ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'after Stripe onboarding: ready');
@@ -560,7 +566,8 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
     ["paid_directly","This Order is paid directly to the freelancer, not through Cuvori. Nothing was charged."],
     ["amount_out_of_range","This amount can't be paid through Cuvori. Nothing was charged. Please contact Cuvori support."],
     ["account_suspended","Your account is suspended, so you can't make payments. Nothing was charged. Please contact Cuvori support."],
-    ["signed_out","Please sign in again, then try once more. Nothing was charged."]]) {
+    ["signed_out","Please sign in again, then try once more. Nothing was charged."],
+    ["signin_unavailable","Cuvori couldn't check your sign-in just now. Nothing was charged. Please try again in a minute."]]) {
     await fundWith([409,{error:"SERVER SENTENCE "+code,code}]);
     ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE') && await unpaid(),`the payment page refuses (${code}): the client reads it in plain words and is told nothing was charged`);
   }
