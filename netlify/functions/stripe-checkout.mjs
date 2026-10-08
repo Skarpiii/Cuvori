@@ -84,8 +84,15 @@ const ownRecordNote = (c) => String(c.money_error || "").startsWith(RECORD_NOTE)
 const noteFilter = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${encodeURIComponent(c.money_error)}`);
 async function needsCheck(c, why) {
   const text = (RECORD_NOTE + why).slice(0, 300);
-  if ((c.money_error == null || ownRecordNote(c)) && c.money_error !== text)
-    await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: text }).catch(() => {});
+  let noted = "already noted on the Order";
+  if (c.money_error !== text) {
+    if (c.money_error == null || ownRecordNote(c)) {
+      const rows = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: text }).catch(() => null);
+      noted = rows && rows.length ? "noted on the Order" : "the note could not be saved";
+    } else noted = "not noted: the Order already has another note";
+  }
+  // always in the Netlify log too (only the owner sees it), so the problem is on record even when no note could be written
+  console.error("Payment record needs checking", "order", c.id, why, `(${noted})`);
   return refuse(409, "This order's payment record needs checking before another payment can be taken. Cuvori support has been told.", "needs_check");
 }
 const euro = (cents) => `€${(cents / 100).toFixed(2)}`;
