@@ -425,6 +425,15 @@ if (!LIVE) {
     vuln(d.money_error !== "top-up pi_x may not be recorded — check by hand", `N5 an Order with another kind of note keeps it -> ${d.money_error}`);
   }
 
+  // ---------- N6: an empty note, or one of only spaces, never stops the check's own note (the same rule as Fund's note) ----------
+  {
+    for (const [what, blank] of [["an empty note", ""], ["a note of only spaces", "   "]]) {
+      const c = mk({ money_error: blank });
+      STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed2.id; const r = await fundIt(c); STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed.id;
+      vuln(r.status !== 409 || !NEEDED.test(c.money_error || ""), `N6 ${what} on the Order, and the saved account isn't the freelancer's -> Fund ${r.status}; the note: ${JSON.stringify(c.money_error)} (the check's note must be written)`);
+    }
+  }
+
   // ---------- the live-mode part: the same file with live keys ----------
   let liveOut = "";
   try { liveOut = execFileSync(process.execPath, [fileURLToPath(import.meta.url)], { env: { ...process.env, HARNESS_STRIPE_KEY: "sk_live_fake" }, encoding: "utf8" }); }
