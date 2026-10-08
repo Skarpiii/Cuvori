@@ -774,5 +774,35 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
     `B40 the note changed at the same moment -> ${rd.status} ${rd.json?.code}, log ${JSON.stringify(line(d))} (must say this click did not save it, not that saving failed)`);
   console.error = e0;
 }
+// ---------- B41: a failure Stripe replays from its memory of the key never blocks Fund, even when Stripe also says "retry" ----------
+{
+  const c = mk({});
+  const f0 = globalThis.fetch; let stuckKey = null; const keys = [];
+  globalThis.fetch = async (u, i = {}) => {
+    if (String(u) === "https://api.stripe.com/v1/checkout/sessions" && (i.method || "GET") === "POST" && String(i.body || "").includes(c.id)) {
+      const k = i.headers["Idempotency-Key"]; keys.push(k); if (!stuckKey) stuckKey = k;
+      if (k === stuckKey) return new Response(JSON.stringify({ error: { type: "api_error", message: "An unknown error occurred" } }), { status: 500, headers: { "content-type": "application/json", "Idempotent-Replayed": "true", "Stripe-Should-Retry": "true" } });
+    }
+    return f0(u, i);
+  };
+  const quiet = console.error; console.error = () => {};
+  const r = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
+  console.error = quiet; globalThis.fetch = f0;
+  vuln(r.status !== 200 || !r.json?.url || new Set(keys).size !== 2 || keys.length !== 2,
+    `B41 Stripe replays a saved 500 that also says "retry" -> ${r.status} ${r.json?.code || (r.json?.url ? "page made" : "")}, tries ${keys.length}, keys ${new Set(keys).size} (must make one fresh try with a new key and give the page)`);
+  // a definite failure that is not a replay still gets no second try in the same click
+  const d = mk({}); const k2 = [];
+  globalThis.fetch = async (u, i = {}) => {
+    if (String(u) === "https://api.stripe.com/v1/checkout/sessions" && (i.method || "GET") === "POST" && String(i.body || "").includes(d.id)) {
+      k2.push(i.headers["Idempotency-Key"]);
+      return new Response(JSON.stringify({ error: { type: "invalid_request_error", message: "bad" } }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    return f0(u, i);
+  };
+  console.error = () => {};
+  const rd = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: d.id, lang: "en" } }));
+  console.error = quiet; globalThis.fetch = f0;
+  vuln(k2.length !== 1 || rd.status === 200, `B41 a new (not replayed) refusal from Stripe -> ${rd.status}, tries ${k2.length} (must not be tried again in the same click)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
