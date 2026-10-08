@@ -754,5 +754,25 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(rd.status !== 409 || rd.json?.code !== "needs_check" || !line(d) || !line(d).includes("the note could not be saved"),
     `B39 the note can't be saved -> ${rd.status} ${rd.json?.code}, log ${JSON.stringify(line(d) || null)} (must still refuse, and be logged)`);
 }
+// ---------- B40: an empty note never stops the real one, and the log says truly why a note was not saved ----------
+{
+  const click = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
+  const logged = []; const e0 = console.error; console.error = (...a) => { logged.push(a.map(String).join(" ")); };
+  const line = (c) => logged.find(l => l.startsWith("Payment record needs checking") && l.includes(c.id)) || null;
+  const own = (c) => String(c.money_error || "").startsWith("Payment record needs checking: this Order is waiting for its first payment");
+  for (const [what, blank] of [["an empty note", ""], ["a note of only spaces", "   "]]) {
+    const c = mk({ funded_at: new Date().toISOString(), money_error: blank });
+    const r = await click(c);
+    vuln(r.status !== 409 || r.json?.code !== "needs_check" || !own(c) || !String(line(c)).includes("(noted on the Order)"),
+      `B40 ${what} on the Order -> ${r.status} ${r.json?.code}, note ${JSON.stringify(c.money_error)}, log ${JSON.stringify(line(c))} (the real note must be written)`);
+  }
+  // the note changed between reading the Order and saving (another click wrote it at the same moment): nothing saved, said truly
+  const d = mk({ funded_at: new Date().toISOString() });
+  hooks.db = async (method, table, search) => (method === "PATCH" && table === "contracts" && search.includes(`id=eq.${d.id}`) ? new Response("[]", { status: 200, headers: { "content-type": "application/json" } }) : null);
+  const rd = await click(d); reset();
+  vuln(rd.status !== 409 || !String(line(d)).includes("this click did not save the note: it changed at the same moment") || String(line(d)).includes("could not be saved"),
+    `B40 the note changed at the same moment -> ${rd.status} ${rd.json?.code}, log ${JSON.stringify(line(d))} (must say this click did not save it, not that saving failed)`);
+  console.error = e0;
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
