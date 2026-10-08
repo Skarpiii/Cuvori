@@ -30,7 +30,8 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu, TAGS = /[\u{E0000}-\u{E0
 // The Order's title as plain text for Stripe's page, at most `room` long as JavaScript counts (an emoji outside the basic
 // range as two, so it fits Stripe's limit however Stripe counts). Titles come from the site's title box, but someone can
 // paste odd characters into it, and a title made directly on the server can hold anything:
-// - line breaks, tabs, control characters and every other kind of blank (the braille blank too) become one plain space;
+// - line breaks, tabs, control characters and every other kind of blank (the braille blank and the music sign that is
+//   drawn as nothing too) become one plain space;
 // - codes that are never text (noncharacters) and the hidden marks that flip the direction of text are left out;
 // - invisible characters (zero-width spaces, invisible direction marks, fillers, soft hyphens, …) are left out wherever
 //   they stand on their own. Inside an emoji some of them hold it together (the joiner in a family, the mark that makes a
@@ -46,7 +47,7 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu, TAGS = /[\u{E0000}-\u{E0
 const graphemes = (t) => (GRAPHEMES ? Array.from(GRAPHEMES.segment(t), x => x.segment) : Array.from(t));
 const capped = (g) => (Array.from(g).length > 16 ? Array.from(g.replace(INVISIBLE, ""))[0] || "" : g);   // its first visible piece
 function stripeTitle(raw, room) {
-  const s = String(raw ?? "").replace(/\p{Noncharacter_Code_Point}/gu, "").replace(/[\u202A-\u202E\u2066-\u2069]/g, "").replace(/[\p{Cc}\p{Zl}\p{Zp}\u2800]/gu, " ");
+  const s = String(raw ?? "").replace(/\p{Noncharacter_Code_Point}/gu, "").replace(/[\u202A-\u202E\u2066-\u2069]/g, "").replace(/[\p{Cc}\p{Zl}\p{Zp}\u2800\u{1D159}]/gu, " ");
   let out = "";
   for (const g of graphemes(s)) {
     const piece = g.codePointAt(0) === 0x1F3F4 ? g : g.replace(TAGS, "");
