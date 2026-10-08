@@ -37,20 +37,25 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu, TAGS = /[\u{E0000}-\u{E0
 //   symbol colourful), so there they stay; the hidden letters that make England's or Scotland's flag stay only on the
 //   black flag they belong to, anywhere else they are hidden text and are left out;
 // - one character built from more than 16 pieces is a trick (a letter with hundreds of accents stacked on it, which would
-//   push the rest of the title off the page); the longest real emoji has 10, so such a character keeps only its letter;
+//   push the rest of the title off the page); the longest real emoji has 10, so such a character keeps only its letter.
+//   This is checked again once the invisible characters are out: accents split up by zero-width spaces or soft hyphens
+//   would otherwise all land on one letter when those are left out;
 // - the whole title is shown when it fits; only when it doesn't is it cut by whole characters (never half an emoji, a
 //   flag or a letter with its accent) and ends with "…", so a cut title shows that it was cut.
 // Nothing visible left means no title (the caller then uses "Cuvori order" in the client's language).
+const graphemes = (t) => (GRAPHEMES ? Array.from(GRAPHEMES.segment(t), x => x.segment) : Array.from(t));
+const capped = (g) => (Array.from(g).length > 16 ? Array.from(g.replace(INVISIBLE, ""))[0] || "" : g);   // its first visible piece
 function stripeTitle(raw, room) {
   const s = String(raw ?? "").replace(/\p{Noncharacter_Code_Point}/gu, "").replace(/[\u202A-\u202E\u2066-\u2069]/g, "").replace(/[\p{Cc}\p{Zl}\p{Zp}\u2800]/gu, " ");
   let out = "";
-  for (const g of GRAPHEMES ? Array.from(GRAPHEMES.segment(s), x => x.segment) : Array.from(s)) {
+  for (const g of graphemes(s)) {
     const piece = g.codePointAt(0) === 0x1F3F4 ? g : g.replace(TAGS, "");
     const seen = piece.replace(INVISIBLE, "");
     if (!seen) continue;                                             // nothing visible: left out
     if (/^\s+$/u.test(seen)) { out += " "; continue; }
-    out += Array.from(piece).length > 16 ? Array.from(seen)[0] : piece;
+    out += capped(piece);
   }
+  out = graphemes(out).map(capped).join("");                         // what the left-out characters stood between, joined up
   out = out.replace(/\s+/gu, " ").trim();
   return out.length <= room ? out : cut(out, Infinity, room - 1).trimEnd() + "…";
 }
