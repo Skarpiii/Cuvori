@@ -57,7 +57,8 @@ function stripeTitle(raw, room) {
 // Makes the page under the request's stored key (moneyPost).
 // - Two tabs clicking at the same moment: Stripe is still making the first tab's page and tells the second to wait. The
 //   second waits a moment and asks again with the same key, and gets that very page (for up to about 4 seconds).
-// - A failure Stripe repeats from its memory of the key (the database could not forget the key when that failure came),
+// - A failure Stripe repeats from its memory of the key (the database could not forget the key when that failure came,
+//   or Stripe said "retry" with it: a repeat never changes, so the same key would only fail again for 24 hours),
 //   or Stripe saying the key belongs to a different request: that key is dropped (only that one: never a newer key
 //   another tab has just stored) and one fresh try is made, so the client never gets an old answer instead of a new try.
 async function makePage(scope, params) {
@@ -66,7 +67,7 @@ async function makePage(scope, params) {
     try { return await moneyPost(scope, "/checkout/sessions", params); }
     catch (e) {
       if (idemBusy(e) && waits < 10) { waits++; await sleep(400); continue; }
-      if (!fresh && (idemMismatch(e) || (e && e.replayed && e.status >= 400 && !e.shouldRetry))) { fresh = true; await dropKeyIf(scope, e.idemKey); continue; }
+      if (!fresh && (idemMismatch(e) || (e && e.replayed && e.status >= 400))) { fresh = true; await dropKeyIf(scope, e.idemKey); continue; }
       throw e;
     }
   }
