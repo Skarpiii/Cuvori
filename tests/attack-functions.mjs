@@ -3,6 +3,7 @@
 //  - failure / race hooks on Stripe and Supabase calls
 //  - a URL log
 process.env.STRIPE_SECRET_KEY = "sk_test_fake"; process.env.SUPABASE_SERVICE_ROLE_KEY = "service_fake"; process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake"; process.env.SITE_URL = "https://cuvori.test";
+process.env.STRIPE_CONNECT_WEBHOOK_SECRET = " whsec_connect_fake \n";   // pasted with a space and a line break, as can happen in Netlify
 import crypto from "node:crypto";
 import fs from "node:fs";
 const F = (process.env.TARGET || new URL("..", import.meta.url).pathname.replace(/\/$/, "")) + "/netlify/functions/";
@@ -356,6 +357,15 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
   const onlyNew = keyWith({ SUPABASE_SECRET_KEY: " sb_secret_new \n" });
   vuln(both !== "sb_secret_new" || onlyOld !== "old_jwt_key" || onlyNew !== "sb_secret_new",
     `A24 the database key used -> both set: ${both}, only the old: ${onlyOld}, only the new (pasted with spaces): ${JSON.stringify(onlyNew)} (the new key must win when both are set; either alone must work)`);
+}
+// ---------- A25: the second webhook secret (freelancers' own Stripe accounts) works even when pasted with a space or line break ----------
+{
+  const raw = JSON.stringify({ type: "account.updated", data: { object: { id: "acct_1EditorAAAAAAAA" } } });
+  const t = Math.floor(Date.now() / 1000), v1 = crypto.createHmac("sha256", "whsec_connect_fake").update(`${t}.${raw}`).digest("hex");
+  const r = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `t=${t},v1=${v1}` } }));
+  const forged = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `t=${t},v1=${"0".repeat(64)}` } }));
+  vuln(r.status !== 200 || forged.status !== 400,
+    `A25 an event signed with the freelancer-account webhook secret (saved with a space and a line break) -> HTTP ${r.status} ${JSON.stringify(r.json)}; a forged one -> HTTP ${forged.status} (the real one must be accepted, the forged one refused)`);
 }
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
