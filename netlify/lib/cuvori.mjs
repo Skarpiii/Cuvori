@@ -21,6 +21,8 @@ export const STRIPE_KEY = env("STRIPE_SECRET_KEY");
 // live keys, and the other way round. The key says which one these functions work in.
 export const STRIPE_MODE = /^(sk|rk)_live_/.test(STRIPE_KEY) ? "live" : /^(sk|rk)_test_/.test(STRIPE_KEY) ? "test" : null;
 export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
+// the optional second endpoint, for events about the freelancers' own Stripe accounts: read like every other setting
+export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
 export const SITE_URL = configuredOrigin(env("SITE_URL") || env("URL"), "SITE_URL or URL");
 // the page may live on another host (GitHub Pages) and call these functions across origins
 // An explicit list replaces the defaults; wildcard origins are not accepted.
