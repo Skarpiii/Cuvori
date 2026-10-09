@@ -13,8 +13,9 @@ function configuredOrigin(value, name) {
 }
 // The project address is public (it is in the page too); a missing variable must not take every payment function down.
 export const SUPABASE_URL = configuredOrigin(env("SUPABASE_URL") || "https://tnxujwlfatcvxzevllfr.supabase.co", "SUPABASE_URL");
-// Legacy service-role keys are JWTs; new secret keys use only the apikey header.
-export const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SECRET_KEY");
+// Legacy service-role keys are JWTs; new secret keys use only the apikey header. When both are set, the new secret key
+// is used: Supabase is phasing the old keys out, and an old key switched off in Supabase must never shadow a working new one.
+export const SERVICE_KEY = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
 export const STRIPE_KEY = env("STRIPE_SECRET_KEY");
 // Test and live are two separate worlds at Stripe: an account, payment or payout made with test keys does not exist for
 // live keys, and the other way round. The key says which one these functions work in.
