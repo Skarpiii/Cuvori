@@ -343,5 +343,19 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
   const outHtml = contractCardHtml({ sender: "x", payload: { contract_id: '1" autofocus onfocus="alert(1)" tabindex="0', title: "ok", price: 1, currency: "<img src=x onerror=alert(2)>", event: "<svg onload=alert(3)>" } });
   vuln(/onfocus="alert\(1\)"/.test(outHtml) || /<img src=x/.test(outHtml) || /<svg onload/.test(outHtml), `A23 contractCardHtml output: ${outHtml.slice(0, 260)}...`);
 }
+// ---------- A24: which database key the functions use when Netlify has both the old and the new one ----------
+{
+  const { execFileSync } = await import("node:child_process");
+  const lib = new URL("../netlify/lib/cuvori.mjs", import.meta.url).href;
+  const keyWith = (extra) => {
+    const env = { ...process.env, SITE_URL: "https://cuvori.io", SUPABASE_SERVICE_ROLE_KEY: "", SUPABASE_SECRET_KEY: "", ...extra };
+    return execFileSync(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(lib)}); process.stdout.write(String(m.SERVICE_KEY))`], { env, encoding: "utf8" });
+  };
+  const both = keyWith({ SUPABASE_SERVICE_ROLE_KEY: "old_jwt_key", SUPABASE_SECRET_KEY: "sb_secret_new" });
+  const onlyOld = keyWith({ SUPABASE_SERVICE_ROLE_KEY: "old_jwt_key" });
+  const onlyNew = keyWith({ SUPABASE_SECRET_KEY: " sb_secret_new \n" });
+  vuln(both !== "sb_secret_new" || onlyOld !== "old_jwt_key" || onlyNew !== "sb_secret_new",
+    `A24 the database key used -> both set: ${both}, only the old: ${onlyOld}, only the new (pasted with spaces): ${JSON.stringify(onlyNew)} (the new key must win when both are set; either alone must work)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
