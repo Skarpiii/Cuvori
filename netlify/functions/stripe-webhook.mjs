@@ -1,14 +1,14 @@
 // Stripe → Cuvori. Hardened copy.
 // Platform endpoint events: checkout.session.completed, checkout.session.async_payment_succeeded,
 //   charge.refunded, charge.dispute.created, charge.dispute.closed. Connect endpoint (separate secret): account.updated.
-import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady } from "../lib/cuvori.mjs";
+import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET } from "../lib/cuvori.mjs";
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 
 export default async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
   const raw = await req.text();
   const sig = req.headers.get("stripe-signature");
-  const CONNECT_SECRET = process.env.STRIPE_CONNECT_WEBHOOK_SECRET || "";
+  const CONNECT_SECRET = CONNECT_WEBHOOK_SECRET;
   let event = null, fromConnect = false;
   try { event = verifyWebhook(raw, sig, WEBHOOK_SECRET); } catch {}
   if (!event && CONNECT_SECRET) { try { event = verifyWebhook(raw, sig, CONNECT_SECRET); fromConnect = true; } catch {} }
