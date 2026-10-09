@@ -67,7 +67,7 @@ Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's 
 6. Netlify → site → **Site configuration → Environment variables** → add:
    - `STRIPE_SECRET_KEY` = sk_…
    - `STRIPE_WEBHOOK_SECRET` = whsec_…
-   - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key
+   - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key (or `SUPABASE_SECRET_KEY` = Supabase's newer secret key, `sb_secret_…`; if both are set, the newer one is used)
    - optional: `ALLOWED_ORIGINS` (comma-separated page addresses allowed to call the functions; defaults to the site URL plus https://cuvori.io)
    There is no fee setting here any more: the processing cost comes from the **fee_schedules** table (Admin panel → Payment costs), see Part 13.
    Then **Deploys → Trigger deploy**. From now on new Orders are "Protected payment".
