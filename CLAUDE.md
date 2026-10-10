@@ -28,6 +28,16 @@ Before changing existing code:
 
 Do not casually redesign unrelated parts of the product. Do not rewrite simple Cuvori copy into corporate or AI-sounding language — simple wording is preferred.
 
+## When the owner reviews code
+
+The owner reviews the code by pasting lines into the chat. This applies every time, to every line pasted, without being reminded:
+
+- **Check every line properly, and everything it touches:** the functions it calls, the database, the page, the tests and every other copy of the same rule. Never answer from an earlier check of the same lines, and never stop at the first thing found.
+- **Prove it where you can** with a test or a live check, and say plainly when something was only read, not tested. If an earlier answer turns out to be wrong, say so.
+- **"check it", or lines pasted with no words, means report only.** Change nothing. Only "fix it" changes code.
+- **On "fix it":** write a test, show it failing on the code that is on GitHub now, make the fix, run every test suite, then upload through the GitHub upload page (the owner clicks Commit changes) and confirm each file arrived exactly as tested.
+- **Report in plain words:** what is right, then each problem with what it means for a client, a freelancer or the owner, and one clear recommendation.
+
 ## Product rules that override everything else
 
 - **0% commission.** Cuvori never takes a percentage of what a professional earns.
