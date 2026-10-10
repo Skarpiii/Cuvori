@@ -277,6 +277,26 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
   reset();
 }
 
+// ---------- R-Z: half an emoji that is already in a note (only a hand-made request can hold one) becomes "�", so the database never refuses what is saved ----------
+{
+  const whole = (t) => typeof t === "string" && t.isWellFormed();
+  // the freelancer cancels with a note holding half an emoji (a first half alone, and a second half alone)
+  const a = mk(); await fund(fx, a);
+  const ra = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: a.id, note: "sorry \uD83C and \uDFAC bye" } }));
+  const ev = DB.order_events.find(e => e.order_id === a.id && e.event === "cancelled");
+  vuln(ra.status !== 200 || a.status !== "refunded" || !ev || !whole(ev.data.note) || ev.data.note !== "sorry � and � bye",
+    `R-Z freelancer cancels with half an emoji in the note -> HTTP ${ra.status}, status=${a.status}, history line ${ev ? JSON.stringify(ev.data.note) : "LOST"} (must be kept, with "�" for each half)`);
+  reset();
+  // the admin decides a dispute with half an emoji at the end of the note: the money moves, and the flag and the chat message are saved too
+  const b = mk(); await fund(fx, b); b.status = "disputed"; b.dispute_by = users.cl.id; b.disputed_at = new Date().toISOString();
+  const rb = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: b.id, decision: "release", note: "decided \uD83C" } }));
+  const flag = DB.user_flags.find(f => f.contract_id === b.id && f.kind === "dispute_lost");
+  const msg = DB.messages.find(m => m.conversation_id === b.conversation_id && typeof m.body === "string" && m.body.startsWith("Cuvori decision: decided "));
+  vuln(rb.status !== 200 || b.status !== "completed" || !flag || !whole(flag.reason) || !msg || msg.body !== "Cuvori decision: decided �",
+    `R-Z admin decides with half an emoji in the note -> HTTP ${rb.status} ${rb.json && rb.json.error || ""}, status=${b.status}, flag ${flag ? "kept" : "LOST"}, chat message ${msg ? JSON.stringify(msg.body) : "LOST"} (the decision, the flag and the message must all be saved)`);
+  reset();
+}
+
 // ---------- R-R: an emoji built from several pieces (a flag, a skin tone, a family) is kept whole or left out, never cut ----------
 {
   const nameOf = (c) => { const s = STRIPE.sessions[c.stripe_checkout_id]; return (s && s.params && s.params["line_items[0][price_data][product_data][name]"]) || ""; };

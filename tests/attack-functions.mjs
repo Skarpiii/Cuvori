@@ -404,10 +404,11 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
 // ---------- A28: shortening text looks only at its start: exactly what splitting the whole text gives, and a text of several megabytes takes no time ----------
 {
   const L = await import(new URL("../netlify/lib/cuvori.mjs", import.meta.url).href);
-  // the way it was done before: split the whole text into what people see as characters, keep them while they fit
+  // the way it is meant to work: half an emoji already in the text becomes "�" (the database refuses half an emoji),
+  // then the whole text is split into what people see as characters, and they are kept while they fit
   const SEG = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   const whole = (s, n, maxUnits = Infinity) => {
-    let out = "", used = 0;
+    s = s.toWellFormed(); let out = "", used = 0;
     for (const g of Array.from(SEG.segment(s), x => x.segment)) { const size = Array.from(g).length; if (used + size > n || out.length + g.length > maxUnits) break; out += g; used += size; }
     return out;
   };
@@ -421,11 +422,11 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
     let s = ""; for (let j = 0, len = 1 + rnd(40); j < len; j++) s += pieces[rnd(pieces.length)];
     for (let n = 0; n <= 30; n++) for (const u of [Infinity, 1, 3, 7, 12, 20]) {
       tried++; const a = L.cut(s, n, u), b = whole(s, n, u);
-      if (a !== b && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${n} characters / ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
+      if ((a !== b || !a.isWellFormed()) && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${n} characters / ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
     }
     for (const u of [2, 5, 9, 15, 33]) {
       tried++; const a = L.cut(s, Infinity, u), b = whole(s, Infinity, u);
-      if (a !== b && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
+      if ((a !== b || !a.isWellFormed()) && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
     }
   }
   const slow = [];
@@ -436,7 +437,7 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
     const t = performance.now(); const got = L.cut(s, n, u); const ms = Math.round(performance.now() - t);
     if (got !== want || ms > 200) slow.push(`${what}: ${ms} ms, kept ${got.length} units${got !== want ? " (WRONG)" : ""}`);
   }
-  vuln(wrong.length || slow.length, `A28 shortening text: ${tried} cuts of hard text, ${wrong.length ? "different from splitting the whole text: " + wrong.join("; ") : "all the same as splitting the whole text"}; ${slow.length ? "too slow or wrong: " + slow.join("; ") : "6 MB texts done at once"}`);
+  vuln(wrong.length || slow.length, `A28 shortening text: ${tried} cuts of hard text, ${wrong.length ? "different from splitting the whole text, or half an emoji kept: " + wrong.join("; ") : "all the same as splitting the whole text, never half an emoji"}; ${slow.length ? "too slow or wrong: " + slow.join("; ") : "6 MB texts done at once"}`);
 }
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
