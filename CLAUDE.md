@@ -36,7 +36,8 @@ The owner reviews the code by pasting lines into the chat. This applies every ti
 - **Prove it where you can** with a test or a live check, and say plainly when something was only read, not tested. If an earlier answer turns out to be wrong, say so.
 - **"check it", or lines pasted with no words, means report only.** Change nothing. Only "fix it" changes code.
 - **On "fix it":** write a test, show it failing on the code that is on GitHub now, make the fix, run every test suite, then upload through the GitHub upload page (the owner clicks Commit changes) and confirm each file arrived exactly as tested.
-- **Report in plain words:** what is right, then each problem with what it means for a client, a freelancer or the owner, and one clear recommendation.
+- **Every report starts with a "Checked this time" list:** each place the pasted lines are used, by file and line, and next to each one "tested" or "read", all done in this answer. A place that is not on the list was not checked, so the owner can see a skip before trusting the answer. Never leave the list out, never shorten it to "all callers", and never fill it from an earlier check.
+- **Then report in plain words:** what is right, then each problem with what it means for a client, a freelancer or the owner, and one clear recommendation.
 
 ## Product rules that override everything else
 
