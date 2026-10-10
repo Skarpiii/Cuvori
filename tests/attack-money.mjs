@@ -812,5 +812,18 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
        || evil.headers.get("access-control-allow-origin") || evil.headers.get("access-control-max-age"),
     `B42 the "may I?" check from cuvori.io -> ${pre.status}, remembered for ${pre.headers.get("access-control-max-age")} s; from another site -> allowed ${evil.headers.get("access-control-allow-origin")}, remembered ${evil.headers.get("access-control-max-age")} (must be 600 s for Cuvori, nothing for others)`);
 }
+// ---------- B43: a cancel note of several megabytes (sent by hand: the page sends none) is shortened at once, so it never holds up the cancel ----------
+{
+  const c = mk(); await fund(fx, c);
+  const huge = "Sorry, I cannot finish this. " + "a".repeat(6e6);
+  const t = performance.now();
+  const r = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id, note: huge } }));
+  const ms = Math.round(performance.now() - t);
+  const ev = DB.order_events.find(e => e.order_id === c.id && e.event === "cancelled");
+  const note = (ev && ev.data && ev.data.note) || "";
+  vuln(r.status !== 200 || c.status !== "refunded" || note !== huge.slice(0, 500) || ms > 1500,
+    `B43 a freelancer cancels with a 6 MB note -> HTTP ${r.status} ${r.json && r.json.error || ""}, status=${c.status}, the history keeps ${note.length} characters (must be the first 500), took ${ms} ms (must not be held up: it took over 4 s before)`);
+  reset();
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);

@@ -401,5 +401,42 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
   vuln(!fixedOk(a) || a.origin || !fixedOk(e) || e.origin || e.allow || !fixedOk(g) || g.origin !== "https://cuvori.io" || g.allow !== "authorization, content-type",
     `A27 extra headers that try to change the fixed ones -> on their own ${JSON.stringify(a)}; another website ${JSON.stringify(e)}; cuvori.io ${JSON.stringify(g)} (JSON, never cached and the allowed list must win; a harmless extra must stay)`);
 }
+// ---------- A28: shortening text looks only at its start: exactly what splitting the whole text gives, and a text of several megabytes takes no time ----------
+{
+  const L = await import(new URL("../netlify/lib/cuvori.mjs", import.meta.url).href);
+  // the way it was done before: split the whole text into what people see as characters, keep them while they fit
+  const SEG = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const whole = (s, n, maxUnits = Infinity) => {
+    let out = "", used = 0;
+    for (const g of Array.from(SEG.segment(s), x => x.segment)) { const size = Array.from(g).length; if (used + size > n || out.length + g.length > maxUnits) break; out += g; used += size; }
+    return out;
+  };
+  // the pieces that are hard to cut: accents (also many on one letter), emoji with a skin tone, a family, flags (also
+  // half a flag), England's flag, a keycap, Korean letters built from parts, Hindi and Thai, line breaks, half emoji
+  const pieces = ["a", "Ž", "ė", "e\u0301", "\u0301", "\u0301\u0301\u0301", "😀", "👍🏽", "\u{1F3FD}", "👨‍👩‍👧", "\u200D", "\uFE0F", "🇱🇹", "🇱",
+    "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", "1️⃣", "ᄀ", "ᅡ", "ᆨ", "क्ष", "्", "ำ", "\r\n", "\n", " ", "\uD83D", "\uDE00", "\u{1D165}"];
+  let seed = 28; const rnd = (k) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % k; };
+  const wrong = []; let tried = 0;
+  for (let i = 0; i < 400; i++) {
+    let s = ""; for (let j = 0, len = 1 + rnd(40); j < len; j++) s += pieces[rnd(pieces.length)];
+    for (let n = 0; n <= 30; n++) for (const u of [Infinity, 1, 3, 7, 12, 20]) {
+      tried++; const a = L.cut(s, n, u), b = whole(s, n, u);
+      if (a !== b && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${n} characters / ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
+    }
+    for (const u of [2, 5, 9, 15, 33]) {
+      tried++; const a = L.cut(s, Infinity, u), b = whole(s, Infinity, u);
+      if (a !== b && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
+    }
+  }
+  const slow = [];
+  for (const [what, s, n, u, want] of [["6 MB of letters", "a".repeat(6e6), 500, Infinity, "a".repeat(500)],
+                                       ["6 MB of emoji", "😀".repeat(1.5e6), 500, Infinity, "😀".repeat(500)],
+                                       ["one letter with 6 million accents", "a" + "\u0301".repeat(6e6 - 1), 500, Infinity, ""],
+                                       ["6 MB of emoji cut to fit Stripe", "😀".repeat(1.5e6), Infinity, 249, "😀".repeat(124)]]) {
+    const t = performance.now(); const got = L.cut(s, n, u); const ms = Math.round(performance.now() - t);
+    if (got !== want || ms > 200) slow.push(`${what}: ${ms} ms, kept ${got.length} units${got !== want ? " (WRONG)" : ""}`);
+  }
+  vuln(wrong.length || slow.length, `A28 shortening text: ${tried} cuts of hard text, ${wrong.length ? "different from splitting the whole text: " + wrong.join("; ") : "all the same as splitting the whole text"}; ${slow.length ? "too slow or wrong: " + slow.join("; ") : "6 MB texts done at once"}`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
