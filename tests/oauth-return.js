@@ -26,7 +26,12 @@ const log=[]; const ok=(c,m)=>log.push((c?'PASS ':'FAIL ')+m);
     await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
     await p.click('.nav-btn[data-route="jobs"]'); await p.waitForTimeout(300);
     ok(await p.locator('#page-jobs').evaluate(e=>e.classList.contains('active')),'…and the rest of the site still works (Jobs opens)');
-    await p.click('.account-btn >> visible=true'); await p.waitForTimeout(300); await p.click('#signOutBtn'); await p.waitForTimeout(500);
+    // since 25 September the Account button opens a small menu: its Account entry opens the page, its Sign out signs out
+    await p.click('.account-btn >> visible=true'); await p.waitForTimeout(300);
+    ok((await p.textContent('#modalRoot')).includes('google-user@test.com') && await p.locator('#modalRoot [data-am="signout"]').isVisible(),'…the Account button opens the account menu, with Sign out');
+    await p.click('#modalRoot [data-am="account"]'); await p.waitForTimeout(300);
+    ok(await p.locator('#page-account').evaluate(e=>e.classList.contains('active')),'…the menu\'s Account entry opens the Account page');
+    await p.click('.account-btn >> visible=true'); await p.waitForTimeout(300); await p.click('#modalRoot [data-am="signout"]'); await p.waitForTimeout(500);
     ok(await p.locator('#signInBtn').isVisible(),'…sign out works after an OAuth sign-in');
     await p.close();
 
