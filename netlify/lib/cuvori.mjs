@@ -130,8 +130,17 @@ let modeSeen = { mode: null, at: 0 };
 let keyPlatform = null;                         // the Stripe account these keys belong to: asked once, it never changes for a key
 let platformSeen = { id: null, at: 0 };
 export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; keyPlatform = null; platformSeen = { id: null, at: 0 }; };
+// A Stripe key that is not a secret key (Stripe's public "pk_…" key pasted by mistake, or another secret in its place)
+// never moves money: payments pause, and both the Netlify log and the admin say exactly why. The log names only the key's
+// first three characters, which are never secret.
+function requireStripeMode() {
+  if (STRIPE_MODE) return;
+  if (STRIPE_KEY) console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify is not a Stripe secret key (it starts with "${STRIPE_KEY.slice(0, 3)}"; a secret key starts with sk_live_ or sk_test_, a restricted key with rk_live_ or rk_test_)`);
+  throw fail(STRIPE_KEY ? "Payments are paused: the Stripe key in Netlify (STRIPE_SECRET_KEY) is not a secret key. It must start with sk_live_ or sk_test_ (rk_ for a restricted key)."
+                        : "Payments are not configured. Please contact support.", 503, PAUSED);
+}
 async function checkStripeMode(fresh = false) {
-  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503, PAUSED);
+  requireStripeMode();
   if (fresh || !modeSeen.mode || Date.now() - modeSeen.at > 60e3) {
     const row = await db.one("site_settings", "key=eq.stripe_mode&select=value");
     modeSeen = { mode: row ? String(row.value) : "test", at: Date.now() };
@@ -422,7 +431,7 @@ export async function moneyPost(scope, path, body) {
 // stripe_payouts_enabled, the live pair stripe_live_account_id / stripe_live_payouts_enabled (schema v28). Only the
 // pair of the current mode is ever read or written; the other one stays exactly as it is.
 export const acctCols = () => {
-  if (!STRIPE_MODE) throw fail("Payments are not configured. Please contact support.", 503, PAUSED);
+  requireStripeMode();
   return STRIPE_MODE === "live" ? { mode: "live", id: "stripe_live_account_id", ready: "stripe_live_payouts_enabled" }
                                 : { mode: "test", id: "stripe_account_id", ready: "stripe_payouts_enabled" };
 };
