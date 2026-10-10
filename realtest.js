@@ -458,6 +458,24 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'the Payout details status refused for today: the box still says ready (from the database)');
   await p.evaluate(()=>{ window.__mockFnFail=null; });
   const newOrder=async(title,price,extra)=>{ await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#home'); await p.waitForTimeout(500); await p.click('#contactList .contact'); await p.waitForTimeout(800); await p.click('.chat-window .open-contract'); await p.waitForTimeout(700); await p.fill('#oTitle',title); await p.fill('#oPrice',String(price)); await p.fill('#oScope','As discussed'); if(extra) await extra(); await p.click('#oSend'); await p.waitForTimeout(900); await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); };
+  // payments are on, but this page could not check that (the payment functions slow or down for a moment): a new Order is
+  // not sent, because it would quietly become a direct payment; once the check answers, the same click sends a protected one
+  { await p.evaluate(()=>{ window.__mockEscrow=false; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);   // the page has seen "off"
+    await p.evaluate(()=>{ window.__mockEscrow=true; window.__mockStatusDown=true; }); await p.evaluate(()=>window.__reloadEscrow().catch(()=>{})); await p.waitForTimeout(300);
+    const before=await db(()=>window.__mockdb.contracts.length);
+    await p.evaluate(()=>{ document.querySelector('#modalRoot').innerHTML=''; document.querySelector('#toastWrap').innerHTML=''; });
+    await p.goto(url+'#home'); await p.waitForTimeout(500); await p.click('#contactList .contact'); await p.waitForTimeout(800); await p.click('.chat-window .open-contract'); await p.waitForTimeout(900);
+    const note=await p.evaluate(()=>{ const n=document.querySelector('#oModeNote'); return n?n.textContent:document.querySelector('#modalRoot').textContent; });
+    await p.fill('#oTitle','Checked first'); await p.fill('#oPrice','120'); await p.fill('#oScope','As discussed'); await p.click('#oSend'); await p.waitForTimeout(900);
+    ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments can't be checked right now, so nothing was sent.")) && await db(()=>window.__mockdb.contracts.length)===before && !note.includes('not switched on yet'),
+      'payment check unreachable: the new Order is not sent, and the form never claims payments are off');
+    await p.evaluate(()=>{ window.__mockStatusDown=false; }); if(await p.locator('#oSend').count()) await p.click('#oSend'); await p.waitForTimeout(1200);
+    ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.title==='Checked first' && c.payment_mode==='escrow'; }) && await db(()=>window.__mockdb.contracts.length)===before+1,
+      'once the check answers, the same click sends it as a protected payment');
+    // this extra Order is taken out again, so the scenario below starts exactly as before (one Order per conversation)
+    await p.evaluate(()=>{ const db=window.__mockdb; const c=db.contracts.find(x=>x.title==='Checked first'); if(!c) return;
+      for(const k of Object.keys(db)) if(Array.isArray(db[k])) db[k]=db[k].filter(r=>!(r&&(r===c||r.order_id===c.id||r.contract_id===c.id||(r.payload&&r.payload.contract_id===c.id)))); });
+    await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); }
   // scenario: fixed-price €500, both accept, client funds, work delivered, approve & release
   await newOrder('Reel edit',500);
   ok(await db(()=>{ const c=window.__mockdb.contracts.at(-1); return c.payment_mode==='escrow' && c.amount_cents===50000 && c.freelancer_accepted_version===1; }),'the freelancer created a protected-payment Order for €500');
