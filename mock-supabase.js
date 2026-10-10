@@ -543,7 +543,7 @@
     const name=u.split("/.netlify/functions/")[1].split("?")[0]; const body=init.body?JSON.parse(init.body):{}; const method=init.method||"GET";
     const res=(status,data)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});
     const me=uid()?db.profiles.find(p=>p.id===uid()):null;
-    if(name==="stripe-status") return res(200,{escrow:window.__mockEscrow,autoReleaseDays:7});
+    if(name==="stripe-status") return res(200,{escrow:window.__mockEscrow,stripeKeyOk:window.__mockStripeKeyOk!==false,autoReleaseDays:7});
     if(!window.__mockEscrow) return res(503,{error:"Escrow payments are not configured yet"});
     if(!me) return res(401,{error:"Sign in first"});
     const forced=window.__mockFnFail&&window.__mockFnFail[name]; if(forced) return res(forced[0],forced[1]);   // tests: a function stopping on Cuvori's side, or payments paused

@@ -779,6 +779,13 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   // cancellation: before funding either side walks away; after funding the freelancer can give the money back
   await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(600);
   ok((await p.textContent('#adminBody')).includes('a €500 Order') && (await p.textContent('#adminBody')).includes('€7.87') && await p.locator('.f-pct').count()>=3,'admin sees the processing-cost table and a worked example');
+  // a Stripe key in Netlify that is not a secret key: the admin panel says "ON, but paused" and what to correct, not "ON"
+  await p.evaluate(()=>{ window.__mockStripeKeyOk=false; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+  { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON, but paused') && tx.includes('STRIPE_SECRET_KEY') && tx.includes('sk_live_'),'a Stripe key that is not a secret key: the admin panel says "ON, but paused" and what to correct'); }
+  await p.evaluate(()=>{ window.__mockStripeKeyOk=true; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+  { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON — clients fund Orders through Stripe') && !tx.includes('ON, but paused'),'a real secret key: the admin panel says plain "ON" again'); }
   await newOrder('Quick teaser',200);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-caction="cancel"]'); await p.waitForTimeout(800);
   ok(await db(()=>window.__mockdb.contracts.at(-1).status==='cancelled') && (await modal()).includes('Cancelled'),'before funding the client can cancel');
