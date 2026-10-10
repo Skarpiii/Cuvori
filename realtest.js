@@ -530,6 +530,13 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await signin('maya@test.com'); await openOrders();
   await p.click('[data-caction="deliver"]'); await p.waitForTimeout(400); await p.fill('#onUrl','https://drive.test/final-v2'); await p.click('#onGo'); await p.waitForTimeout(900);
   await signin('jonas@test.com'); await openOrders();
+  // the payment service can't be reached when approving: it isn't known yet whether the money went, so the client is told to
+  // reload and check, never the browser's "Failed to fetch"
+  await p.evaluate(()=>{ window.__mockFnFail={"stripe-release":"down"}; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Couldn't reach the payment service, so it isn't known yet whether this went through. Reload the page to check before trying again.")) && !(await p.textContent('#toastWrap')).includes('Failed to fetch') && await db(()=>window.__mockdb.contracts.at(-1).status)==='delivered',
+    'approving while the payment service cannot be reached: the client is told it is not known yet whether it went through, and to reload and check');
+  await p.evaluate(()=>{ window.__mockFnFail=null; }); await openOrders();
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400);
   ok((await modal()).includes('This releases €500 to Maya') && (await p.textContent('#omGo')).includes('Yes, release €500'),'releasing money asks once more, with the amount');
   await p.click('#omGo'); await p.waitForTimeout(1200);
@@ -577,6 +584,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Too many tries today. Nothing was charged. Please try again tomorrow.")) && await unpaid(),"too many Fund tries in a day: the client is asked to try again tomorrow and told nothing was charged");
   await fundWith([409,{error:"This Order was paid in test mode, so its money cannot move with the live keys. Cuvori support needs to look at it.",code:"other_mode"}]);
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Payments on this Order are on hold. Please contact Cuvori support.")) && !(await p.textContent('#toastWrap')).includes('test mode') && await unpaid(),"an Order paid in the other mode: the client is told payments are on hold, without the technical reason");
+  // no readable answer at all (the connection gone, or Netlify's own error page): plain words that nothing was charged,
+  // never the browser's "Failed to fetch" or a bare "HTTP 502"
+  for(const how of ["down","netlify"]){ await fundWith(how);
+    ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Couldn't reach the payment service. Nothing was charged. Please check your connection and try again.")) && !/Failed to fetch|HTTP 502/.test(await p.textContent('#toastWrap')) && await unpaid(),
+      `Fund gets no readable answer (${how==="down"?"no connection":"Netlify's own error page"}): the client is told in plain words that nothing was charged`); }
   // the payment page's other refusals: said in plain words in the client's language, never the server's English sentence
   for (const [code, want] of [["needs_check","This Order's payment record needs checking before another payment can be taken. Nothing was charged. Cuvori has been told and will look at it."],
     ["chargeback_open","A card chargeback is open on this Order, so nothing can be paid until the bank decides. Nothing was charged."],

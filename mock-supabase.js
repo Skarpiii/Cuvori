@@ -547,7 +547,9 @@
       return res(200,{escrow:window.__mockEscrow,stripeKeyOk:window.__mockStripeKeyOk!==false,autoReleaseDays:7}); }
     if(!window.__mockEscrow) return res(503,{error:"Escrow payments are not configured yet"});
     if(!me) return res(401,{error:"Sign in first"});
-    const forced=window.__mockFnFail&&window.__mockFnFail[name]; if(forced) return res(forced[0],forced[1]);   // tests: a function stopping on Cuvori's side, or payments paused
+    const forced=window.__mockFnFail&&window.__mockFnFail[name]; if(forced==="down") throw new TypeError("Failed to fetch");   // no readable answer at all
+    if(forced==="netlify") return new Response("<html>Function timed out</html>",{status:502,headers:{"content-type":"text/html"}});   // Netlify's own error page
+    if(forced) return res(forced[0],forced[1]);   // tests: a function stopping on Cuvori's side, or payments paused
     if(name==="stripe-connect"){ if(me.role!=="editor") return res(403,{error:"Only editors"}); let p=db.payout_details.find(x=>x.id===me.id); if(method==="GET") return res(200,{connected:!!(p&&p.stripe_account_id),payouts_enabled:!!(p&&p.stripe_payouts_enabled)}); if(!p){ p={id:me.id,methods:[],note:""}; db.payout_details.push(p);} p.stripe_account_id=p.stripe_account_id||"acct_"+me.id.slice(0,6); p.stripe_payouts_enabled=true; /* pretend onboarding completes instantly */ return res(200,{url:"#settings?stripe=return"}); }
     const olog2=(c,ev,data,actor)=>db.order_events.push({id:db.order_events.length+1,order_id:c.id,actor:actor===undefined?me.id:actor,event:ev,data:data||{},created_at:new Date().toISOString()});
     const oheld2=c=>Math.max((c.funded_cents||0)-(c.released_cents||0)-(c.refunded_cents||0),0);
