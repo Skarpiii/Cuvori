@@ -1,4 +1,5 @@
-# Working copies unpacked from tests/test-kit.tar.gz (the tarball is the tracked source)
+# Working copies unpacked from tests/test-kit.tar.gz (the tarball is the tracked source; tests/run-all.sh unpacks them
+# without replacing any file that is already here)
 admin-professions.js
 avail-i18n.js
 availability.js
@@ -12,14 +13,12 @@ rules-i18n/
 rules-page.js
 services-ui.js
 taginput.js
-tests/csp-test.js
 tests/db/00_supabase_stub.sql
 tests/db/10_harness.sql
 tests/db/20_seed.sql
 tests/db/load.sh
 tests/db/run.sh
 tests/db/start-pg.sh
-tests/xss/
 tools/gen-professions.js
 
 # Screenshots produced by the test runs
