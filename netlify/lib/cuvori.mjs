@@ -44,9 +44,11 @@ export function setCors(req) {
   const o = req && req.headers.get("origin") || "";
   corsContext.enterWith({ origin: ALLOWED_ORIGINS.includes(o) ? o : null });
 }
+// max-age: the browser may remember the answer to its "may I?" check for 10 minutes, so a click within that time is one
+// call instead of two (without it the browser forgets after about 5 seconds)
 const corsHeaders = () => {
   const origin = corsContext.getStore()?.origin;
-  return origin ? { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, OPTIONS", "vary": "origin" } : { "vary": "origin" };
+  return origin ? { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-max-age": "600", "vary": "origin" } : { "vary": "origin" };
 };
 export const json = (status, body, extraHeaders = {}) => new Response(JSON.stringify(body), { status, headers: { ...extraHeaders, "content-type": "application/json", "cache-control": "no-store", ...corsHeaders() } });
 export const bad = (msg, status = 400, extraHeaders = {}) => json(status, { error: msg }, extraHeaders);
