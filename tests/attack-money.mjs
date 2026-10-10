@@ -804,5 +804,13 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   console.error = quiet; globalThis.fetch = f0;
   vuln(k2.length !== 1 || rd.status === 200, `B41 a new (not replayed) refusal from Stripe -> ${rd.status}, tries ${k2.length} (must not be tried again in the same click)`);
 }
+// ---------- B42: the browser may remember the answer to its "may I?" check for 10 minutes, and only on Cuvori's own site ----------
+{
+  const pre = await call(fx.checkout, req("OPTIONS", "x", { headers: { origin: "https://cuvori.io", "access-control-request-method": "POST" } }));
+  const evil = await call(fx.checkout, req("OPTIONS", "x", { headers: { origin: "https://evil.example", "access-control-request-method": "POST" } }));
+  vuln(pre.status !== 204 || pre.headers.get("access-control-max-age") !== "600" || pre.headers.get("access-control-allow-origin") !== "https://cuvori.io"
+       || evil.headers.get("access-control-allow-origin") || evil.headers.get("access-control-max-age"),
+    `B42 the "may I?" check from cuvori.io -> ${pre.status}, remembered for ${pre.headers.get("access-control-max-age")} s; from another site -> allowed ${evil.headers.get("access-control-allow-origin")}, remembered ${evil.headers.get("access-control-max-age")} (must be 600 s for Cuvori, nothing for others)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
