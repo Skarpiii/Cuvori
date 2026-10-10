@@ -825,5 +825,21 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
     `B43 a freelancer cancels with a 6 MB note -> HTTP ${r.status} ${r.json && r.json.error || ""}, status=${c.status}, the history keeps ${note.length} characters (must be the first 500), took ${ms} ms (must not be held up: it took over 4 s before)`);
   reset();
 }
+// ---------- B44: Release on an Order that is already closed (a second tab, a second click) says there is nothing to release, never "amount missing" ----------
+{
+  const c = mk(); await fund(fx, c); c.status = "delivered";
+  const first = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const again = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  const m = moneyOut(c);
+  vuln(first.status !== 200 || again.status !== 409 || (again.json && again.json.error) !== "Nothing to release right now" || m.transferred !== 10000 || c.status !== "completed",
+    `B44a Release, then Release again -> ${first.status}, then ${again.status} ${JSON.stringify(again.json && again.json.error)} (must be "Nothing to release right now"); paid out ${m.transferred} (must be 10000 once), status ${c.status}`);
+  reset();
+  const d = mk(); await fund(fx, d); d.status = "delivered";
+  await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: d.id } }));
+  const after = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: d.id } }));
+  vuln(d.status !== "refunded" || after.status !== 409 || (after.json && after.json.error) !== "Nothing to release right now" || moneyOut(d).transferred !== 0,
+    `B44b Release on an Order the freelancer already refunded -> ${after.status} ${JSON.stringify(after.json && after.json.error)} (must be "Nothing to release right now"), status ${d.status}, paid out ${moneyOut(d).transferred}`);
+  reset();
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
