@@ -388,5 +388,18 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
   const good = probe("sk_test_fake");
   vuln(good.status.stripeKeyOk !== true || good.logs.some(l => l.includes("not a Stripe secret key")), `A26 a real secret key -> status ${JSON.stringify(good.status)}, log lines ${good.logs.length} (must say the key is fine and log nothing about it)`);
 }
+// ---------- A27: extra headers can add something, but never change what every answer is (JSON, never cached, allowed websites only) ----------
+{
+  const L = await import(new URL("../netlify/lib/cuvori.mjs", import.meta.url).href);
+  const sneaky = { "Content-Type": "text/html", "Cache-Control": "max-age=999", "access-control-allow-origin": "*", "Access-Control-Allow-Headers": "*", "VARY": "*", "retry-after": "30" };
+  const lone = L.json(200, { ok: 1 }, sneaky);
+  const fromEvil = await L.safe(async () => L.json(200, { ok: 1 }, sneaky))(new Request("https://x/", { method: "POST", headers: { origin: "https://evil.example" } }));
+  const fromCuvori = await L.safe(async () => L.json(200, { ok: 1 }, sneaky))(new Request("https://x/", { method: "POST", headers: { origin: "https://cuvori.io" } }));
+  const h = (r) => ({ type: r.headers.get("content-type"), cache: r.headers.get("cache-control"), origin: r.headers.get("access-control-allow-origin"), allow: r.headers.get("access-control-allow-headers"), vary: r.headers.get("vary"), retry: r.headers.get("retry-after") });
+  const a = h(lone), e = h(fromEvil), g = h(fromCuvori);
+  const fixedOk = (x) => x.type === "application/json" && x.cache === "no-store" && x.vary === "origin" && x.retry === "30";
+  vuln(!fixedOk(a) || a.origin || !fixedOk(e) || e.origin || e.allow || !fixedOk(g) || g.origin !== "https://cuvori.io" || g.allow !== "authorization, content-type",
+    `A27 extra headers that try to change the fixed ones -> on their own ${JSON.stringify(a)}; another website ${JSON.stringify(e)}; cuvori.io ${JSON.stringify(g)} (JSON, never cached and the allowed list must win; a harmless extra must stay)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
