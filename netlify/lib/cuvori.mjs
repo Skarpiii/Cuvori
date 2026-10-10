@@ -50,7 +50,12 @@ const corsHeaders = () => {
   const origin = corsContext.getStore()?.origin;
   return origin ? { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-max-age": "600", "vary": "origin" } : { "vary": "origin" };
 };
-export const json = (status, body, extraHeaders = {}) => new Response(JSON.stringify(body), { status, headers: { ...extraHeaders, "content-type": "application/json", "cache-control": "no-store", ...corsHeaders() } });
+// Extra headers can add something (a "retry after" time, say) but never change what every answer is: JSON, never cached,
+// and readable only by the websites on the allowed list. Headers are the same whatever their capital letters, so an extra
+// "Content-Type" or "Access-Control-Allow-Origin" is dropped, not merged in next to the fixed one.
+const FIXED_HEADER = /^(content-type|cache-control|vary|access-control-.*)$/i;
+const extrasOnly = (h) => Object.fromEntries(Object.entries(h || {}).filter(([k]) => !FIXED_HEADER.test(String(k).trim())));
+export const json = (status, body, extraHeaders = {}) => new Response(JSON.stringify(body), { status, headers: { ...extrasOnly(extraHeaders), "content-type": "application/json", "cache-control": "no-store", ...corsHeaders() } });
 export const bad = (msg, status = 400, extraHeaders = {}) => json(status, { error: msg }, extraHeaders);
 export const isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);
 export const isAcct = (s) => typeof s === "string" && /^acct_[A-Za-z0-9]{8,64}$/.test(s);
