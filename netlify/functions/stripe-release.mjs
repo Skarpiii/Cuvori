@@ -26,11 +26,14 @@ export default safe(async (req) => {
   }
 
   if (c.has_milestones) return bad("This order is released milestone by milestone", 409);
+  const resume = c.status === "releasing" && c.resolution === "release";               // resume an interrupted release
+  // the state first: Release on an Order that is already closed (a second tab, a second click) is told there is nothing
+  // to release, never "amount missing", which would sound as if money were lost
+  if (!resume && !["funded", "delivered"].includes(c.status)) return bad("Nothing to release right now", 409);
   const cents = heldCents(c);
   if (!cents) return bad("Order amount missing", 409);
-  let row = c.status === "releasing" && c.resolution === "release" ? c : null;          // resume an interrupted release
+  let row = resume ? c : null;
   if (!row) {
-    if (!["funded", "delivered"].includes(c.status)) return bad("Nothing to release right now", 409);
     // A price increase both sides accepted is paid in before the client can approve and close the Order: once it is
     // closed, the increase can never be paid through Cuvori. If something is wrong, a dispute is the way. An increase
     // under the €0.50 top-up minimum (only on Orders from before the database refused them) can never be charged, so it
