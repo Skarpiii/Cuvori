@@ -74,12 +74,17 @@ const GRAPHEMES = typeof Intl === "object" && typeof Intl.Segmenter === "functio
 // a note of several megabytes is shortened at once instead of being split up whole first. The piece where that start
 // ends may be cut short there, so it is never kept (it could not have fitted anyway), and the start never ends between
 // the two halves of an emoji, so every piece before it is exactly the piece the whole text has there.
+const LONE_HALF = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const wellFormed = (t) => (typeof t.toWellFormed === "function" ? t.toWellFormed() : t.replace(LONE_HALF, "\uFFFD"));
 export const cut = (text, n, maxUnits = Infinity) => {
   const s = String(text ?? "");
   let end = Math.min(2 * n, maxUnits) + 1;
   const last = s.charCodeAt(end - 1);
   if (last >= 0xD800 && last <= 0xDBFF) end++;                     // never between the two halves of an emoji
-  const short = end < s.length, head = short ? s.slice(0, end) : s;
+  const short = end < s.length;
+  // half an emoji that is already in the text (only a hand-made request can hold one) becomes "�" (U+FFFD), which counts the same:
+  // the database refuses half an emoji, so a note holding one would be lost, or fail a step after the money has moved
+  const head = wellFormed(short ? s.slice(0, end) : s);
   let out = "", used = 0;
   for (const segment of GRAPHEMES ? Array.from(GRAPHEMES.segment(head), x => x.segment) : Array.from(head)) {
     const size = Array.from(segment).length;
