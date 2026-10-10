@@ -367,5 +367,26 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
   vuln(r.status !== 200 || forged.status !== 400,
     `A25 an event signed with the freelancer-account webhook secret (saved with a space and a line break) -> HTTP ${r.status} ${JSON.stringify(r.json)}; a forged one -> HTTP ${forged.status} (the real one must be accepted, the forged one refused)`);
 }
+// ---------- A26: a Stripe key that is not a secret key: payments pause, and the log, the admin and the status say why ----------
+{
+  const { execFileSync } = await import("node:child_process");
+  const base = new URL("../netlify/", import.meta.url).href;
+  const probe = (key) => JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `
+    const logs = []; console.error = (...a) => logs.push(a.map(String).join(" "));
+    globalThis.fetch = async () => { throw new Error("no network in this test"); };   // nothing ever reaches the real database or Stripe
+    const lib = await import(${JSON.stringify(base + "lib/cuvori.mjs")});
+    const status = await (await (await import(${JSON.stringify(base + "functions/stripe-status.mjs")})).default(new Request("https://x/", { method: "GET" }))).json();
+    let err = null; try { await lib.stripe("GET", "/account"); } catch (e) { err = { code: e.code || null, status: e.status || null, message: e.message }; }
+    let cols = null; try { lib.acctCols(); } catch (e) { cols = e.code || null; }
+    process.stdout.write(JSON.stringify({ status, err, cols, logs }));`], {
+    env: { ...process.env, SITE_URL: "https://cuvori.io", STRIPE_SECRET_KEY: key, SUPABASE_SERVICE_ROLE_KEY: "service_fake", STRIPE_WEBHOOK_SECRET: "whsec_fake" }, encoding: "utf8" }));
+  const bad = probe("pk_live_PUBLICPARTabc123");
+  const logLine = bad.logs.find(l => l.includes("not a Stripe secret key")) || "";
+  vuln(bad.status.escrow !== true || bad.status.stripeKeyOk !== false || !bad.err || bad.err.code !== "payments_paused" || !/not a secret key/.test(bad.err.message) || bad.cols !== "payments_paused"
+       || !logLine.includes('"pk_"') || logLine.includes("PUBLICPART") || JSON.stringify(bad).includes("PUBLICPART"),
+    `A26 Stripe's public key saved as the secret key -> status ${JSON.stringify(bad.status)}, payment ${JSON.stringify(bad.err)}, Payout details ${bad.cols}, log ${JSON.stringify(logLine)} (must pause with the reason, show the key's first 3 characters only)`);
+  const good = probe("sk_test_fake");
+  vuln(good.status.stripeKeyOk !== true || good.logs.some(l => l.includes("not a Stripe secret key")), `A26 a real secret key -> status ${JSON.stringify(good.status)}, log lines ${good.logs.length} (must say the key is fine and log nothing about it)`);
+}
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);
