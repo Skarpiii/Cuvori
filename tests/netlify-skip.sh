@@ -1,12 +1,12 @@
 #!/bin/bash
 # The rule that skips a Netlify build when an upload changes only files Netlify never uses (tools/netlify-skip-build.sh).
-# A production deploy costs 15 of the 300 monthly credits on Netlify's free plan. The rule must skip only when it is
-# sure, and build in every other case. Runs it in a throwaway repository, the way Netlify runs it before a build.
+# It must skip only when it is sure, build in every other case, and never skip a production build. Runs it in a
+# throwaway repository, the way Netlify runs it before a build.
 cd "$(dirname "$0")/.."
 root=$(pwd); fail=0; n=0
-check() {  # what, expected exit code (0 skip, 1 build), CACHED_COMMIT_REF, COMMIT_REF
+check() {  # what, expected exit code (0 skip, 1 build), CACHED_COMMIT_REF, COMMIT_REF, deploy context (default: branch-deploy)
   n=$((n+1)); local got
-  (cd "$T" && CACHED_COMMIT_REF="$3" COMMIT_REF="$4" bash "$root/tools/netlify-skip-build.sh" >/dev/null 2>&1); got=$?
+  (cd "$T" && CONTEXT="${5:-branch-deploy}" CACHED_COMMIT_REF="$3" COMMIT_REF="$4" bash "$root/tools/netlify-skip-build.sh" >/dev/null 2>&1); got=$?
   if [ "$got" = "$2" ]; then echo "PASS $1"; else echo "FAIL $1 (got $([ $got = 0 ] && echo skip || echo build), must $([ $2 = 0 ] && echo skip || echo build))"; fail=1; fi
 }
 grep -Eq '^[[:space:]]*ignore[[:space:]]*=[[:space:]]*"bash \./tools/netlify-skip-build\.sh"' netlify.toml \
@@ -36,5 +36,9 @@ check "no earlier build known (empty) -> build" 1 "" "$t12"
 check "built without cache (Netlify then gives the same commit twice) -> build" 1 "$t12" "$t12"
 check "the earlier build's commit is not in this copy -> build" 1 "0123456789abcdef0123456789abcdef01234567" "$t12"
 check "no commit given at all -> build" 1 "" ""
+# production (the "production" branch, which runs the hourly job) is built on purpose and costs credits: never skipped,
+# whatever changed, because "the last commit Netlify built" may be a branch deploy's and not what production runs
+check "production, only a test changed -> build" 1 "$base" "$t1" production
+check "production, only notes and database scripts changed -> build" 1 "$t1" "$t3" production
 echo; [ $fail = 0 ] && echo "deploy rule: all $n checks passed" || echo "deploy rule: SOMETHING FAILED"
 exit $fail
