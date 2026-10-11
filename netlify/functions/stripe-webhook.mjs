@@ -3,6 +3,8 @@
 //   charge.refunded, charge.dispute.created, charge.dispute.closed. Connect endpoint (separate secret): account.updated.
 import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET } from "../lib/cuvori.mjs";
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+// the events Cuvori acts on (the first five from Cuvori's own Stripe account, account.updated from the freelancers' accounts)
+const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "charge.refunded", "charge.dispute.created", "charge.dispute.closed", "account.updated"];
 
 export default async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -13,6 +15,21 @@ export default async (req) => {
   try { event = verifyWebhook(raw, sig, WEBHOOK_SECRET); } catch {}
   if (!event && CONNECT_SECRET) { try { event = verifyWebhook(raw, sig, CONNECT_SECRET); fromConnect = true; } catch {} }
     if (!event) return bad("Invalid signature", 400);
+
+  // Cuvori reads Stripe's classic "Snapshot" events: the object the event is about travels inside it (data.object). A
+  // "Thin" event (Stripe's newer format, offered when an event destination is created) carries only a reference, and an
+  // event Cuvori handles cannot be acted on without its object. Such an event is refused, never answered "received": Stripe
+  // then shows it as failed in Workbench and sends it again, so nothing is lost while the destination is set up again with
+  // Snapshot (SETUP.md, Part 5 step 4). Events Cuvori does not handle stay "received", so an extra one never fails the endpoint.
+  // Stripe's own "is this destination ready?" test (a ping) carries nothing to record: it is answered so the test passes
+  if (event.type === "v2.core.event_destination.ping") return json(200, { received: true, ping: true });
+  const obj = event.data && event.data.object;
+  const thin = event.object === "v2.core.event" || /^v\d+\./.test(String(event.type || "")) || (!!event.related_object && !event.data);
+  const unreadable = HANDLED.includes(event.type) && !(obj && typeof obj === "object" && !Array.isArray(obj) && typeof obj.id === "string" && obj.id);
+  if (thin || unreadable) {
+    console.error("webhook event Cuvori cannot read", event.id, event.type, thin ? "(a Thin event: the Stripe event destination must send Snapshot events)" : "(no object inside it: Snapshot events carry it)");
+    return bad("Cuvori reads Snapshot events only, and this event does not carry the object it is about. Set the Stripe event destination's payload style to Snapshot.", 400);
+  }
 
   try {
     const o = event.data && event.data.object || {};
