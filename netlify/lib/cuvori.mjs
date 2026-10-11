@@ -17,9 +17,15 @@ export const SUPABASE_URL = configuredOrigin(env("SUPABASE_URL") || "https://tnx
 // is used: Supabase is phasing the old keys out, and an old key switched off in Supabase must never shadow a working new one.
 export const SERVICE_KEY = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
 export const STRIPE_KEY = env("STRIPE_SECRET_KEY");
+// A Stripe secret key is one word: sk_live_, sk_test_ (rk_ for a restricted key) and then only letters and digits. A key
+// with anything else in it (a space or a line break in the middle, from a copy that wrapped; an invisible character; a
+// letter from another alphabet that looks the same) is never sent: Node refuses to send such a header and puts the whole
+// header, the key with it, into its error text, and that text would end up in the Netlify log.
+const KEY_PREFIX = /^(sk|rk)_(live|test)_/;
+const STRIPE_KEY_WHOLE = /^(sk|rk)_(live|test)_[A-Za-z0-9_]+$/.test(STRIPE_KEY);
 // Test and live are two separate worlds at Stripe: an account, payment or payout made with test keys does not exist for
-// live keys, and the other way round. The key says which one these functions work in.
-export const STRIPE_MODE = /^(sk|rk)_live_/.test(STRIPE_KEY) ? "live" : /^(sk|rk)_test_/.test(STRIPE_KEY) ? "test" : null;
+// live keys, and the other way round. The key says which one these functions work in (none when the key can't be used).
+export const STRIPE_MODE = !STRIPE_KEY_WHOLE ? null : /^(sk|rk)_live_/.test(STRIPE_KEY) ? "live" : "test";
 export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 // the optional second endpoint, for events about the freelancers' own Stripe accounts: read like every other setting
 export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
@@ -156,6 +162,10 @@ export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; keyPla
 // first three characters, which are never secret.
 function requireStripeMode() {
   if (STRIPE_MODE) return;
+  if (KEY_PREFIX.test(STRIPE_KEY)) {
+    console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify has a space, a line break or another character that is not part of a Stripe key (it starts with "${STRIPE_KEY.slice(0, 3)}"); copy the key again from Stripe, in one piece`);
+    throw fail("Payments are paused: the Stripe key in Netlify (STRIPE_SECRET_KEY) has a space, a line break or another character that is not part of a Stripe key. It must be copied again from Stripe, in one piece.", 503, PAUSED);
+  }
   if (STRIPE_KEY) console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify is not a Stripe secret key (it starts with "${STRIPE_KEY.slice(0, 3)}"; a secret key starts with sk_live_ or sk_test_, a restricted key with rk_live_ or rk_test_)`);
   throw fail(STRIPE_KEY ? "Payments are paused: the Stripe key in Netlify (STRIPE_SECRET_KEY) is not a secret key. It must start with sk_live_ or sk_test_ (rk_ for a restricted key)."
                         : "Payments are not configured. Please contact support.", 503, PAUSED);
@@ -213,7 +223,13 @@ async function stripeCall(method, path, body, opts = {}) {
   else { headers["content-type"] = "application/x-www-form-urlencoded"; init.body = encode(body || {}); }
   let r;
   try { r = await fetch(url, init); }
-  catch (e) { const x = new Error("Could not reach the payment provider: " + (e && e.message || "network")); x.network = true; throw x; }
+  catch (e) {
+    // Node's own text is never copied: for a request it refuses to send, it holds the request's headers, the key among
+    // them. Only the kind of failure is kept, so the Netlify log still says what went wrong.
+    const code = e && e.cause && typeof e.cause.code === "string" && /^[A-Z0-9_]{2,40}$/.test(e.cause.code) ? e.cause.code : null;
+    const why = e && e.name === "TimeoutError" ? "no answer within 8 seconds" : code || (e && e.message === "fetch failed" ? "no connection" : "the request could not be sent");
+    const x = new Error(`Could not reach the payment provider (${why})`); x.network = true; throw x;
+  }
   let data;
   try { data = await r.json(); }
   catch { const e = new Error("Unreadable payment provider response"); e.outcomeUnknown = true; e.status = r.status; throw e; }
@@ -251,8 +267,18 @@ export function verifyWebhook(rawBody, sigHeader, secret = WEBHOOK_SECRET, toler
 }
 
 // ---- Supabase REST with the service role ----
+// The Supabase key is one word too (sb_secret_… or, for the older service key, a JWT: letters, digits, "_", "-" and
+// dots). One with anything else in it is never sent, for the same reason as the Stripe key: Node's error text for it holds
+// the whole key. The Netlify log says why once per start, with the key's first 3 characters only.
+const SERVICE_KEY_NAME = env("SUPABASE_SECRET_KEY") ? "SUPABASE_SECRET_KEY" : "SUPABASE_SERVICE_ROLE_KEY";
+const SERVICE_KEY_WHOLE = /^[A-Za-z0-9._-]+$/.test(SERVICE_KEY);
+let serviceKeyLogged = false;
 function requireServiceKey() {
   if (!SERVICE_KEY) throw fail("Database access is not configured. Please contact support.", 503);
+  if (!SERVICE_KEY_WHOLE) {
+    if (!serviceKeyLogged) { serviceKeyLogged = true; console.error(`Database paused: ${SERVICE_KEY_NAME} in Netlify has a space, a line break or another character that is not part of a Supabase key (it starts with "${SERVICE_KEY.slice(0, 3)}"); copy the key again from Supabase, in one piece`); }
+    throw fail("Database access is not configured. Please contact support.", 503);
+  }
 }
 async function sbFetch(path, init = {}) {
   requireServiceKey();
@@ -532,6 +558,19 @@ function checkNote(e) {
   if (e && e.db) return "Cuvori's database had a problem";
   return "something unexpected went wrong";
 }
+// The note on an Order when a money step fails (a payout, a refund, pulling money back after a chargeback, paying again
+// after a won one). The same rule as the Stripe check's note above: both people on the Order can read it, so it is
+// Cuvori's own sentence. Cuvori's own messages (the money is still settling, the account is not ready, Stripe did not
+// answer, …) are written as they are; an answer from Stripe or the database, or any other error, is said in plain words,
+// and its full text goes to the Netlify log under the ref the note gives — the ref the person is shown too.
+function failNote(e, step) {
+  const own = e && (e.expose || (e.constructor === Error && !e.stripe && !e.network && !e.outcomeUnknown && !e.db));
+  if (own) return String(e.message);
+  const ref = e && typeof e.ref === "string" && /^[0-9a-f]{8}$/.test(e.ref) ? e.ref : crypto.randomUUID().slice(0, 8);
+  try { e.ref = ref; } catch {}
+  console.error("money step failed", ref, step, e && e.stack || e);
+  return `${checkNote(e)} (Netlify log ref ${ref})`;
+}
 export async function orderPayoutAccount(c) {
   let acct; const why = {};
   try { acct = await payoutAccount(c.editor, why); }
@@ -710,7 +749,7 @@ async function settleLocked(c0, actor, ev) {
     if (pendE > 0) { if (!transferId) transferId = await releaseToEditor(c, pendE); await count("release", pendE, transferId); }
     if (pendR > 0) { if (!refundId) refundId = await refundToClient(c, pendR); await count("refund", pendR, refundId); }
   } catch (e) {
-    await db.update("contracts", `id=eq.${c.id}`, { money_error: String(e.message).slice(0, 300) }).catch(() => {});
+    await db.update("contracts", `id=eq.${c.id}`, { money_error: failNote(e, `settlement of order ${c.id}`).slice(0, 300) }).catch(() => {});
     throw e;
   }
   const movedE = (doneT ? editorCents : 0) + pendE, movedR = (doneR ? refundCents : 0) + pendR;
@@ -744,7 +783,7 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
   if (!claimed) throw fail("This milestone was just changed, reload", 409);
   let transferId;
   try { transferId = await releaseToEditor(c, m.amount_cents, m.id); }
-  catch (e) { await db.update("contracts", `id=eq.${c.id}`, { money_error: String(e.message).slice(0, 300) }).catch(() => {}); throw e; }
+  catch (e) { await db.update("contracts", `id=eq.${c.id}`, { money_error: failNote(e, `milestone ${m.id} of order ${c.id}`).slice(0, 300) }).catch(() => {}); throw e; }
   const now = new Date().toISOString();
   const marked = await db.claimMilestone(m.id, ["approved"], { status: "released", released_at: now, transfer_ref: transferId });
   if (!marked) return transferId;                                                      // another request marked it first: it also moved the counters
@@ -1122,7 +1161,7 @@ async function coverChargebackLocked(id, disputeId, centsHint, pullBack = true) 
     }
     if (err) {
       console.error("reversal", c.id, err.message);
-      await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback: " + err.message).slice(0, 300) }).catch(() => {});
+      await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback: " + failNote(err, `pulling money back after chargeback ${disputeId}`)).slice(0, 300) }).catch(() => {});
       if (retryable(err)) throw err;
     } else if (pendingReversal(c)) await db.update("contracts", `id=eq.${c.id}`, { money_error: null }).catch(() => {});
     return c;
@@ -1255,7 +1294,7 @@ async function repayWonLocked(c0) {
     return back;
   } catch (e) {
     console.error("re-pay after won chargeback", c.id, e.message);
-    await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback won, re-payment failed: " + e.message).slice(0, 300) }).catch(() => {});
+    await db.update("contracts", `id=eq.${c.id}`, { money_error: ("chargeback won, re-payment failed: " + failNote(e, `paying again after chargeback ${c.chargeback_id}`)).slice(0, 300) }).catch(() => {});
     if (retryable(e)) throw e;                                             // no answer: the webhook fails and Stripe sends the event again
     return 0;                                                              // a plain no (account not ready, money settling): the hourly job tries again
   }
