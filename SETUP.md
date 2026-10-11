@@ -32,6 +32,8 @@ Paste the two values between the quotes, save, then commit and push in GitHub De
 5. Later, to use **cuvori.io**: Netlify → **Domain management** → **Add a domain** and follow the instructions from your domain provider.
 6. **If the page itself lives on GitHub Pages (cuvori.io does today)**, the payment functions still need Netlify. Deploy the repository to Netlify as above (only the functions matter there), then add one value to `window.CUVORI_CONFIG` in `index.html`: `functionsUrl: "https://<your-site>.netlify.app"`. The page calls the functions there; they accept calls from `https://cuvori.io` (see `ALLOWED_ORIGINS` in `netlify/lib/cuvori.mjs` to add another address).
 
+7. **Netlify credits (free plan: 300 a month).** Each production deploy costs 15 credits; when they run out, Netlify pauses production deploys until the next billing period. Uploads still go out as free "branch deploys", and the page and Stripe's payment notices use that branch address (`main--cuvori.netlify.app`), but **the hourly job only runs on the published production deploy**, so it keeps running the old code. To save credits, an upload that changes only tests, notes (`.md`) or database scripts makes no deploy at all (`tools/netlify-skip-build.sh`, checked by `tests/netlify-skip.sh`). **After a pause ends**, publish the latest code once: Netlify → **Deploys** → **Trigger deploy** → **Clear cache and deploy site**. Then check that `https://<your-site>.netlify.app/.netlify/functions/stripe-status` answers with the same fields as the branch address.
+
 ## Part 4 — Check it works
 
 - Open the Netlify address. The yellow "Demo mode" strip at the top should be **gone**.
