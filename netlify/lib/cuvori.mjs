@@ -239,11 +239,16 @@ async function stripeCall(method, path, body, opts = {}) {
   return data;
 }
 const stripeCode = (e) => (e && e.stripe && (e.stripe.code || e.stripe.decline_code)) || "";
-const isIdemInFlight = (e) => e && e.stripe && e.stripe.type === "idempotency_error";
-// Stripe's two answers about a key itself rather than about the request: "still working on the first request with this
-// key" (409) and "this key was used for a different request" (400)
-export const idemBusy = (e) => isIdemInFlight(e) && e.status === 409;
-export const idemMismatch = (e) => isIdemInFlight(e) && e.status === 400;
+// Stripe's two answers about a key itself rather than about the request:
+// - "another request with this key is still running": a 409. Stripe's docs give it its own code, idempotency_key_in_use,
+//   and don't say which type comes with it (the type idempotency_error is the other answer, below). Stripe's own library
+//   sends every 409 again with the same key, and Stripe's docs say to wait and retry with that key: a new key could start
+//   a second payout or refund. So every 409, or that code, counts: the key is kept and the same request asks again later.
+// - "this key was used for a different request": the type idempotency_error, a 400.
+export const idemBusy = (e) => !!(e && e.stripe && (e.status === 409 || e.stripe.code === "idempotency_key_in_use"));
+export const idemMismatch = (e) => !!(e && e.stripe && e.stripe.type === "idempotency_error" && e.status === 400);
+// either answer is about the key: what the first request with it did is not known from here, so the key is never dropped
+const aboutTheKey = (e) => idemBusy(e) || !!(e && e.stripe && e.stripe.type === "idempotency_error");
 // What Stripe recognises a repeated request by: the exact text it receives, read under the API version sent with it. A
 // key named after this can never meet a request Stripe calls "different", whatever a later version changes in how
 // requests are written.
@@ -465,10 +470,11 @@ export async function moneyPost(scope, path, body) {
   catch (e) {
     if (e && typeof e === "object") e.idemKey = key;
     // Keep the key only when the outcome is unknown (no answer, unreadable answer, Stripe says "retry with the
-    // same key", or the same key is still in flight). Any other answer is final for this key — including a 500,
-    // which Stripe saves and would replay for 24 h. The next attempt gets a fresh key; the Stripe-side lookups
-    // before every transfer, refund and reversal are what keep a fresh attempt from paying twice.
-    const unknown = e.network || e.outcomeUnknown || e.shouldRetry || isIdemInFlight(e) || !e.status;
+    // same key", another request with this key is still running, or the key belongs to a different request). Any
+    // other answer is final for this key — including a 500, which Stripe saves and would replay for 24 h. The next
+    // attempt gets a fresh key; the Stripe-side lookups before every transfer, refund and reversal are what keep a
+    // fresh attempt from paying twice.
+    const unknown = e.network || e.outcomeUnknown || e.shouldRetry || aboutTheKey(e) || !e.status;
     if (!unknown) await db.remove("money_keys", `scope=eq.${q(scope)}&key=eq.${q(key)}`).catch(() => {});
     throw e;
   }
@@ -673,7 +679,8 @@ export async function refundToClient(c, cents) {
     return ids.join(",");
   } catch (e) {
     if (stripeCode(e) === "balance_insufficient" || /insufficient funds/i.test(e.message)) throw fail("The payment provider cannot pay this refund yet (balance still settling). Cuvori retries every hour.");
-    if (stripeCode(e) === "charge_disputed" || /charged back/i.test(e.message)) throw fail(CHARGEBACK);
+    // Stripe has two codes for "this payment was charged back, it can't be refunded"
+    if (["charge_disputed", "refund_disputed_payment"].includes(stripeCode(e)) || /charged back/i.test(e.message)) throw fail(CHARGEBACK);
     if (e.network) throw fail("The payment provider did not answer. Nothing was lost — please try again in a minute.", 503);
     throw e;
   }
