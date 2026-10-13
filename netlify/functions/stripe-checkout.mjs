@@ -105,6 +105,10 @@ async function needsCheck(c, why) {
   return refuse(409, "This order's payment record needs checking before another payment can be taken. Cuvori support has been told.", "needs_check");
 }
 const euro = (cents) => `€${(cents / 100).toFixed(2)}`;
+// Closes a payment page so it can never be paid. When that fails the page stays open: paying it later only places a hold,
+// which is released with nothing charged if the Order is already paid, but you are told in the Netlify log.
+const closePage = (id, order) => stripe("POST", `/checkout/sessions/${id}/expire`)
+  .catch(e => console.error("could not close a payment page", id, "order", order, e && e.message));
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -229,6 +233,16 @@ export default safe(async (req) => {
   // repeating that failure for the rest of the half hour.
   const scope = `checkout:${c.id}:${stripeFingerprint("/checkout/sessions", params)}`;
   let session = await makePage(scope, params);
+  // a page that can no longer be paid is never handed out: its key is dropped (only that key, so a new page another tab
+  // has just made under a newer key stays the one both tabs get) and one new page is made
+  const renew = async () => {
+    await dropKeyIf(scope, session[IDEM_KEY]);
+    const renewed = await makePage(scope, params);
+    // the database could not forget the key, so Stripe handed back the same page again: never sent to the client
+    if (renewed.id === session.id) throw new Error("the payment page's key could not be renewed");
+    return renewed;
+  };
+  let replacedDone = false;                       // the Order's page was paid at Stripe: there is nothing left to close on it
   // For a repeated key Stripe hands back its saved answer, even when that page has been closed or paid since (a page in
   // another language replaced it and the client switched back; or the client paid and clicked Fund again before the
   // payment was confirmed). Only such a page is looked up at Stripe: Stripe marks answers it hands back from its memory,
@@ -238,20 +252,23 @@ export default safe(async (req) => {
     const live = await stripe("GET", `/checkout/sessions/${session.id}`);
     if (live.status === "complete") {
       // paid already: confirmed right now, the same way as on the return from Stripe (a problem there is left to the
-      // return and the webhook, which confirm it too). code: the page says the Order isn't waiting for a payment — it may
-      // already be paid — and reloads it.
-      await applyPaidSession(live).catch(e => console.error("confirming a paid page at Fund", c.id, e && e.message));
-      return json(409, { error: "This order is not waiting for payment", code: "not_payable" });
-    }
-    if (live.status === "expired") {
-      // a closed page is never handed out: its key is dropped (only that key, so a new page another tab has just made
-      // under a newer key stays the one both tabs get) and one new page is made
-      await dropKeyIf(scope, session[IDEM_KEY]);
-      const renewed = await makePage(scope, params);
-      // the database could not forget the key, so Stripe handed back the closed page again: never sent to the client
-      if (renewed.id === session.id) throw new Error("the payment page's key could not be renewed");
-      session = renewed;
-    }
+      // return and the webhook, which confirm it too)
+      const r = await applyPaidSession(live).catch(e => { console.error("confirming a paid page at Fund", c.id, e && e.message); return null; });
+      // Nothing was taken from that page: its card hold was released because the Order could not take the payment at that
+      // moment (the freelancer was suspended, say), or the card never got that far. If the Order still waits for exactly
+      // this payment, a new page is made now, rather than telling the client for the rest of the half hour that it is not
+      // waiting for a payment. An Order that changed meanwhile is shown again as it is now.
+      if (r === "released" || r === "unpaid") {
+        const now = await db.contract(c.id);
+        const same = !!now && now.status === c.status && now.amount_cents === c.amount_cents && (now.funded_cents ?? null) === (c.funded_cents ?? null);
+        if (!same) return json(409, { error: "The order changed, reload", code: "order_changed" });
+        if (live.id === prev) replacedDone = true;
+        session = await renew();
+      } else {
+        // code: the page says the Order isn't waiting for a payment — it may already be paid — and reloads it
+        return json(409, { error: "This order is not waiting for payment", code: "not_payable" });
+      }
+    } else if (live.status === "expired") session = await renew();
   }
 
   const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
@@ -266,7 +283,7 @@ export default safe(async (req) => {
     // language): it is the Order's page, so this tab gets it too, and it is never closed here
     if (same && now.stripe_checkout_id === session.id) return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
     // a page of this request's own that the Order is not using is closed, so it can never be paid
-    if (!now || now.stripe_checkout_id !== session.id) await stripe("POST", `/checkout/sessions/${session.id}/expire`).catch(() => {});
+    if (!now || now.stripe_checkout_id !== session.id) await closePage(session.id, c.id);
     if (same && now.stripe_checkout_id && now.stripe_checkout_id !== prev && isSession(now.stripe_checkout_id)) {
       const other = await stripe("GET", `/checkout/sessions/${now.stripe_checkout_id}`).catch(() => null);
       const om = other && other.metadata || {};
@@ -277,6 +294,6 @@ export default safe(async (req) => {
     return json(409, { error: "The order changed, reload", code: "order_changed" });
   }
   // only one live Checkout per Order: the previous page (another tab, an old link) can no longer be paid
-  if (prev && prev !== session.id && isSession(prev)) await stripe("POST", `/checkout/sessions/${prev}/expire`).catch(() => {});
+  if (prev && prev !== session.id && isSession(prev) && !replacedDone) await closePage(prev, c.id);
   return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
 });
