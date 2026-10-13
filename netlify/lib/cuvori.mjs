@@ -949,11 +949,15 @@ async function applyPaidSessionNow(s) {
     // this payment's amounts; a page from before, or a damaged value, leaves the Order's record as it is
     let quote;
     try { const qd = md.quote ? JSON.parse(md.quote) : null; if (qd && typeof qd === "object" && !Array.isArray(qd) && qd.price_cents === amount && qd.processing_cents === fee) quote = qd; } catch {}
-    try { u = await db.claim(id, ["accepted"], { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, paid_mode: STRIPE_MODE, ...(quote ? { quote } : {}) }); }
+    // recorded only while the Order still waits for it at this very price: the price can no longer change while this step
+    // runs (schema v34 makes a change wait for it), and if it ever did, the payment is never recorded as paying a
+    // different price (it would leave more paid in than the price, or less)
+    try { u = ((await db.update("contracts", `id=eq.${id}&status=eq.accepted&amount_cents=eq.${amount}`, { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, paid_mode: STRIPE_MODE, ...(quote ? { quote } : {}) })) || [])[0] || null; }
     catch (e) { if (MODE_REFUSED.test(String(e && e.message))) return refundOrphan(s, "test and live were switched while this payment came in"); throw e; }
     if (!u) {
       const now = await db.contract(id);
       if (now && now.stripe_payment_intent === s.payment_intent) return "already";   // concurrent duplicate delivery won the claim
+      if (now && now.status === "accepted" && now.amount_cents !== amount) return refundOrphan(s, "the price changed while this payment came in");
       return refundOrphan(s, `order is ${now && now.status}`);                        // cancelled / already funded by another session
     }
   } else {
