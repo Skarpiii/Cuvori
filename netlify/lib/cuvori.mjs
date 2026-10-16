@@ -1085,7 +1085,12 @@ const pendingRepay = (c) => String(c.money_error || "").startsWith("chargeback w
 const retryable = (e) => !!(e && (e.network || e.outcomeUnknown || e.shouldRetry || !e.status || e.status >= 500));
 export async function onDisputeCreated(o) {
   const initial = await contractByPi(o.payment_intent);
-  if (!initial) return "ignored";
+  if (!initial) {
+    // a chargeback on a payment with no Order on record (an Order removed with an account before schema v35 kept them, or
+    // a payment made outside Cuvori): nothing here can answer it or pull money back, so the log says where to do it
+    console.error("chargeback on a payment with no Order on record: answer it in Stripe's dashboard, under Disputes", "dispute", o && o.id, "payment", o && o.payment_intent, "amount", o && o.amount);
+    return "ignored";
+  }
   const unlock = await lockOrder(initial.id);
   try { return await createDisputeLocked(initial.id, o); }
   finally { await unlock(); }
