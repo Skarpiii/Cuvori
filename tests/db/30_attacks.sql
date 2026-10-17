@@ -223,7 +223,7 @@ select t.try('client','stores a 1 MB clause document', t.u('101'), $$select publ
 select t.try('client','sets a 3-day notice period (v11 minimum)', t.u('102'), $$select public.adjust_contract('30000000-0000-0000-0000-000000000002', 'Proposed', '', 80, 'project', null, 2, 'fixed', 'LT', 'en', '{"cancel_days":0}')$$, $$select (select terms->>'cancel_days' from public.contracts where id = '30000000-0000-0000-0000-000000000002') = '0'$$);
 select t.try('client','sets a 36-month minimum term (v11 max is 24)', t.u('102'), $$select public.adjust_contract('30000000-0000-0000-0000-000000000002', 'Proposed', '', 80, 'project', null, 2, 'fixed', 'LT', 'en', '{"months":36}')$$, $$select (select terms->>'months' from public.contracts where id = '30000000-0000-0000-0000-000000000002') = '36'$$);
 select t.try('client','sets a 100% deposit (v11 max is 50)', t.u('102'), $$select public.adjust_contract('30000000-0000-0000-0000-000000000002', 'Proposed', '', 80, 'project', null, 2, 'fixed', 'LT', 'en', '{"deposit_pct":100}')$$, $$select (select terms->>'deposit_pct' from public.contracts where id = '30000000-0000-0000-0000-000000000002') = '100'$$);
-select t.try('client','freezes clause text after acceptance (normal)', t.u('101'), $$select public.store_contract_doc('30000000-0000-0000-0000-000000000001', '{"clauses":[{"t":"Scope of work","b":"agreed text"}],"version":"v1-2026-09"}')$$, $$select (select terms_doc->'clauses'->0->>'b' = 'agreed text' from public.contracts where id = '30000000-0000-0000-0000-000000000001')$$, 'allow');
+select t.try('client','writes its own clause text after acceptance (closed since v38: the database saves what was agreed)', t.u('101'), $$select public.store_contract_doc('30000000-0000-0000-0000-000000000001', '{"clauses":[{"t":"Scope of work","b":"agreed text"}],"version":"v1-2026-09"}')$$, $$select (select terms_doc->'clauses'->0->>'b' = 'agreed text' from public.contracts where id = '30000000-0000-0000-0000-000000000001')$$);
 select t.try('client','freezes held money with a change request after the paid rounds', t.u('104'), $$select public.contract_action('30000000-0000-0000-0000-000000000006', 'request_changes', 'one more change')$$, $$select (select status = 'funded' or auto_release_at is null from public.contracts where id = '30000000-0000-0000-0000-000000000006')$$);
 
 -- ---------- v12: the rules people agree to, and the report route ----------
@@ -397,8 +397,8 @@ begin
   perform t.as_user('203'); out := out || '|' || public.order_update(oid, t.v18_order(9500));
   select * into c from public.contracts where id = oid;
   out := out || '|' || coalesce(c.client_accepted_version::text, '-') || '/' || coalesce(c.freelancer_accepted_version::text, '-') || '/' || c.status || '/' || c.terms_version || '/' || c.amount_cents;
-  out := out || '|' || public.order_accept(oid);                                     -- the editor accepting his own change again: nothing new
-  perform t.as_user('102'); out := out || '|' || public.order_accept(oid);
+  out := out || '|' || public.order_accept(oid, (select terms_version from public.contracts where id = oid));                                     -- the editor accepting his own change again: nothing new
+  perform t.as_user('102'); out := out || '|' || public.order_accept(oid, (select terms_version from public.contracts where id = oid));
   select * into c from public.contracts where id = oid;
   out := out || '|' || c.status || '/' || coalesce(c.accepted_version::text, '-') || '/' || (c.client_accepted_at is not null and c.freelancer_accepted_at is not null)::text;
   out := out || '|' || public.order_update(oid, t.v18_order(9900));                  -- accepted: no more silent edits
@@ -415,7 +415,7 @@ declare oid uuid; c public.contracts%rowtype; m1 uuid; m2 uuid; aid uuid; out te
 begin
   ms := '[{"title":"First draft","amount_cents":25000},{"title":"Completed first version","amount_cents":35000},{"title":"Final delivery","amount_cents":40000}]';
   perform t.as_user('206'); oid := public.order_create('10000000-0000-0000-0000-000000000009', t.v18_order(100000, ms));
-  perform t.as_user('106'); out := out || public.order_accept(oid);
+  perform t.as_user('106'); out := out || public.order_accept(oid, (select terms_version from public.contracts where id = oid));
   perform t.fund(oid);
   select id into m1 from public.order_milestones where order_id = oid and position = 1;
   select id into m2 from public.order_milestones where order_id = oid and position = 2;
@@ -453,7 +453,7 @@ create or replace function t.f_direct() returns text language plpgsql as $$
 declare oid uuid; c public.contracts%rowtype; out text := '';
 begin
   perform t.as_user('102'); oid := public.order_create('10000000-0000-0000-0000-000000000006', t.v18_order(9000, null, 'direct'));
-  perform t.as_user('203'); out := out || public.order_accept(oid);
+  perform t.as_user('203'); out := out || public.order_accept(oid, (select terms_version from public.contracts where id = oid));
   out := out || '|' || public.order_action(oid, 'mark_paid');                                  -- only the client can say they paid
   perform t.as_user('102'); out := out || '|' || public.order_action(oid, 'mark_paid');
   out := out || '|' || public.order_action(oid, 'confirm_paid');                               -- only the freelancer can confirm money arrived
@@ -484,9 +484,11 @@ select t.try('client','creates an Order for a profession that does not exist', t
 select t.try('client','creates an Order with invented rights', t.u('102'), $$select public.order_create('10000000-0000-0000-0000-000000000006', t.v18_order(9000) || '{"rights":"everything is mine"}')::text$$, $$select $1 is not null$$);
 select t.try('client','creates a second Order while one is open', t.u('101'), $$select public.order_create('10000000-0000-0000-0000-000000000001', t.v18_order(9000))::text$$, $$select $1 is not null$$);
 select t.try('client','creates an Order with milestones (normal)', t.u('102'), $$select public.order_create('10000000-0000-0000-0000-000000000006', t.v18_order(9000, '[{"title":"a","amount_cents":4000},{"title":"b","amount_cents":5000}]'))::text$$, $$select $1 is not null and (select count(*) from public.order_milestones where order_id = $1::uuid) = 2 and (select has_milestones from public.contracts where id = $1::uuid)$$, 'allow');
-select t.try('client','accepts a stranger''s Order', t.u('501'), $$select public.order_accept('30000000-0000-0000-0000-000000000002')$$, $$select $1 = 'ok'$$);
-select t.try('client','accepts an Order made before v18 (normal)', t.u('102'), $$select public.order_accept('30000000-0000-0000-0000-000000000002')$$, $$select $1 = 'already_accepted'$$, 'allow');
-select t.try('editor','accepts an Order made before v18 as the other side (normal)', t.u('202'), $$select public.order_accept('30000000-0000-0000-0000-000000000002')$$, $$select $1 = 'ok' and (select status = 'accepted' and accepted_version = 1 from public.contracts where id = '30000000-0000-0000-0000-000000000002')$$, 'allow');
+select t.try('client','accepts a stranger''s Order', t.u('501'), $$select public.order_accept('30000000-0000-0000-0000-000000000002', (select terms_version from public.contracts where id = '30000000-0000-0000-0000-000000000002'))$$, $$select $1 = 'ok'$$);
+select t.try('client','accepts an Order made before v18 (normal)', t.u('102'), $$select public.order_accept('30000000-0000-0000-0000-000000000002', (select terms_version from public.contracts where id = '30000000-0000-0000-0000-000000000002'))$$, $$select $1 = 'already_accepted'$$, 'allow');
+select t.try('editor','accepts an Order made before v18 as the other side (normal)', t.u('202'), $$select public.order_accept('30000000-0000-0000-0000-000000000002', (select terms_version from public.contracts where id = '30000000-0000-0000-0000-000000000002'))$$, $$select $1 = 'ok' and (select status = 'accepted' and accepted_version = 1 from public.contracts where id = '30000000-0000-0000-0000-000000000002')$$, 'allow');
+select t.try('editor','accepts version 0 of an Order whose version is 1 (v38: only the version read)', t.u('202'), $$select public.order_accept('30000000-0000-0000-0000-000000000002', 0)$$, $$select (select status = 'accepted' or freelancer_accepted_version is not null from public.contracts where id = '30000000-0000-0000-0000-000000000002')$$);
+select t.try('editor','accepts without saying which version he read (v38)', t.u('202'), $$select public.order_action('30000000-0000-0000-0000-000000000002', 'accept')$$, $$select (select status = 'accepted' or freelancer_accepted_version is not null from public.contracts where id = '30000000-0000-0000-0000-000000000002')$$);
 select t.try('client','rewrites the price of an accepted Order', t.u('101'), $$select public.order_update('30000000-0000-0000-0000-000000000001', t.v18_order(100))$$, $$select $1 = 'ok' or (select amount_cents from public.contracts where id = '30000000-0000-0000-0000-000000000001') = 100$$);
 select t.try('client','edits the amount in the table directly', t.u('101'), $$with x as (update public.contracts set amount_cents = 1 where id = '30000000-0000-0000-0000-000000000001' returning 1) select count(*)::text from x$$, $$select $1::int > 0$$);
 select t.try('client','deletes Order history', t.u('106'), $$with x as (delete from public.order_events returning 1) select count(*)::text from x$$, $$select $1::int > 0$$);
@@ -741,7 +743,7 @@ create or replace function t.f_discount_after_funding() returns text language pl
 declare oid uuid; c public.contracts%rowtype; aid uuid; r text;
 begin
   perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(10000));
-  perform t.as_user('107'); perform public.order_accept(oid);
+  perform t.as_user('107'); perform public.order_accept(oid, (select terms_version from public.contracts where id = oid));
   perform t.as_user('207'); aid := public.order_amend(oid, '{"note":"small discount","price_delta_cents":-2000}');   -- allowed: nothing paid yet
   perform t.fund(oid);                                                                                                -- the client pays €100
   perform t.as_user('107'); r := public.order_amendment_decide(aid, true);                                            -- the client accepts the discount afterwards
@@ -753,7 +755,7 @@ create or replace function t.f_tiny_topup(p_when text) returns text language plp
 declare oid uuid; aid uuid; r text;
 begin
   perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(10000));
-  perform t.as_user('107'); perform public.order_accept(oid);
+  perform t.as_user('107'); perform public.order_accept(oid, (select terms_version from public.contracts where id = oid));
   if p_when = 'after' then
     perform t.fund(oid);                                                                                     -- the client pays €100 first
     perform t.as_user('207');
@@ -785,11 +787,11 @@ create or replace function t.f_fee_short(extra int) returns text language plpgsq
 declare oid uuid; plain uuid; lst jsonb;
 begin
   perform t.as_user('207'); plain := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(10000));
-  perform t.as_user('107'); perform public.order_accept(plain); perform t.fund(plain);
+  perform t.as_user('107'); perform public.order_accept(plain, (select terms_version from public.contracts where id = plain)); perform t.fund(plain);
   perform t.set_provider_fee(plain, 0);                                   -- an ordinary paid Order: the fee covered the card cost exactly
   perform t.close_order(plain);                                           -- (done, so the next Order can be made in the same conversation)
   perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(20000));
-  perform t.as_user('107'); perform public.order_accept(oid); perform t.fund(oid);
+  perform t.as_user('107'); perform public.order_accept(oid, (select terms_version from public.contracts where id = oid)); perform t.fund(oid);
   perform t.set_provider_fee(oid, extra);                                 -- the provider took `extra` cents more than the client paid for processing
   perform t.as_user('401');
   select jsonb_agg(to_jsonb(r)) into lst from public.admin_list_contracts() r;
@@ -821,7 +823,7 @@ create or replace function t.f_amend_cap(p_delta int) returns text language plpg
 declare oid uuid; aid uuid;
 begin
   perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(94000000));   -- €940,000
-  perform t.as_user('107'); perform public.order_accept(oid);
+  perform t.as_user('107'); perform public.order_accept(oid, (select terms_version from public.contracts where id = oid));
   perform t.fund(oid);                                                                                                   -- paid
   perform t.as_user('207');
   begin aid := public.order_amend(oid, jsonb_build_object('note', 'more work', 'price_delta_cents', p_delta)); exception when others then return 'refused:' || sqlerrm; end;
@@ -839,7 +841,7 @@ create or replace function t.f_accept_over_cap() returns text language plpgsql a
 declare oid uuid; aid uuid; r text;
 begin
   perform t.as_user('207'); oid := public.order_create('10000000-0000-0000-0000-000000000023', t.v18_order(94000000));
-  perform t.as_user('107'); perform public.order_accept(oid); perform t.fund(oid);
+  perform t.as_user('107'); perform public.order_accept(oid, (select terms_version from public.contracts where id = oid)); perform t.fund(oid);
   aid := t.put_amendment(oid, t.u('207'), 2000000);                                            -- +€20,000, proposed earlier
   perform t.as_user('107'); r := public.order_amendment_decide(aid, true);
   return r || '|' || (select amount_cents from public.contracts where id = oid);
