@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged, repairFirstLines } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairPayoutLines } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -82,6 +82,9 @@ export default async () => {
   let linesAdded = 0;
   try { const r = await repairFirstLines(); linesAdded = r.added; failed.push(...r.failed); }
   catch (e) { failed.push({ id: null, why: "first payment lines: " + e.message }); console.error("first payment lines check failed", e.message); }
+  // payout lines (a milestone's payout, a re-payment after a won chargeback) that could not be saved: added the same way
+  try { const r = await repairPayoutLines(); linesAdded += r.added; failed.push(...r.failed); }
+  catch (e) { failed.push({ id: null, why: "payout lines: " + e.message }); console.error("payout lines check failed", e.message); }
   // payments whose processing-fee surplus has not gone back to the card yet (the provider's fee was not known at the
   // time, or the refund failed); older than a couple of minutes so it never races the payment being recorded
   let feesSettled = 0;
