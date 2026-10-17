@@ -422,7 +422,107 @@ export async function contractEvent(c, ev, sender, extra) {
   await db.insert("messages", { conversation_id: c.conversation_id, sender: sender || c.editor, kind: "contract", body: c.title,
     payload: { contract_id: c.id, event: ev, title: c.title, price: c.price, currency: c.currency, pricing: c.pricing, status: c.status, amount_cents: c.amount_cents, ...(extra || {}) } });
 }
-const fundRows = async (c) => { const rows = await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&status=eq.succeeded&select=*&order=created_at.asc`); return rows || []; };
+// The ledger lines money came into an Order by. Refunds, a chargeback and the card-fee surplus all go by them, so a first
+// payment counted on the Order without its line (its save failed, see saveFirstLine) gets its line from Stripe's record
+// first (repairFirstLine). It is placed first: it was the first payment.
+const savedFundRows = async (c) => (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&status=eq.succeeded&select=*&order=created_at.asc`)) || [];
+const fundRows = async (c) => {
+  const rows = await savedFundRows(c);
+  if (!isPi(c.stripe_payment_intent) || !nz(c.funded_cents) || rows.some(r => r.provider_ref === c.stripe_payment_intent)) return rows;
+  const added = await repairFirstLine(c, rows).catch(e => { console.error("first payment line not added", c.id, e.message); return null; });
+  return added && added.status === "succeeded" ? [added, ...rows] : rows;
+};
+
+// ---- the first payment's ledger line ----
+// Saved right after the payment is counted on the Order. A failed save is looked up and tried again, so a save whose answer
+// was lost is never written twice; one that still cannot be saved is said on the Order (the admin panel shows it under
+// "Needs a hand"), and the line is added later from Stripe's own record of the payment.
+export const FIRST_LINE_NOTE = "ledger line of the first payment not saved: ";
+const FIRST_LINE_WAIT_MS = 2 * 60e3;     // the payment's own save is long over by then (a function runs for seconds)
+async function saveFirstLine(u, line) {
+  for (let i = 0; i < 3; i++) {
+    try { await db.insert("order_payments", line); return true; }
+    catch (e) {
+      console.error("ledger", e.message);
+      let found;
+      try { found = await fundRowOf(u, line.provider_ref); } catch (e2) { console.error("ledger lookup", e2.message); break; }   // no answer at all: never saved again blind
+      if (found) return true;                                                          // it was saved, only the answer was lost
+      if (i < 2) await sleep(250 * (i + 1));
+    }
+  }
+  await db.update("contracts", `id=eq.${u.id}`, { money_error: `${FIRST_LINE_NOTE}${line.provider_ref} (the hourly run adds it from Stripe's record; if this note stays, check by hand)` }).catch(() => {});
+  return false;
+}
+// One writer at a time for a missing line: a claim per payment, which a writer that died leaves for at most 90 s.
+async function claimLine(scope) {
+  const key = `claim:${crypto.randomUUID().slice(0, 12)}`;
+  const take = async () => { try { await db.insert("money_keys", { scope, key }); return key; } catch (e) { if (e.status === 409) return null; throw e; } };
+  const k = await take(); if (k) return k;
+  const row = await db.one("money_keys", `scope=eq.${q(scope)}&select=created_at`);
+  if (!row || !row.created_at || Date.now() - Date.parse(row.created_at) <= LOCK_STALE_MS) return null;
+  await db.remove("money_keys", `scope=eq.${q(scope)}&created_at=lt.${q(new Date(Date.now() - LOCK_STALE_MS).toISOString())}`).catch(() => {});
+  return take();
+}
+// A first payment counted on its Order without its ledger line: the line is added from Stripe's record of that payment.
+// Only once the payment is 2 minutes old (its own save can no longer be on its way), one writer at a time, and only when
+// Stripe's record matches the Order: the payment succeeded, it belongs to this Order and is in its currency, and without
+// the card fee it is exactly what the Order counts as paid in beyond its other lines. Anything else is left as it is: the
+// Order's note stays for a person to check. Returns the line, or null.
+export async function repairFirstLine(c, rows) {
+  const pi = c && c.stripe_payment_intent;
+  if (!isPi(pi) || !nz(c.funded_cents)) return null;
+  if (c.paid_mode && c.paid_mode !== STRIPE_MODE) return null;                       // paid in the other mode: these keys cannot see it
+  const have = await fundRowOf(c, pi); if (have) return have;
+  const at = Date.parse(c.funded_at || "");
+  if (!Number.isFinite(at) || Date.now() - at < FIRST_LINE_WAIT_MS) return null;
+  const scope = `ledger:${pi}`, key = await claimLine(scope);
+  if (!key) return null;                                                                // another writer is on it
+  let keep = false;
+  try {
+    const again = await fundRowOf(c, pi); if (again) return again;
+    const p = await stripe("GET", `/payment_intents/${pi}`, { "expand[]": "latest_charge.balance_transaction" });
+    const ch = p && p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
+    const bt = ch && ch.balance_transaction && typeof ch.balance_transaction === "object" ? ch.balance_transaction : null;
+    const md = (p && p.metadata) || {};
+    const total = p && Number.isInteger(p.amount_received) && p.amount_received > 0 ? p.amount_received : p && p.amount;
+    const fee = Number.isInteger(c.fee_cents) && c.fee_cents >= 0 ? c.fee_cents : null;
+    const amount = Number.isInteger(total) && fee != null ? total - fee : null;
+    const others = (rows || await savedFundRows(c)).filter(r => r.provider_ref !== pi).reduce((a, r) => a + r.amount_cents, 0);
+    const why = !p || p.status !== "succeeded" ? "the payment is not marked succeeded at Stripe"
+      : (md.contract_id && md.contract_id !== c.id) || (md.kind && md.kind !== "fund") ? "the payment belongs to something else"
+      : !ch || String(ch.currency || "").toLowerCase() !== String(c.currency || "EUR").toLowerCase() ? "the currency does not match"
+      : !(amount > 0) || amount !== nz(c.funded_cents) - others ? `Stripe's payment (${total} with a ${fee} card fee) does not match what the Order counts as paid in` : null;
+    if (why) { console.error("first payment line not added", c.id, pi, why); return null; }
+    keep = true;      // a lost answer may still mean the line was saved: the claim then stays (90 s), so nobody writes it twice
+    await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: pi,
+      charge_ref: ch.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: "fund (line added from Stripe's record)" });
+    keep = false;
+    console.error("first payment line added from Stripe's record", c.id, pi, amount);
+    if (String(c.money_error || "").startsWith(FIRST_LINE_NOTE) && String(c.money_error).includes(pi))
+      await db.update("contracts", `id=eq.${c.id}&money_error=eq.${q(c.money_error)}`, { money_error: null }).catch(() => {});
+    return await fundRowOf(c, pi);
+  } finally { if (!keep) await dropKeyIf(scope, key); }
+}
+// The hourly run: Orders paid in the last 30 days, and any older one whose note says its line is missing. The card-fee
+// surplus of a line added here goes back to the card right away.
+export async function repairFirstLines() {
+  const since = q(new Date(Date.now() - 30 * 86400e3).toISOString());          // the 2 minutes are checked by repairFirstLine
+  const recent = (await db.select("contracts", `payment_mode=eq.escrow&funded_at=gt.${since}&select=*&order=funded_at.desc&limit=100`)) || [];
+  const noted = (await db.select("contracts", `money_error=like.${q(FIRST_LINE_NOTE)}*&select=*&limit=20`)) || [];
+  const todo = [...new Map([...recent, ...noted].filter(c => isPi(c.stripe_payment_intent) && nz(c.funded_cents)).map(c => [c.id, c])).values()];
+  if (!todo.length) return { added: 0, failed: [] };
+  const have = new Set(((await db.select("order_payments", `kind=eq.fund&provider_ref=in.(${todo.map(c => q(c.stripe_payment_intent)).join(",")})&select=provider_ref`)) || []).map(r => r.provider_ref));
+  let added = 0; const failed = [];
+  for (const c of todo.filter(c => !have.has(c.stripe_payment_intent))) {
+    try {
+      const row = await repairFirstLine(c);
+      if (!row) { if (String(c.money_error || "").startsWith(FIRST_LINE_NOTE)) failed.push({ id: c.id, why: "first payment line still missing" }); continue; }
+      added++;
+      await settleFee(c, row).catch(e => console.error("fee settle", c.id, e.message));
+    } catch (e) { failed.push({ id: c.id, why: "first payment line: " + e.message }); console.error("first payment line failed for", c.id, e.message); }
+  }
+  return { added, failed };
+}
 
 // ---- idempotency keys that survive retries ----
 // Keep the key after uncertain outcomes, including server errors. Only known rejections permit
@@ -1006,7 +1106,8 @@ async function applyPaidSessionNow(s) {
     try { await db.insert("order_payments", ledgerRow); }
     catch (e) { console.error("ledger", e.message); await db.update("contracts", `id=eq.${id}`, { money_error: `top-up ${s.payment_intent} counted but its ledger line failed — check by hand` }).catch(() => {}); }
   }
-  if (kind === "fund") await ledger(u, { kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind });
+  // the first payment's line: checked like a top-up's, never left out in silence (saveFirstLine)
+  if (kind === "fund") await saveFirstLine(u, { order_id: id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind });
   await orderEvent(u, kind === "fund" ? "funded" : "topped_up", { amount_cents: amount, fee_cents: fee, total_cents: amount + fee }, c.client);
   await contractEvent(u, "funded", c.client, { amount_cents: amount });
   const card = charge && charge.payment_method_details && charge.payment_method_details.card;
