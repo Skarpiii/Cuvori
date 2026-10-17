@@ -347,13 +347,19 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok((await p.evaluate(()=>location.hash))==='#orders','the address is #orders');
   await p.click('#contractsList .c-row'); await p.waitForTimeout(700);
   ok(await p.locator('[data-caction="accept"]').count()===1 && await p.locator('[data-caction="edit"]').count()===1 && (await modal()).includes('Jonas') && (await modal()).includes('accepted'),'the freelancer can accept version 2 or edit it');
+  // the client changes the Order a moment before the freelancer clicks Accept (the open screen still shows version 2)
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts[0]; c.__was=[c.terms_version,c.client_accepted_version,c.amount_cents,c.price]; c.terms_version=3; c.client_accepted_version=3; c.amount_cents=99900; c.price=999; });
+  await p.click('[data-caction="accept"]'); await p.waitForTimeout(900);
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('This Order was changed a moment ago')) && await db(()=>{ const c=window.__mockdb.contracts[0]; return c.status==='proposed' && c.freelancer_accepted_version==null; }) && (await modal()).includes('Version 3') && (await modal()).includes('999'),'a change made a moment before Accept is not accepted unseen: the Order is reloaded with it, to be read again');
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts[0]; [c.terms_version,c.client_accepted_version,c.amount_cents,c.price]=c.__was; delete c.__was; document.querySelector('#modalRoot').innerHTML=''; document.querySelector('#toastWrap').innerHTML=''; });
+  await p.click('#contractsList .c-row'); await p.waitForTimeout(700);
   await p.click('[data-caction="accept"]'); await p.waitForTimeout(900);
   ok(await db(()=>{ const c=window.__mockdb.contracts[0]; return c.status==='accepted' && c.accepted_version===2 && !!c.client_accepted_at && !!c.freelancer_accepted_at; }),'both accepted the same version: the Order is the agreement');
   ok((await modal()).includes('Accepted by both') && await p.locator('[data-caction="edit"]').count()===0 && await p.locator('[data-caction="pdf"]').count()===1,'after acceptance: no more editing, a printable copy is available');
   await p.evaluate(()=>{ window.__printed=0; window.print=()=>{ window.__printed++; }; }); await p.click('[data-caction="pdf"]'); await p.waitForTimeout(300);
   ok(await db(()=>window.__printed===1 && document.querySelector('#printDoc .ct-doc') && document.querySelector('#printDoc .ct-sign.ok') && document.querySelector('#printDoc').textContent.includes('Freelancer')),'the printable copy is the accepted Order, not a second contract');
-  ok(await db(()=>{ const c=window.__mockdb.contracts[0]; return c.terms_doc && Array.isArray(c.terms_doc.clauses) && c.terms_doc.clauses.length>8; }),'the accepted wording is frozen');
-  ok(await db(async()=>{ const c=window.__mockdb.contracts[0]; const before=JSON.stringify(c.terms_doc); await window.__sb.rpc('store_contract_doc',{cid:c.id,doc:{clauses:[{t:'Free work',b:'The freelancer works for free.'}]}}); return JSON.stringify(window.__mockdb.contracts[0].terms_doc)===before; }),'frozen wording cannot be overwritten afterwards');
+  ok(await db(()=>{ const c=window.__mockdb.contracts[0], d=c.terms_doc||{}; return d.kind==='facts' && d.version===2 && d.amount_cents===c.amount_cents && d.title===c.title && !!d.client_name && !!d.freelancer_name && document.querySelectorAll('#printDoc .ct-doc h4').length>8; }),'what was agreed is saved by the backend at acceptance (version 2, the price, both names), and the printable copy is built from it');
+  ok(await db(async()=>{ const c=window.__mockdb.contracts[0]; const before=JSON.stringify(c.terms_doc); const r=await window.__sb.rpc('store_contract_doc',{cid:c.id,doc:{clauses:[{t:'Free work',b:'The freelancer works for free.'}]}}); return !!r.error && JSON.stringify(window.__mockdb.contracts[0].terms_doc)===before; }),'a contract text sent from a browser is refused; the saved copy stays');
   ok((await modal()).includes('Waiting for the client to pay') && (await modal()).includes('Cuvori fee') && (await modal()).includes('€0'),'freelancer sees waiting-for-payment; Cuvori fee €0 is shown');
   // the client pays directly and says so; the freelancer confirms
   await signin('jonas@test.com'); await openOrders();

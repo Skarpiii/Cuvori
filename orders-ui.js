@@ -252,7 +252,7 @@
     const total=oCents(o), funded=oFunded(o), released=o.released_cents||0, held=oHeld(o), topup=Math.max(total-funded,0);
     const actions=[]; let hint="", moneyHtml="", extra="";
     const act=(key,cls,label,fn)=>actions.push([key,cls,label,fn]);
-    const rpc=(a,note,link)=>async()=>{ const { data, error } = await sb.rpc("order_action",{ p_order:o.id, p_action:a, p_note:note||null, p_link:link||null }); if(error||data!=="ok"){ toast(errText(error,data)); return false; } return true; };
+    const rpc=(a,note,link,ver)=>async()=>{ const { data, error } = await sb.rpc("order_action",{ p_order:o.id, p_action:a, p_note:note||null, p_link:link||null, ...(ver===undefined?{}:{p_version:ver}) }); if(!error&&data==="order_changed"){ toast(t("o_acceptChanged")); again(); return false; } if(error||data!=="ok"){ toast(errText(error,data)); return false; } return true; };
     const again=()=>{ openOrder(o.id); refreshOrdersPage(); };
     const releaseWhole=()=>oConfirmMoney(t("o_approve"), fill(t("o_releaseConfirm"),{amt:oMoney(held,cur),name:flName}), fill(t("o_releaseYes"),{amt:oMoney(held,cur)}), async()=>{ await fnCall("stripe-release",{ contract_id:o.id }); closeModal(); toast(t("es_released")); again(); });
     const releaseMs=m=>oConfirmMoney(fill(t("o_msApproveRelease"),{amt:oMoney(m.amount_cents,cur)}), fill(t("o_releaseConfirm"),{amt:oMoney(m.amount_cents,cur),name:flName}), fill(t("o_releaseYes"),{amt:oMoney(m.amount_cents,cur)}), async()=>{ await fnCall("stripe-release",{ contract_id:o.id, milestone_id:m.id }); closeModal(); toast(t("es_released")); again(); });
@@ -263,7 +263,7 @@
       :(o.accepted_at&&!["declined","cancelled"].includes(o.status)?`<div class="o-acc"><span class="ok">✓ ${escapeHtml(fill(t("o_bothAccepted"),{d:fmtDate(o.accepted_at),n:o.accepted_version||o.terms_version||1}))}</span></div>`:"");
     if(o.status==="proposed"){
       const mine=iAmClient?accC:accF;
-      if(!mine) act("accept","primary",t("o_accept"),async()=>{ if(await rpc("accept")()){ await ctFreezeDoc({...o, status:"accepted", accepted_at:new Date().toISOString()}, names).catch(()=>{}); toast(t("c_updated")); again(); } });
+      if(!mine) act("accept","primary",t("o_accept"),async()=>{ if(await rpc("accept",null,null,o.terms_version)()){ toast(t("c_updated")); again(); } });   // the version on screen: a change made since is never accepted unseen
       else hint=fill(t("o_waitingOther"),{name:otherName});
       act("edit","secondary",t("o_edit"),()=>orderForm(o.conversation_id,"u:"+(iAmClient?o.editor:o.client),{...o, __milestones:ms}));
       if(!mine) act("decline","secondary",t("o_decline"),async()=>{ if(await rpc("decline")()){ toast(t("c_updated")); again(); } });
