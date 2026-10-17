@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged, repairFirstLines } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -77,6 +77,11 @@ export default async () => {
     try { if (await repayWon(c)) done.push(c.id); else failed.push({ id: c.id, why: c.money_error }); }
     catch (e) { failed.push({ id: c.id, why: e.message }); console.error("re-payment retry failed for", c.id, e.message); }
   }
+  // first payments counted on their Order whose ledger line could not be saved: added from Stripe's record, and their
+  // card-fee surplus sent back (refunds, a chargeback and the surplus all go by that line)
+  let linesAdded = 0;
+  try { const r = await repairFirstLines(); linesAdded = r.added; failed.push(...r.failed); }
+  catch (e) { failed.push({ id: null, why: "first payment lines: " + e.message }); console.error("first payment lines check failed", e.message); }
   // payments whose processing-fee surplus has not gone back to the card yet (the provider's fee was not known at the
   // time, or the refund failed); older than a couple of minutes so it never races the payment being recorded
   let feesSettled = 0;
@@ -85,5 +90,5 @@ export default async () => {
     try { const c = await db.contract(row.order_id); if (!c) continue; if ((await settleFee(c, row)) !== "pending") feesSettled++; }
     catch (e) { failed.push({ id: row.order_id, why: "fee: " + e.message }); console.error("fee settle retry failed for", row.order_id, e.message); }
   }
-  return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled });
+  return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled, linesAdded });
 };
