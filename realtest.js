@@ -967,11 +967,13 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.goto(url+'#account'); await p.waitForTimeout(300); await p.click('#adminBtn'); await p.waitForTimeout(500);
   // delete Jonas entirely
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(500);
+  await p.evaluate(()=>{ const j=window.__mockdb.profiles.find(x=>x.email==='jonas@test.com'); window.__jonasId=j.id; window.__mockdb.storage_objects.push({bucket:'portfolio',name:j.id+'/video_1.mp4',owner:j.id},{bucket:'portfolio',name:j.id+'/thumb_1.jpg',owner:j.id}); });
   await p.locator('.admin-row').filter({hasText:'jonas@test.com'}).locator('[data-adelete]').click(); await p.waitForTimeout(300);
   ok(await p.locator('#dzGo').isDisabled(),'delete needs typed confirmation');
   await p.fill('#dzWord','DELETE'); await p.click('#dzGo'); await p.waitForTimeout(800);
   ok(await p.evaluate(()=>window.__mockdb.profiles.length===1 && window.__mockdb.reviews.length===0 && window.__mockdb.conversations.length===0),'user + all data deleted');
   ok(await p.locator('.admin-row').count()===1,'admin list refreshed');
+  ok(await p.evaluate(()=>!window.__mockdb.storage_objects.some(o=>o.name.startsWith(window.__jonasId+'/'))),'an admin deleting a user removes their uploaded files first, through the file service');
   // ---------- self delete ----------
   await p.goto(url+'#account'); await p.waitForTimeout(300); await p.click('#signOutBtn'); await p.waitForTimeout(400);
   await p.goto(url+'#create-account'); await p.waitForTimeout(300); await p.click('#authSeg [data-auth="signup"]'); await p.waitForTimeout(200);
@@ -981,8 +983,14 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
   await p.goto(url+'#account'); await p.waitForTimeout(400);
   ok(await p.locator('#deleteAccountBtn').isVisible(),'Delete my account sits on the Account page, no extra click');
+  // a deletion that has to wait (money held for him) changes nothing: the account and its uploaded files stay
+  await p.evaluate(()=>{ const t=window.__mockdb.profiles.find(x=>x.email==='tom@test.com'); window.__tomId=t.id; window.__mockHeldFor=t.id; window.__mockdb.storage_objects.push({bucket:'portfolio',name:t.id+'/video_1.mp4',owner:t.id}); });
+  await p.click('#deleteAccountBtn'); await p.waitForTimeout(300); await p.fill('#dzWord','DELETE'); await p.click('#dzGo'); await p.waitForTimeout(900);
+  ok(await p.evaluate(()=>window.__mockdb.profiles.some(x=>x.email==='tom@test.com') && window.__mockdb.storage_objects.some(o=>o.name.startsWith(window.__tomId+'/'))),'a deletion that has to wait (money held) keeps the account and its uploaded files');
+  await p.evaluate(()=>{ window.__mockHeldFor=null; });
   await p.click('#deleteAccountBtn'); await p.waitForTimeout(300); await p.fill('#dzWord','DELETE'); await p.click('#dzGo'); await p.waitForTimeout(900);
   ok(await p.evaluate(()=>!window.__mockdb.profiles.some(x=>x.email==='tom@test.com')),'self-delete removed the account');
+  ok(await p.evaluate(()=>!window.__mockdb.storage_objects.some(o=>o.name.startsWith(window.__tomId+'/'))),'self-delete removed the uploaded files first, through the file service');
   ok(await p.locator('#signInBtn').isVisible(),'signed out after deleting');
   await p.screenshot({path:'shots/real-final.png'});
 

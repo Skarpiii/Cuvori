@@ -102,7 +102,7 @@
     cfg.professions.forEach(p=>{ p.professional_count=db.services.filter(s=>s.profession_slug===p.slug && s.is_public && (db.editor_profiles.find(e=>e.id===s.profile_id)||{}).is_public && listed(s.profile_id)).length; });
     return cfg;
   }
-  const db = { profiles:[], editor_profiles:[], projects:[], jobs:[], conversations:[], messages:[], reviews:[], invites:[], contracts:[], payout_details:[], user_flags:[], user_identifiers:[], deleted_user_identifiers:[], reports:[], services:[], order_milestones:[], order_amendments:[], order_events:[], order_payments:[], order_reviews:[], fee_schedules:[{id:1,provider:"stripe",region:"EEA",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"Stripe: standard European cards"},{id:2,provider:"stripe",region:"INTL",country:null,customer_kind:"any",method:"any",percent:3.25,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"non-European cards"},{id:3,provider:"stripe",region:"ANY",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"country unknown"}] };
+  const db = { storage_objects:[], profiles:[], editor_profiles:[], projects:[], jobs:[], conversations:[], messages:[], reviews:[], invites:[], contracts:[], payout_details:[], user_flags:[], user_identifiers:[], deleted_user_identifiers:[], reports:[], services:[], order_milestones:[], order_amendments:[], order_events:[], order_payments:[], order_reviews:[], fee_schedules:[{id:1,provider:"stripe",region:"EEA",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"Stripe: standard European cards"},{id:2,provider:"stripe",region:"INTL",country:null,customer_kind:"any",method:"any",percent:3.25,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"non-European cards"},{id:3,provider:"stripe",region:"ANY",country:null,customer_kind:"any",method:"any",percent:1.5,fixed_cents:25,currency:"EUR",payer:"client",active:true,note:"country unknown"}] };
   const rvDays = () => (window.__MOCK_REVIEW_DAYS||14);
   const rvOpens = (c) => new Date(c.completed_at||c.closed_at||c.created_at||Date.now()).getTime();
   const rvDue = (c) => rvOpens(c) + rvDays()*86400000;
@@ -449,11 +449,13 @@
         r.moderation_status=args.p_status; r.moderation_reason=(args.p_reason||"").trim()||null; return {data:"ok"};
       }
       if(fn==="can_review"){ const ed=args.ed; return {data: !!uid() && uid()!==ed && db.profiles.some(p=>p.id===ed&&p.role==="editor") && db.conversations.some(c=>(c.user_a===uid()&&c.user_b===ed)||(c.user_b===uid()&&c.user_a===ed))}; }
-      const held=(t)=>db.contracts.some(k=>(k.editor===t||k.client===t)&&["funded","delivered","disputed","releasing","resolving"].includes(k.status));
-      if(fn==="delete_my_account"){ if(!uid()) return {data:"not_signed_in"}; if(held(uid())) return {data:"active_payments"}; purge(uid()); return {data:"ok"}; }
+      const held=(t)=>window.__mockHeldFor===t || db.contracts.some(k=>(k.editor===t||k.client===t)&&["funded","delivered","disputed","releasing","resolving"].includes(k.status));   // __mockHeldFor: a test says money is held for this person
+      // like the database (v36): the money check first, then the person's portfolio files must be gone (the page removes them through the file service)
+      const filesLeft=(t)=>db.storage_objects.some(o=>o.bucket==="portfolio" && o.name.startsWith(t+"/"));
+      if(fn==="delete_my_account"){ if(!uid()) return {data:"not_signed_in"}; if(held(uid())) return {data:"active_payments"}; if(filesLeft(uid())) return {data:"files_left"}; purge(uid()); return {data:"ok"}; }
       if(fn==="admin_list_users"){ if(!adm()) return {data:[]}; return {data: db.profiles.map(p=>{ const e=db.editor_profiles.find(x=>x.id===p.id); const rv=db.reviews.filter(r=>r.editor===p.id); return {...p, visibility:p.visibility||"public", display_name:e?e.display_name:null, is_public:!!(e&&e.is_public), projects:db.projects.filter(x=>x.owner===p.id).length, reviews:rv.length, avg_stars: rv.length? +(rv.reduce((a,r)=>a+r.stars,0)/rv.length).toFixed(1):null, flags:db.user_flags.filter(f=>f.user_id===p.id).length}; })}; }
       if(fn==="admin_set_ban"){ if(!adm()) return {data:"forbidden"}; if(args.target===uid()) return {data:"cannot_ban_self"}; if(args.ban && String(args.reason||"").trim().length<5) return {data:"bad_reason"}; const p=db.profiles.find(p=>p.id===args.target); p.banned=args.ban; p.ban_reason=args.ban?args.reason:null; return {data:"ok"}; }
-      if(fn==="admin_delete_user"){ if(!adm()) return {data:"forbidden"}; if(args.target===uid()) return {data:"cannot_delete_self"}; if(held(args.target)) return {data:"active_payments"}; purge(args.target); return {data:"ok"}; }
+      if(fn==="admin_delete_user"){ if(!adm()) return {data:"forbidden"}; if(args.target===uid()) return {data:"cannot_delete_self"}; if(held(args.target)) return {data:"active_payments"}; if(filesLeft(args.target)) return {data:"files_left"}; purge(args.target); return {data:"ok"}; }
       if(fn==="admin_set_role"){ if(!adm()) return {data:"forbidden"}; db.profiles.find(p=>p.id===args.target).role=args.new_role; return {data:"ok"}; }
       if(fn==="admin_create_invite"){ if(!adm()) return {error:{message:"forbidden"}}; const code="CUV-"+Math.random().toString(36).slice(2,6).toUpperCase()+"-"+Math.random().toString(36).slice(2,6).toUpperCase(); invites[code]=null; db.invites.push({code_hash:"h"+code,label:code.slice(0,8)+"****",note:args.note,created_at:new Date().toISOString(),used_at:null,used_by:null,code}); return {data:code}; }
       if(fn==="admin_list_invites"){ if(!adm()) return {data:[]}; return {data: db.invites.map(i=>({...i, used_by_name: i.used_by? (db.profiles.find(p=>p.id===i.used_by)||{}).first_name : null}))}; }
@@ -530,7 +532,15 @@
     },
     channel(name){ const ch={ handlers:[], on(ev,cfg,fn){ ch.handlers.push({cfg,fn}); return ch; }, subscribe(){ channels.push(ch); return ch; }, fire(event,table,row){ ch.handlers.forEach(h=>{ if(h.cfg.table===table && h.cfg.event===event){ const f=h.cfg.filter; if(!f || f===`conversation_id=eq.${row.conversation_id}`) h.fn({new:row}); } }); } }; return ch; },
     removeChannel(ch){ const i=channels.indexOf(ch); if(i>=0) channels.splice(i,1); },
-    storage:{ from(){ return { async upload(path){ return {error:null,data:{path}}; }, getPublicUrl(path){ return {data:{publicUrl:"https://storage.test/"+path}}; } }; } }
+    // the file service: files are kept in db.storage_objects; a person removes their own folder's files, an admin anyone's (v36)
+    storage:{ from(bucket){ return {
+      async upload(path){ db.storage_objects.push({ bucket, name:path, owner:uid() }); return {error:null,data:{path}}; },
+      getPublicUrl(path){ return {data:{publicUrl:"https://storage.test/"+path}}; },
+      async list(folder){ return {error:null, data: db.storage_objects.filter(o=>o.bucket===bucket && o.name.startsWith(folder+"/") && !o.name.slice(folder.length+1).includes("/")).map(o=>({ name:o.name.slice(folder.length+1) })) }; },
+      async remove(paths){ const me=uid(), admin=!!(db.profiles.find(p=>p.id===me)||{}).is_admin; const gone=[];
+        db.storage_objects=db.storage_objects.filter(o=>{ if(o.bucket===bucket && paths.includes(o.name) && (o.name.split("/")[0]===me || admin)){ gone.push({ name:o.name }); return false; } return true; });
+        return {error:null, data:gone}; }
+    }; } }
   };
   // tests may pre-load rows: window.__MOCK_SEED = { profiles:[…], editor_profiles:[…], services:[…] }
   if(window.__MOCK_SEED){ for(const [k,v] of Object.entries(window.__MOCK_SEED)){ if(Array.isArray(db[k]) && Array.isArray(v)) db[k].push(...v); } }
