@@ -26,6 +26,7 @@ echo "== error texts";      out=$(node tests/attack-error-text.mjs 2>/dev/null |
 echo "== retry keys";       out=$(node tests/attack-idempotency.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== payment races";    out=$(node tests/attack-payment-race.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== first payment's ledger line"; out=$(node tests/attack-first-payment.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== payout ledger lines"; out=$(node tests/attack-payout-lines.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== payment lock (database)"; out=$(node tests/attack-payment-lock.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== account deletion (database)"; out=$(node tests/attack-account-delete.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== account files (database)"; out=$(node tests/attack-account-files.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
