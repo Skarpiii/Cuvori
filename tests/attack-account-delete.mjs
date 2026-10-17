@@ -105,8 +105,9 @@ const PERSON = (n) => `select 'person: ' || 'sign-in ' || (select count(*) from 
     vuln(pick(r, "answer") !== want, `A4 the client deletes her account while ${label} -> ${pick(r, "answer")} (must be ${want})`);
   }
 }
-{ // A5 an account with nothing agreed: everything goes, as before (no record is left behind)
-  const r = tx(`delete from public.contracts where id = ${O}; ${del("701")} ${PERSON("701")}
+{ // A5 an account with nothing agreed: everything goes, as before (no record is left behind). The finished Order is removed
+  // first, on purpose, the way the owner removes a test Order (v39 refuses it otherwise)
+  const r = tx(`select set_config('cuvori.remove_kept_order', 'yes', true); delete from public.contracts where id = ${O}; ${del("701")} ${PERSON("701")}
      select 'left: ' || (select count(*) from public.contracts where id = ${DRAFT}) || ' draft, ' || (select count(*) from public.conversations where user_a = ${U("701")} or user_b = ${U("701")}) || ' chats'`);
   vuln(pick(r, "answer") !== "ok" || pick(r, "person") !== "sign-in 0, profile gone" || pick(r, "left") !== "0 draft, 0 chats",
     `A5 a client with only a draft Order deletes her account -> ${pick(r, "answer")}; ${pick(r, "person")}; ${pick(r, "left")} (everything must go, profile included)`);
