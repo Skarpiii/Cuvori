@@ -414,8 +414,24 @@ export async function orderEvent(c, ev, data, actor) {
   if (!c) return;
   await db.insert("order_events", { order_id: c.id, actor: actor || null, event: ev, data: data || {} }).catch(e => console.error("event", ev, e.message));
 }
-export async function ledger(c, row) {
-  await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", ...row }).catch(e => console.error("ledger", e.message));
+// A ledger line. A failed save is looked up first (a save whose answer was lost is never written twice) and tried again,
+// three tries in all; without a way to look it up, or with no answer to the look-up, it is never saved again blind.
+// `same` finds this very line. True once the line is there; false when it could not be saved: the caller then says so
+// on the Order, and the hourly run adds it from Stripe's record (repairFirstLines, repairPayoutLines).
+export async function ledger(c, row, same) {
+  const line = { order_id: c.id, provider: "stripe", status: "succeeded", ...row };
+  for (let i = 0; i < 3; i++) {
+    try { await db.insert("order_payments", line); return true; }
+    catch (e) {
+      console.error("ledger", line.kind, e.message);
+      if (!same) return false;
+      let found;
+      try { found = await db.one("order_payments", `order_id=eq.${c.id}&${same}&select=id`); } catch (e2) { console.error("ledger lookup", e2.message); return false; }
+      if (found) return true;                                                          // it was saved, only the answer was lost
+      if (i < 2) await sleep(250 * (i + 1));
+    }
+  }
+  return false;
 }
 export async function contractEvent(c, ev, sender, extra) {
   if (!c) return;
@@ -440,16 +456,7 @@ const fundRows = async (c) => {
 export const FIRST_LINE_NOTE = "ledger line of the first payment not saved: ";
 const FIRST_LINE_WAIT_MS = 2 * 60e3;     // the payment's own save is long over by then (a function runs for seconds)
 async function saveFirstLine(u, line) {
-  for (let i = 0; i < 3; i++) {
-    try { await db.insert("order_payments", line); return true; }
-    catch (e) {
-      console.error("ledger", e.message);
-      let found;
-      try { found = await fundRowOf(u, line.provider_ref); } catch (e2) { console.error("ledger lookup", e2.message); break; }   // no answer at all: never saved again blind
-      if (found) return true;                                                          // it was saved, only the answer was lost
-      if (i < 2) await sleep(250 * (i + 1));
-    }
-  }
+  if (await ledger(u, line, `kind=eq.fund&provider_ref=eq.${q(line.provider_ref)}`)) return true;
   await db.update("contracts", `id=eq.${u.id}`, { money_error: `${FIRST_LINE_NOTE}${line.provider_ref} (the hourly run adds it from Stripe's record; if this note stays, check by hand)` }).catch(() => {});
   return false;
 }
@@ -522,6 +529,76 @@ export async function repairFirstLines() {
     } catch (e) { failed.push({ id: c.id, why: "first payment line: " + e.message }); console.error("first payment line failed for", c.id, e.message); }
   }
   return { added, failed };
+}
+
+// ---- the payout lines: a milestone's payout, and the re-payment after a chargeback Cuvori won ----
+// Written after the money moved and the counters followed. One that could not be saved is said on the Order and added by
+// the hourly run from Stripe's record of the transfer: under the Order's lock, never twice, and nothing is paid or counted
+// again (the counters already include it). A note that starts like this is not a retry marker: no money is on its way.
+export const MS_LINE_NOTE = "ledger line of a milestone payout not saved: ";
+export const REPAY_LINE_NOTE = "ledger line of the re-payment not saved: ";
+export async function repairPayoutLines() {
+  let added = 0; const failed = [];
+  // milestones paid out in the last 30 days, and every paid-out milestone of an Order whose note says a line is missing
+  const since = q(new Date(Date.now() - 30 * 86400e3).toISOString());
+  const recent = (await db.select("order_milestones", `status=eq.released&released_at=gt.${since}&select=*&order=released_at.desc&limit=200`)) || [];
+  const noted = (await db.select("contracts", `money_error=like.${q(MS_LINE_NOTE)}*&select=id&limit=20`)) || [];
+  const ofNoted = noted.length ? ((await db.select("order_milestones", `status=eq.released&order_id=in.(${noted.map(c => c.id).join(",")})&select=*`)) || []) : [];
+  const ms = [...new Map([...recent, ...ofNoted].filter(m => isStripeId(m.transfer_ref)).map(m => [m.id, m])).values()];
+  const have = new Set(ms.length ? ((await db.select("order_payments", `kind=eq.release&milestone_id=in.(${ms.map(m => m.id).join(",")})&select=milestone_id`)) || []).map(r => r.milestone_id) : []);
+  const byOrder = new Map();
+  for (const m of ms.filter(m => !have.has(m.id))) byOrder.set(m.order_id, [...(byOrder.get(m.order_id) || []), m]);
+  for (const id of new Set([...byOrder.keys(), ...noted.map(c => c.id)])) {
+    try { added += await repairMilestoneLines(id, byOrder.get(id) || []); }
+    catch (e) { failed.push({ id, why: "milestone payout line: " + e.message }); console.error("milestone payout line failed for", id, e.message); }
+  }
+  // re-payments after a won chargeback
+  for (const { id } of ((await db.select("contracts", `money_error=like.${q(REPAY_LINE_NOTE)}*&select=id&limit=20`)) || [])) {
+    try { added += await repairRepayLine(id); }
+    catch (e) { failed.push({ id, why: "re-payment line: " + e.message }); console.error("re-payment line failed for", id, e.message); }
+  }
+  return { added, failed };
+}
+async function repairMilestoneLines(id, missing) {
+  const unlock = await lockOrder(id);
+  try {
+    const c = await db.contract(id);
+    if (!c || (c.paid_mode && c.paid_mode !== STRIPE_MODE)) return 0;                // paid in the other mode: these keys cannot see it
+    const lines = () => db.select("order_payments", `order_id=eq.${id}&kind=eq.release&select=milestone_id`).then(r => r || []);
+    const had = await lines();
+    // only once the payout is 2 minutes old: its own save is long over by then
+    const todo = missing.filter(m => !had.some(l => l.milestone_id === m.id) && Date.now() - Date.parse(m.released_at || "") >= FIRST_LINE_WAIT_MS);
+    let added = 0;
+    if (todo.length) {
+      const ts = await transfersOf(c);
+      for (const m of todo) {
+        const t = ts.find(x => x.id === m.transfer_ref);
+        if (!t || t.amount !== m.amount_cents || (t.metadata.milestone_id || "") !== m.id) { console.error("milestone payout line not added", id, m.id, "the transfer at Stripe does not match the milestone"); continue; }
+        if (await ledger(c, { kind: "release", milestone_id: m.id, amount_cents: m.amount_cents, provider_ref: t.id, note: "milestone payout (line added from Stripe's record)" }, `kind=eq.release&milestone_id=eq.${m.id}`)) added++;
+      }
+    }
+    // the note goes once every paid-out milestone of the Order has its line
+    if (String(c.money_error || "").startsWith(MS_LINE_NOTE)) {
+      const out = (await db.select("order_milestones", `order_id=eq.${id}&status=eq.released&select=id`)) || [], now = await lines();
+      if (out.every(m => now.some(l => l.milestone_id === m.id))) await db.update("contracts", `id=eq.${id}&money_error=eq.${q(c.money_error)}`, { money_error: null }).catch(() => {});
+    }
+    return added;
+  } finally { await unlock(); }
+}
+async function repairRepayLine(id) {
+  const unlock = await lockOrder(id);
+  try {
+    const c = await db.contract(id);
+    if (!c || !String(c.money_error || "").startsWith(REPAY_LINE_NOTE) || !c.chargeback_id) return 0;
+    if (c.paid_mode && c.paid_mode !== STRIPE_MODE) return 0;
+    const t = (await transfersOf(c)).find(x => !x.reversed && x.metadata.purpose === `retransfer_${c.chargeback_id}`);
+    if (!t) { console.error("re-payment line not added", id, "no re-payment at Stripe"); return 0; }
+    const same = `kind=eq.release&note=eq.chargeback_won&provider_ref=eq.${q(t.id)}`;
+    const there = await db.one("order_payments", `order_id=eq.${id}&${same}&select=id`);
+    const ok = there || await ledger(c, { kind: "release", amount_cents: t.amount, provider_ref: t.id, note: "chargeback_won" }, same);
+    if (ok) await db.update("contracts", `id=eq.${id}&money_error=eq.${q(c.money_error)}`, { money_error: null }).catch(() => {});
+    return ok && !there ? 1 : 0;
+  } finally { await unlock(); }
 }
 
 // ---- idempotency keys that survive retries ----
@@ -902,7 +979,9 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
     u = rows && rows[0] || null;
   }
   if (!u) { await db.update("contracts", `id=eq.${c.id}`, { money_error: `counter update failed for milestone ${m.id}` }).catch(() => {}); throw new Error("could not record the release"); }
-  await ledger(u, { kind: "release", milestone_id: m.id, amount_cents: m.amount_cents, provider_ref: transferId, note: ev });
+  // the payout's line: checked like the payments' lines, never left out in silence
+  if (!(await ledger(u, { kind: "release", milestone_id: m.id, amount_cents: m.amount_cents, provider_ref: transferId, note: ev }, `kind=eq.release&milestone_id=eq.${m.id}`)))
+    await db.update("contracts", `id=eq.${c.id}`, { money_error: `${MS_LINE_NOTE}${m.id} (transfer ${transferId}; the hourly run adds it from Stripe's record; if this note stays, check by hand)` }).catch(() => {});
   await orderEvent(u, ev === "auto_release" ? "milestone_auto_released" : "milestone_released", { milestone: m.id, title: m.title, amount_cents: m.amount_cents }, actor);
   await contractEvent(u, "milestone_approved", actor || c.client, { amount_cents: m.amount_cents, label: m.title });
   const open = await db.select("order_milestones", `order_id=eq.${c.id}&status=neq.released&select=id`);
@@ -1407,7 +1486,9 @@ async function repayWonLocked(c0) {
   try {
     const t = await releaseToEditor(c, back, null, `retransfer_${c.chargeback_id}`);
     const v = (await db.update("contracts", `id=eq.${c.id}`, { released_cents: nz(c.released_cents) + back, money_error: null }))[0];
-    await ledger(v || c, { kind: "release", amount_cents: back, provider_ref: t, note: "chargeback_won" });
+    // the line is what says the re-payment was made (what is still owed is worked out from it): checked, never left out in silence
+    if (!(await ledger(v || c, { kind: "release", amount_cents: back, provider_ref: t, note: "chargeback_won" }, `kind=eq.release&note=eq.chargeback_won&provider_ref=eq.${q(t)}`)))
+      await db.update("contracts", `id=eq.${c.id}`, { money_error: `${REPAY_LINE_NOTE}${t} (${back} paid again after chargeback ${c.chargeback_id}; the hourly run adds it from Stripe's record; if this note stays, check by hand)` }).catch(() => {});
     return back;
   } catch (e) {
     console.error("re-pay after won chargeback", c.id, e.message);
