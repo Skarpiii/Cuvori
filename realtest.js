@@ -646,9 +646,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   // the Order changed in the moment of clicking (an amendment accepted just then): said in the client's language, and the
   // Order reloads so the client sees the new price before trying again
   await openOrders();
-  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={amount_cents:c.amount_cents,price:c.price}; window.__mockFnFail={"stripe-checkout":[409,{error:"The order changed, reload",code:"order_changed"}]}; document.querySelector('#toastWrap').innerHTML=''; });
+  // (the price changes after the page showed the Order and before the click is answered: changed here before the click,
+  // so the page's reload can't read the Order before the change does)
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.__was={amount_cents:c.amount_cents,price:c.price}; window.__mockFnFail={"stripe-checkout":[409,{error:"The order changed, reload",code:"order_changed"}]}; document.querySelector('#toastWrap').innerHTML='';
+    c.amount_cents+=5000; c.price=c.amount_cents/100; });
   await p.click('[data-caction="fund"]');
-  await p.evaluate(()=>{ const c=window.__mockdb.contracts.at(-1); c.amount_cents+=5000; c.price=c.amount_cents/100; });
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This Order changed a moment ago (for example its price). It has been refreshed — please check it and try again. Nothing was charged.")) && await until(async()=>(await modal()).includes('€250.00')) && await unpaid(),'the Order changed in the moment of clicking Fund: the client is told in plain words, nothing is charged, and the Order reloads with the new price');
   await p.evaluate(()=>{ window.__mockFnFail=null; const c=window.__mockdb.contracts.at(-1); c.amount_cents=c.__was.amount_cents; c.price=c.__was.price; delete c.__was; document.querySelector('[data-lang="lt"]').click(); });
   await openOrders();
@@ -1001,13 +1003,41 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   // an agreed Order nobody paid, closed because the other person deleted the account (v37): the one left sees why
   await p.evaluate(()=>{ const db=window.__mockdb, m=db.profiles.find(x=>x.email==='maya@test.com'), now=new Date().toISOString();
     db.profiles.push({id:'00000000-0000-0000-0000-0000000d0001', role:'editor', first_name:null, email:null, visibility:'hidden', deleted_at:now, created_at:now});
-    db.conversations.push({id:'cv-left-behind', user_a:m.id, user_b:'00000000-0000-0000-0000-0000000d0001', created_at:now, last_message_at:now});
+    const [ua,ub]=[m.id,'00000000-0000-0000-0000-0000000d0001'].sort();   // stored in this order, as the database does
+    db.conversations.push({id:'cv-left-behind', user_a:ua, user_b:ub, created_at:now, last_message_at:now});
     db.contracts.push({id:'c-left-behind', conversation_id:'cv-left-behind', editor:'00000000-0000-0000-0000-0000000d0001', client:m.id, proposed_by:m.id, title:'Left behind', description:'', price:80, currency:'EUR', pricing:'project', revisions:2, status:'cancelled', payment_mode:'escrow', amount_cents:8000, funded_cents:0, released_cents:0, refunded_cents:0, terms:{}, terms_version:1, accepted_version:1, client_accepted_version:1, freelancer_accepted_version:1, accepted_at:now, closed_at:now, created_at:now, changes_used:0, amendments:0});
-    db.order_events.push({id:db.order_events.length+1, order_id:'c-left-behind', actor:null, event:'cancelled', data:{reason:'account_deleted'}, created_at:now}); });
+    db.order_events.push({id:db.order_events.length+1, order_id:'c-left-behind', actor:null, event:'cancelled', data:{reason:'account_deleted'}, created_at:now});
+    // v44: a progress report Maya sent there 10 days ago, and a chat with Lina, who is still here
+    db.messages.push({id:'msg-left-behind', conversation_id:'cv-left-behind', sender:m.id, kind:'report', body:'Cut 1', payload:{title:'Cut 1', message:'First cut', video_url:null, comments:[], status:'pending'}, created_at:new Date(Date.now()-10*86400000).toISOString()});
+    db.profiles.push({id:'00000000-0000-0000-0000-0000000d0002', role:'client', first_name:'Lina', email:'lina@test.com', visibility:'public', created_at:now});
+    const [la,lb]=[m.id,'00000000-0000-0000-0000-0000000d0002'].sort();
+    db.conversations.push({id:'cv-still-here', user_a:la, user_b:lb, created_at:now, last_message_at:now});
+    db.messages.push({id:'msg-from-lina', conversation_id:'cv-still-here', sender:'00000000-0000-0000-0000-0000000d0002', kind:'report', body:'Poster draft', payload:{title:'Poster draft', message:'Have a look', video_url:null, comments:[], status:'pending'}, created_at:now}); });
   await signin('maya@test.com'); await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#orders'); await p.waitForTimeout(900);
   if(await p.locator('.modal.locked [data-avpick="open"]').count()){ await p.click('.modal.locked [data-avpick="open"]'); await p.waitForTimeout(600); }
   await p.locator('#contractsList .c-row', { hasText:'Left behind' }).first().click(); await p.waitForTimeout(700);
   ok((await modal()).includes('Cancelled') && (await modal()).includes('This Order was cancelled because the other person deleted their account. No money was paid into it.') && (await modal()).includes('Cancelled: the other person deleted their account'),'an Order closed because the other person deleted the account says so, on the Order and in its history');
+  // a chat with a person who deleted the account (v44): it says so, has no box to write in, and asks for no update
+  const GONE='u:00000000-0000-0000-0000-0000000d0001', LINA='u:00000000-0000-0000-0000-0000000d0002';
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#account'); await p.waitForTimeout(700);
+  ok(await p.locator(`#recoHost [data-reco-name="${GONE}"]`).count()===0,'no reminder to send a progress update to someone who deleted their account');
+  await p.click(`#contactList [data-person="${GONE}"]`); await p.waitForTimeout(900);
+  const goneWin=p.locator(`.chat-window[data-person="${GONE}"][data-conv="cv-left-behind"]`);
+  ok((await goneWin.textContent()).includes("This person has deleted their account. You can still read this chat and its Orders, but you can't send new messages.") && !(await goneWin.locator('.chat-input').isVisible()) && (await goneWin.textContent()).includes('Cut 1'),'a chat with someone who deleted their account says so, keeps what is in it, and has no box to write in');
+  await goneWin.locator('.close').click(); await p.waitForTimeout(300);
+  // Lina deletes her account while Maya has their chat open: Maya's message is refused, said so, and kept in the box
+  await p.click(`#contactList [data-person="${LINA}"]`); await p.waitForTimeout(900);
+  const linaWin=p.locator(`.chat-window[data-person="${LINA}"][data-conv="cv-still-here"]`);
+  ok(await linaWin.locator('.chat-input input').isVisible() && !(await linaWin.textContent()).includes('has deleted their account'),'a chat with someone still here has its box to write in');
+  await p.evaluate(()=>{ const x=window.__mockdb.profiles.find(q=>q.id==='00000000-0000-0000-0000-0000000d0002'); x.deleted_at=new Date().toISOString(); x.first_name=null; document.querySelector('#toastWrap').innerHTML=''; });
+  await linaWin.locator('.chat-input input').fill('Are you still there?'); await linaWin.locator('.send-msg').click();
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This person can't be contacted right now.")) && await linaWin.locator('.chat-input input').inputValue()==='Are you still there?' && await db(()=>!window.__mockdb.messages.some(m=>m.conversation_id==='cv-still-here'&&m.kind!=='report')),'a message to someone who deleted their account a moment ago is refused, said so, and stays in the box');
+  // ...and so is asking her for changes on the progress report she sent before
+  await p.evaluate(()=>document.querySelector('#toastWrap').innerHTML=''); await linaWin.locator('.report-card').click(); await p.waitForTimeout(700);
+  await p.click('#requestChanges'); await p.waitForTimeout(400); await p.fill('#changesText','Bigger title please'); await p.click('#sendChanges');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes("This person can't be contacted right now.")) && !(await p.textContent('#toastWrap')).includes('Change request sent') && await p.locator('#changesText').count()===1 && await db(()=>!window.__mockdb.messages.some(m=>m.conversation_id==='cv-still-here'&&m.kind==='change_request')),'a change request to someone who deleted their account is refused and said so, not reported as sent');
+  await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML='');
+  await linaWin.locator('.close').click(); await p.waitForTimeout(300);
   await p.screenshot({path:'shots/real-final.png'});
 
   // ---------- rules, privacy notice, reports ----------
