@@ -237,7 +237,7 @@
   // ---------- the Order screen ----------
   function oEventLine(e, o){
     const d=e.data||{}; const amt=oMoney(d.amount_cents??d.editor_cents??d.refund_cents??d.price_cents??0,o.currency);
-    const key="o_ev_"+e.event; const txt=fill(t(key),{amt, label:d.title||d.label||"", n:d.version||d.n||"", note:d.note||""});
+    const key="o_ev_"+e.event+(e.event==="cancelled"&&d.reason==="account_deleted"?"_deleted":"");   /* v37: closed because the other person deleted the account */ const txt=fill(t(key),{amt, label:d.title||d.label||"", n:d.version||d.n||"", note:d.note||""});
     return `<div class="o-ev"><span class="muted small">${fmtDate(e.at)}</span> <span>${escapeHtml(txt)}</span>${d.note?`<div class="muted small" style="white-space:pre-wrap">${escapeHtml(String(d.note).slice(0,300))}</div>`:""}</div>`;
   }
   async function openOrder(id){
@@ -349,6 +349,8 @@
     if(accepted.length) amHtml+=`<div class="muted small" style="margin-top:8px">${accepted.map((a,i)=>`✓ ${escapeHtml(fill(t("o_amendAccepted"),{n:i+1,d:fmtDate(a.decided_at)}))} — ${escapeHtml(a.note||amLine(a))}`).join("<br>")}</div>`;
     if(!open && ["accepted","paid_marked","paid","funded","delivered"].includes(o.status)) act("amend","secondary",t("o_amend"),()=>amendForm(o, ms));
 
+    // an agreed Order nobody paid, closed because the other person deleted the account (v37): say why
+    if(o.status==="cancelled"&&evs.some(e=>e.event==="cancelled"&&e.data&&e.data.reason==="account_deleted")) hint=escapeHtml(t("o_cancelledDeleted"));
     // --- the terms as accepted, and the printable copy ---
     const termsHtml=`<details class="ct-details" style="margin-top:12px"><summary><strong>${t("o_stdTerms")}</strong> <span class="muted small">· ${escapeHtml(fill(t("ct_version"),{n:o.terms_version||1}))} · ${escapeHtml(countryName(ctLawOf(o),state.language))}</span></summary>${ctDocHtml(o,names)}</details>`;
     if(!["proposed","declined","cancelled"].includes(o.status)) act("pdf","secondary",t("o_pdf"),()=>ctPrint(o,names));

@@ -998,6 +998,16 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(await p.evaluate(()=>!window.__mockdb.profiles.some(x=>x.email==='tom@test.com')),'self-delete removed the account');
   ok(await p.evaluate(()=>!window.__mockdb.storage_objects.some(o=>o.name.startsWith(window.__tomId+'/'))),'self-delete removed the uploaded files first, through the file service');
   ok(await p.locator('#signInBtn').isVisible(),'signed out after deleting');
+  // an agreed Order nobody paid, closed because the other person deleted the account (v37): the one left sees why
+  await p.evaluate(()=>{ const db=window.__mockdb, m=db.profiles.find(x=>x.email==='maya@test.com'), now=new Date().toISOString();
+    db.profiles.push({id:'00000000-0000-0000-0000-0000000d0001', role:'editor', first_name:null, email:null, visibility:'hidden', deleted_at:now, created_at:now});
+    db.conversations.push({id:'cv-left-behind', user_a:m.id, user_b:'00000000-0000-0000-0000-0000000d0001', created_at:now, last_message_at:now});
+    db.contracts.push({id:'c-left-behind', conversation_id:'cv-left-behind', editor:'00000000-0000-0000-0000-0000000d0001', client:m.id, proposed_by:m.id, title:'Left behind', description:'', price:80, currency:'EUR', pricing:'project', revisions:2, status:'cancelled', payment_mode:'escrow', amount_cents:8000, funded_cents:0, released_cents:0, refunded_cents:0, terms:{}, terms_version:1, accepted_version:1, client_accepted_version:1, freelancer_accepted_version:1, accepted_at:now, closed_at:now, created_at:now, changes_used:0, amendments:0});
+    db.order_events.push({id:db.order_events.length+1, order_id:'c-left-behind', actor:null, event:'cancelled', data:{reason:'account_deleted'}, created_at:now}); });
+  await signin('maya@test.com'); await p.evaluate(()=>document.querySelector('#modalRoot').innerHTML=''); await p.goto(url+'#orders'); await p.waitForTimeout(900);
+  if(await p.locator('.modal.locked [data-avpick="open"]').count()){ await p.click('.modal.locked [data-avpick="open"]'); await p.waitForTimeout(600); }
+  await p.locator('#contractsList .c-row', { hasText:'Left behind' }).first().click(); await p.waitForTimeout(700);
+  ok((await modal()).includes('Cancelled') && (await modal()).includes('This Order was cancelled because the other person deleted their account. No money was paid into it.') && (await modal()).includes('Cancelled: the other person deleted their account'),'an Order closed because the other person deleted the account says so, on the Order and in its history');
   await p.screenshot({path:'shots/real-final.png'});
 
   // ---------- rules, privacy notice, reports ----------
