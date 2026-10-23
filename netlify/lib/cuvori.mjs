@@ -40,6 +40,7 @@ export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
 export const MAX_PAYMENT_CENTS = 99999999;
 export const MIN_CENTS = 100, MAX_CENTS = 95000000, MIN_TOPUP_CENTS = 50;
 export const FEE_SANITY_PERCENT = 10, FEE_SANITY_FIXED_CENTS = 100;   // a quoted fee above 10% + €1 can only be a slip in the fee table (quoteFor)
+export const CONNECT_SANITY_PERCENT = 2, CONNECT_SANITY_FIXED_CENTS = 500;   // a payout fee above 2% + €5 can only be a slip in the fee table's "connect" row (quoteFor, v50)
 export const HOLDING = ["funded", "delivered", "disputed"];
 const holdsFunds = (c) => !!c && [...HOLDING, "releasing", "resolving"].includes(c.status);
 
@@ -384,12 +385,23 @@ export async function limitTries(me, kind, perMinute = 10, perDay = 50) {
 }
 
 // ---- the price the client pays: from the fee table in the database, never a number in code ----
-export async function quoteFor(priceCents, currency = "EUR", country = null, customer = "any", method = "any") {
+export async function quoteFor(priceCents, currency = "EUR", country = null, customer = "any", method = "any", topup = false) {
   // a whole Order starts at €1 (MIN_CENTS, checked by the caller); a top-up for an agreed amendment may be smaller.
   // €0.50 is the smallest card payment Stripe takes in euros, so nothing below it can ever be paid.
   if (!Number.isSafeInteger(priceCents) || priceCents < MIN_TOPUP_CENTS || priceCents > MAX_CENTS) throw fail("Order amount is outside the allowed range.", 400, "amount_out_of_range");
-  const qte = await db.rpc("order_quote", { p_price_cents: priceCents, p_currency: currency, p_country: country, p_customer: customer, p_method: method });
+  const qte = await db.rpc("order_quote", { p_price_cents: priceCents, p_currency: currency, p_country: country, p_customer: customer, p_method: method, p_topup: !!topup });
   if (!qte || !Number.isSafeInteger(qte.total_cents) || qte.total_cents < priceCents) throw new Error("bad quote");
+  // Stripe's payout fees (schema v50): their own line, never part of the card fee. A database from before v50 has no such
+  // line (0). The three lines must add up to the total the client is shown; nothing else is ever charged.
+  const connect = qte.connect_cents == null ? 0 : qte.connect_cents;
+  if (!Number.isSafeInteger(connect) || connect < 0 || !Number.isSafeInteger(qte.processing_cents) || qte.total_cents !== priceCents + qte.processing_cents + connect) throw new Error("bad quote");
+  qte.connect_cents = connect;
+  // A slip in the payout-fee row (25 instead of 0.25, €21 instead of €2.10) must never reach a card either: far above
+  // Stripe's Connect rates, with room for the fixed part on the smallest payments.
+  if (connect > Math.ceil(priceCents * CONNECT_SANITY_PERCENT / 100) + CONNECT_SANITY_FIXED_CENTS) {
+    console.error("fee table: the payout fee is far above Stripe's Connect rates — payments paused", JSON.stringify({ connect_schedule_id: qte.connect_schedule_id, connect_percent: qte.connect_percent, connect_fixed_cents: qte.connect_fixed_cents, price_cents: priceCents, connect_cents: connect }));
+    throw fail(`Payments through Cuvori are paused: the fee table's payout-fee row charges ${qte.connect_percent}% + ${qte.connect_fixed_cents} cents, which is far above Stripe's Connect rates. Correct it under Payment costs in the admin panel.`, 503, PAUSED);
+  }
   // Cuvori never pays the card cost: the client pays it on top of the price. A quote in which the client pays no fee
   // (no active fee row matched, the row is set to "payer = platform", or its rate is zero) would leave the provider's
   // whole fee to Cuvori, so no payment is taken until the fee table is fixed.
@@ -493,15 +505,16 @@ export async function repairFirstLine(c, rows) {
     const md = (p && p.metadata) || {};
     const total = p && Number.isInteger(p.amount_received) && p.amount_received > 0 ? p.amount_received : p && p.amount;
     const fee = Number.isInteger(c.fee_cents) && c.fee_cents >= 0 ? c.fee_cents : null;
-    const amount = Number.isInteger(total) && fee != null ? total - fee : null;
+    const connect = Number.isInteger(c.connect_cents) && c.connect_cents >= 0 ? c.connect_cents : 0;   // Stripe's payout fees (v50); none before it
+    const amount = Number.isInteger(total) && fee != null ? total - fee - connect : null;
     const others = (rows || await savedFundRows(c)).filter(r => r.provider_ref !== pi).reduce((a, r) => a + r.amount_cents, 0);
     const why = !p || p.status !== "succeeded" ? "the payment is not marked succeeded at Stripe"
       : (md.contract_id && md.contract_id !== c.id) || (md.kind && md.kind !== "fund") ? "the payment belongs to something else"
       : !ch || String(ch.currency || "").toLowerCase() !== String(c.currency || "EUR").toLowerCase() ? "the currency does not match"
-      : !(amount > 0) || amount !== nz(c.funded_cents) - others ? `Stripe's payment (${total} with a ${fee} card fee) does not match what the Order counts as paid in` : null;
+      : !(amount > 0) || amount !== nz(c.funded_cents) - others ? `Stripe's payment (${total} with a ${fee} card fee and a ${connect} payout fee) does not match what the Order counts as paid in` : null;
     if (why) { console.error("first payment line not added", c.id, pi, why); return null; }
     keep = true;      // a lost answer may still mean the line was saved: the claim then stays (90 s), so nobody writes it twice
-    await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: pi,
+    await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, connect_cents: connect, provider_ref: pi,
       charge_ref: ch.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: "fund (line added from Stripe's record)" });
     keep = false;
     console.error("first payment line added from Stripe's record", c.id, pi, amount);
@@ -1023,8 +1036,8 @@ async function holdRefusal(s) {
   if (c.payment_mode !== "escrow") return "not a protected-payment order";
   if (String(s.currency || "").toLowerCase() !== String(c.currency || "EUR").toLowerCase()) return "currency changed";
   const md = s.metadata || {}, kind = md.kind === "topup" ? "topup" : "fund";
-  const amount = Number(md.amount_cents), fee = Number(md.fee_cents);
-  if (!Number.isInteger(amount) || amount <= 0 || !Number.isInteger(fee) || fee < 0 || s.amount_total !== amount + fee) return "amounts do not match";
+  const amount = Number(md.amount_cents), fee = Number(md.fee_cents), connect = md.connect_cents != null ? Number(md.connect_cents) : 0;   // connect: Stripe's payout fees (v50)
+  if (!Number.isInteger(amount) || amount <= 0 || !Number.isInteger(fee) || fee < 0 || !Number.isInteger(connect) || connect < 0 || s.amount_total !== amount + fee + connect) return "amounts do not match";
   if (chargebackOpen(c)) return "a chargeback is open";
   if (c.paid_mode && c.paid_mode !== STRIPE_MODE) return `the order was paid in ${c.paid_mode} mode`;
   if (await isBanned(c.editor)) return "the freelancer cannot receive payments";
@@ -1106,6 +1119,10 @@ async function applyPaidSessionNow(s) {
   const kind = md.kind === "topup" ? "topup" : "fund";
   // sessions made before v18 carry no amounts in their metadata: the Order row has them
   const amount = md.amount_cents != null ? Number(md.amount_cents) : centsOf(c), fee = md.fee_cents != null ? Number(md.fee_cents) : (Number.isInteger(c.fee_cents) ? c.fee_cents : 0);
+  // Stripe's payout fees (v50): their own line on the page, kept in their own field, never part of the card fee (so the
+  // card-fee settlement never touches them). A page from before v50 has none (0).
+  const connect = md.connect_cents != null ? Number(md.connect_cents) : 0;
+  if (!Number.isInteger(connect) || connect < 0) return refundOrphan(s, `payout fee on the page is not a number: ${md.connect_cents}`);
   const expected = kind === "fund" ? centsOf(c) : Math.max((centsOf(c) || 0) - nz(c.funded_cents), 0);
   const scope = `apply:${s.payment_intent}`;
   let amountOk = Number.isInteger(amount) && amount > 0 && (kind === "fund" ? amount === expected : amount <= expected);   // a top-up may be part of what is owed
@@ -1117,8 +1134,8 @@ async function applyPaidSessionNow(s) {
     const gap = nz(c.funded_cents) - (await fundRows(c)).reduce((a, f) => a + f.amount_cents, 0);
     if (claim && gap >= amount) amountOk = true;
   }
-  if (!amountOk || s.amount_total !== amount + fee || String(s.currency).toLowerCase() !== String(c.currency || "EUR").toLowerCase() || c.payment_mode !== "escrow")
-    return refundOrphan(s, `amount/currency mismatch ${s.amount_total} ${s.currency} vs ${expected}+${fee}`);
+  if (!amountOk || s.amount_total !== amount + fee + connect || String(s.currency).toLowerCase() !== String(c.currency || "EUR").toLowerCase() || c.payment_mode !== "escrow")
+    return refundOrphan(s, `amount/currency mismatch ${s.amount_total} ${s.currency} vs ${expected}+${fee}+${connect}`);
   let charge = null;
   try { const pi = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge.balance_transaction" }); charge = pi.latest_charge; } catch (e) { console.error("pi fetch", e.message); }
   const bt = charge && charge.balance_transaction && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
@@ -1127,11 +1144,11 @@ async function applyPaidSessionNow(s) {
     // the breakdown the client saw on this very page (its metadata, since v34 of the functions): saved only when it describes
     // this payment's amounts; a page from before, or a damaged value, leaves the Order's record as it is
     let quote;
-    try { const qd = md.quote ? JSON.parse(md.quote) : null; if (qd && typeof qd === "object" && !Array.isArray(qd) && qd.price_cents === amount && qd.processing_cents === fee) quote = qd; } catch {}
+    try { const qd = md.quote ? JSON.parse(md.quote) : null; if (qd && typeof qd === "object" && !Array.isArray(qd) && qd.price_cents === amount && qd.processing_cents === fee && (qd.connect_cents == null ? 0 : qd.connect_cents) === connect) quote = qd; } catch {}
     // recorded only while the Order still waits for it at this very price: the price can no longer change while this step
     // runs (schema v34 makes a change wait for it), and if it ever did, the payment is never recorded as paying a
     // different price (it would leave more paid in than the price, or less)
-    try { u = ((await db.update("contracts", `id=eq.${id}&status=eq.accepted&amount_cents=eq.${amount}`, { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, paid_mode: STRIPE_MODE, ...(quote ? { quote } : {}) })) || [])[0] || null; }
+    try { u = ((await db.update("contracts", `id=eq.${id}&status=eq.accepted&amount_cents=eq.${amount}`, { status: "funded", funded_at: new Date().toISOString(), funded_cents: amount, stripe_payment_intent: s.payment_intent, stripe_checkout_id: s.id, stripe_charge_id: charge && charge.id || null, fee_cents: fee, connect_cents: connect, paid_mode: STRIPE_MODE, ...(quote ? { quote } : {}) })) || [])[0] || null; }
     catch (e) { if (MODE_REFUSED.test(String(e && e.message))) return refundOrphan(s, "test and live were switched while this payment came in"); throw e; }
     if (!u) {
       const now = await db.contract(id);
@@ -1143,7 +1160,7 @@ async function applyPaidSessionNow(s) {
     // A top-up counts once. The same paid session is delivered twice at the same moment as a rule (Stripe's
     // webhook and the page's own check): the first to claim the payment records it, the other waits for that
     // record. Nothing here treats a payment as unwanted while the other delivery may be recording it.
-    const ledgerRow = { order_id: id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind };
+    const ledgerRow = { order_id: id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, connect_cents: connect, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind };
     const topupRow = () => db.one("order_payments", `order_id=eq.${id}&provider_ref=eq.${q(s.payment_intent)}&select=id`);
     if (!(await claimScope(scope))) {
       for (let i = 0; i < 15; i++) { if (await topupRow()) return "already"; await sleep(400); }
@@ -1186,8 +1203,8 @@ async function applyPaidSessionNow(s) {
     catch (e) { console.error("ledger", e.message); await db.update("contracts", `id=eq.${id}`, { money_error: `top-up ${s.payment_intent} counted but its ledger line failed — check by hand` }).catch(() => {}); }
   }
   // the first payment's line: checked like a top-up's, never left out in silence (saveFirstLine)
-  if (kind === "fund") await saveFirstLine(u, { order_id: id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind });
-  await orderEvent(u, kind === "fund" ? "funded" : "topped_up", { amount_cents: amount, fee_cents: fee, total_cents: amount + fee }, c.client);
+  if (kind === "fund") await saveFirstLine(u, { order_id: id, provider: "stripe", status: "succeeded", kind: "fund", amount_cents: amount, fee_cents: fee, connect_cents: connect, provider_ref: s.payment_intent, charge_ref: charge && charge.id || null, provider_fee_cents: bt && Number.isInteger(bt.fee) ? bt.fee : null, note: kind });
+  await orderEvent(u, kind === "fund" ? "funded" : "topped_up", { amount_cents: amount, fee_cents: fee, connect_cents: connect, total_cents: amount + fee + connect }, c.client);
   await contractEvent(u, "funded", c.client, { amount_cents: amount });
   const card = charge && charge.payment_method_details && charge.payment_method_details.card;
   if (card && card.fingerprint) await db.rpc("record_card", { uid: c.client, fingerprint: card.fingerprint, label: `${card.brand || "card"} ••${card.last4 || "????"}` }).catch(e => console.error("card", e.message));

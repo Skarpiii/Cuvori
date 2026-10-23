@@ -44,17 +44,18 @@
   const O_QUOTES={};
   async function orderQuote(cents){
     const key=String(cents); if(O_QUOTES[key]) return O_QUOTES[key];
-    if(!REAL) return { price_cents:cents, processing_cents:0, cuvori_cents:0, total_cents:cents };
+    if(!REAL) return { price_cents:cents, processing_cents:0, connect_cents:0, cuvori_cents:0, total_cents:cents };
     const { data } = await sb.rpc("order_quote",{ p_price_cents:cents, p_currency:"EUR", p_country:null, p_customer:"any", p_method:"card" });
-    const q=data&&Number.isInteger(data.total_cents)?data:{ price_cents:cents, processing_cents:0, cuvori_cents:0, total_cents:cents };
+    const q=data&&Number.isInteger(data.total_cents)?data:{ price_cents:cents, processing_cents:0, connect_cents:0, cuvori_cents:0, total_cents:cents };
     O_QUOTES[key]=q; return q;
   }
   function quoteHtml(q, cur){
     return `<div class="o-quote"><div><span>${t("o_priceLine")}</span><strong>${oMoney2(q.price_cents,cur)}</strong></div>
       <div><span>${t("o_processing")} <span class="muted small" title="${escapeHtml(t("o_processingHint"))}">ⓘ</span></span><strong>${oMoney2(q.processing_cents,cur)}</strong></div>
+      ${q.connect_cents>0?`<div><span>${t("o_connect")} <span class="muted small" title="${escapeHtml(t("o_connectHint"))}">ⓘ</span></span><strong>${oMoney2(q.connect_cents,cur)}</strong></div>`:""}
       <div><span>${t("o_cuvoriFee")}</span><strong>${oMoney2(0,cur)}</strong></div>
       <div class="o-total"><span>${t("o_total")}</span><strong>${oMoney2(q.total_cents,cur)}</strong></div>
-      <div class="muted small" style="grid-column:1/-1">${escapeHtml(t("o_processingHint"))}</div></div>`;
+      <div class="muted small" style="grid-column:1/-1">${escapeHtml(t("o_processingHint"))}</div>${q.connect_cents>0?`<div class="muted small" style="grid-column:1/-1">${escapeHtml(t("o_connectHint"))}</div>`:""}</div>`;
   }
 
   async function activeOrderFor(conv){

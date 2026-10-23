@@ -1,26 +1,35 @@
-// POST { contract_id, lang } (client) → { url, amount, fee, total }. Funds an accepted Order, or tops up an
+// POST { contract_id, lang } (client) → { url, amount, fee, connect, total }. Funds an accepted Order, or tops up an
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
-// page before clicking (order_quote), and the Stripe page shows the same two lines.
+// page before clicking (order_quote), and the Stripe page shows the same three lines: the price, the card fee and
+// (since schema v50) Stripe's payout fee.
 import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession, blankNote } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
-// Stripe's own page in the same language (Stripe has no Ukrainian page, so there it follows the browser).
+// Stripe's own page in the same language (Stripe has no Ukrainian page, so there it follows the browser). The payout-fee line's
+// text is the same as the page's (o_connectHint in index.html): no rates in it, since the admin can change the fee row.
 const STRIPE_TEXT = {
   en: { locale: "en", order: "Order: ", increase: "Agreed price increase — ", untitled: "Cuvori order", fee: "Card fee",
-        feeDesc: "Charged at a rate that covers even the most expensive cards. Anything above what your card really costs goes back to your card automatically after payment. Cuvori keeps none of it." },
+        feeDesc: "Charged at a rate that covers even the most expensive cards. Anything above what your card really costs goes back to your card automatically after payment. Cuvori keeps none of it.",
+        connect: "Payout fee (Stripe)", connectDesc: "The payment provider bills Cuvori for paying the freelancer out (a monthly fee per freelancer account plus a small charge on each payout); this line covers it at the provider's rates. If the Order is cancelled, the Order price goes back to you; this fee, like the card fee, does not." },
   de: { locale: "de", order: "Auftrag: ", increase: "Vereinbarte Preiserhöhung — ", untitled: "Cuvori-Auftrag", fee: "Kartengebühr",
-        feeDesc: "Berechnet zu einem Satz, der auch die teuersten Karten abdeckt. Alles, was über die tatsächlichen Kosten deiner Karte hinausgeht, geht nach der Zahlung automatisch auf deine Karte zurück. Cuvori behält nichts davon." },
+        feeDesc: "Berechnet zu einem Satz, der auch die teuersten Karten abdeckt. Alles, was über die tatsächlichen Kosten deiner Karte hinausgeht, geht nach der Zahlung automatisch auf deine Karte zurück. Cuvori behält nichts davon.",
+        connect: "Auszahlungsgebühr (Stripe)", connectDesc: "Der Zahlungsdienstleister stellt Cuvori die Auszahlung an den Freelancer in Rechnung (eine monatliche Gebühr pro Freelancer-Konto plus ein kleiner Betrag je Auszahlung); diese Zeile deckt das zu den Sätzen des Anbieters. Wird der Auftrag abgebrochen, geht der Auftragspreis an dich zurück; diese Gebühr, wie die Kartengebühr, nicht." },
   lt: { locale: "lt", order: "Užsakymas: ", increase: "Sutartas kainos padidinimas — ", untitled: "Cuvori užsakymas", fee: "Kortelės mokestis",
-        feeDesc: "Taikomas tarifas, kuris padengia net brangiausias korteles. Viskas, kas viršija tikrąją jūsų kortelės kainą, po mokėjimo automatiškai grąžinama į jūsų kortelę. Cuvori iš to nieko nepasilieka." },
+        feeDesc: "Taikomas tarifas, kuris padengia net brangiausias korteles. Viskas, kas viršija tikrąją jūsų kortelės kainą, po mokėjimo automatiškai grąžinama į jūsų kortelę. Cuvori iš to nieko nepasilieka.",
+        connect: "Išmokėjimo mokestis (Stripe)", connectDesc: "Mokėjimų paslaugų teikėjas ima iš Cuvori už išmokėjimą specialistui (mėnesinį mokestį už specialisto paskyrą ir nedidelę sumą už kiekvieną išmokėjimą); ši eilutė tai padengia pagal teikėjo tarifus. Jei užsakymas atšaukiamas, užsakymo kaina jums grąžinama; šis mokestis, kaip ir kortelės mokestis, negrąžinamas." },
   pl: { locale: "pl", order: "Zlecenie: ", increase: "Uzgodniona podwyżka ceny — ", untitled: "Zlecenie Cuvori", fee: "Opłata za kartę",
-        feeDesc: "Naliczana według stawki pokrywającej nawet najdroższe karty. Wszystko ponad rzeczywisty koszt Twojej karty wraca automatycznie na Twoją kartę po płatności. Cuvori nic z tego nie zatrzymuje." },
+        feeDesc: "Naliczana według stawki pokrywającej nawet najdroższe karty. Wszystko ponad rzeczywisty koszt Twojej karty wraca automatycznie na Twoją kartę po płatności. Cuvori nic z tego nie zatrzymuje.",
+        connect: "Opłata za wypłatę (Stripe)", connectDesc: "Dostawca płatności obciąża Cuvori za wypłatę dla freelancera (miesięczna opłata za konto freelancera plus niewielka kwota za każdą wypłatę); ta pozycja pokrywa to według stawek dostawcy. Jeśli zlecenie zostanie anulowane, cena zlecenia wraca do Ciebie; ta opłata, jak opłata za kartę, nie." },
   ru: { locale: "ru", order: "Заказ: ", increase: "Согласованное повышение цены — ", untitled: "Заказ Cuvori", fee: "Комиссия за карту",
-        feeDesc: "Взимается по ставке, покрывающей даже самые дорогие карты. Всё сверх реальной стоимости вашей карты автоматически возвращается на вашу карту после оплаты. Cuvori ничего из этого не оставляет себе." },
+        feeDesc: "Взимается по ставке, покрывающей даже самые дорогие карты. Всё сверх реальной стоимости вашей карты автоматически возвращается на вашу карту после оплаты. Cuvori ничего из этого не оставляет себе.",
+        connect: "Комиссия за выплату (Stripe)", connectDesc: "Платёжный провайдер берёт с Cuvori плату за выплату фрилансеру (ежемесячная плата за аккаунт фрилансера и небольшая сумма за каждую выплату); эта строка покрывает её по тарифам провайдера. Если заказ отменён, цена заказа возвращается вам; эта комиссия, как и комиссия за карту, не возвращается." },
   uk: { locale: null, order: "Замовлення: ", increase: "Погоджене підвищення ціни — ", untitled: "Замовлення Cuvori", fee: "Комісія за картку",
-        feeDesc: "Стягується за ставкою, що покриває навіть найдорожчі картки. Усе понад реальну вартість вашої картки автоматично повертається на вашу картку після оплати. Cuvori нічого з цього не залишає собі." },
+        feeDesc: "Стягується за ставкою, що покриває навіть найдорожчі картки. Усе понад реальну вартість вашої картки автоматично повертається на вашу картку після оплати. Cuvori нічого з цього не залишає собі.",
+        connect: "Комісія за виплату (Stripe)", connectDesc: "Платіжний провайдер бере з Cuvori плату за виплату фрилансеру (щомісячна плата за акаунт фрилансера та невелика сума за кожну виплату); цей рядок покриває її за тарифами провайдера. Якщо замовлення скасовано, ціна замовлення повертається вам; ця комісія, як і комісія за картку, не повертається." },
   es: { locale: "es", order: "Pedido: ", increase: "Aumento de precio acordado — ", untitled: "Pedido de Cuvori", fee: "Comisión de tarjeta",
-        feeDesc: "Se cobra con una tarifa que cubre incluso las tarjetas más caras. Todo lo que supere lo que realmente cuesta tu tarjeta vuelve a tu tarjeta automáticamente tras el pago. Cuvori no se queda con nada." },
+        feeDesc: "Se cobra con una tarifa que cubre incluso las tarjetas más caras. Todo lo que supere lo que realmente cuesta tu tarjeta vuelve a tu tarjeta automáticamente tras el pago. Cuvori no se queda con nada.",
+        connect: "Comisión por el pago al freelancer (Stripe)", connectDesc: "El proveedor de pagos cobra a Cuvori por pagar al freelancer (una cuota mensual por cuenta de freelancer más un pequeño importe por cada pago); esta línea lo cubre a las tarifas del proveedor. Si el pedido se cancela, el precio del pedido vuelve a ti; esta comisión, como la de tarjeta, no." },
 };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -191,8 +200,10 @@ export default safe(async (req) => {
   // The card fee is charged at a rate that covers even the most expensive cards (the fee table's "unknown country" row), the same for everyone,
   // and the same number the page showed. Nothing the client declares can lower it. Once the payment is made,
   // whatever was collected above the provider's real fee is refunded to the card automatically (settleFee).
-  const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card");
-  const fee = quote.processing_cents, total = quote.total_cents;
+  // Stripe's payout fees (schema v50) are the third line, at cost; a top-up pays only their percentage (the fixed part was
+  // paid with the first payment). The three lines add up to the total the page showed (quoteFor checks that).
+  const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card", kind === "topup");
+  const fee = quote.processing_cents, connect = quote.connect_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
   // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to — named after
   // the Order. The whole line, the fixed words in front included, fits Stripe's 250 characters (stripeTitle).
@@ -200,6 +211,7 @@ export default safe(async (req) => {
   const title = stripeTitle(c.title, STRIPE_NAME_MAX - prefix.length) || L.untitled;
   const items = [{ quantity: 1, price_data: { currency, unit_amount: amount, product_data: { name: `${prefix}${title}` } } }];
   if (fee > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: fee, product_data: { name: L.fee, description: L.feeDesc } } });
+  if (connect > 0) items.push({ quantity: 1, price_data: { currency, unit_amount: connect, product_data: { name: L.connect, description: L.connectDesc } } });
   // One Checkout page per half hour and request: a second identical click within it gets the same page back (the
   // stored key below). That needs the same request each time, so the expiry is a fixed point 60–90 min ahead rather
   // than "now + 30 min".
@@ -223,7 +235,7 @@ export default safe(async (req) => {
     payment_intent_data: { capture_method: "manual", transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
     // the breakdown travels with the page (Stripe keeps up to 500 characters per value): when this page's payment is confirmed,
     // this breakdown — not the one from a page made later with a changed fee table — is the one saved on the Order
-    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
+    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), connect_cents: String(connect), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
   };
   // One key per exact request, kept in the database like the keys of payouts and refunds. It is named after the exact
   // text Stripe receives, so the same request again (two tabs in one language, Back and Fund again, a retry after a slow
@@ -271,7 +283,7 @@ export default safe(async (req) => {
     } else if (live.status === "expired") session = await renew();
   }
 
-  const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, quote } : { stripe_checkout_id: session.id };
+  const patch = kind === "fund" ? { stripe_checkout_id: session.id, fee_cents: fee, connect_cents: connect, quote } : { stripe_checkout_id: session.id };
   // Saved only if the Order is still exactly as this request read it: same status, same price, same money paid in, and the
   // same page on record. Two Fund requests at the same moment (two tabs) then cannot both save a page: the second finds
   // the first one's page on the Order and hands that page back, so one Order never has two pages that could both be paid.
@@ -281,19 +293,19 @@ export default safe(async (req) => {
     const same = !!now && now.status === c.status && now.amount_cents === c.amount_cents && (now.funded_cents ?? null) === (c.funded_cents ?? null);
     // Stripe handed this request the very page another request has just saved (the same request twice: two tabs in one
     // language): it is the Order's page, so this tab gets it too, and it is never closed here
-    if (same && now.stripe_checkout_id === session.id) return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
+    if (same && now.stripe_checkout_id === session.id) return json(200, { url: session.url, amount, fee, connect, total, cuvori_fee: 0, kind, held: heldCents(c) });
     // a page of this request's own that the Order is not using is closed, so it can never be paid
     if (!now || now.stripe_checkout_id !== session.id) await closePage(session.id, c.id);
     if (same && now.stripe_checkout_id && now.stripe_checkout_id !== prev && isSession(now.stripe_checkout_id)) {
       const other = await stripe("GET", `/checkout/sessions/${now.stripe_checkout_id}`).catch(() => null);
       const om = other && other.metadata || {};
-      if (other && other.status === "open" && other.url && other.client_reference_id === c.id && om.kind === kind && Number(om.amount_cents) === amount && Number.isSafeInteger(Number(om.fee_cents)))
-        return json(200, { url: other.url, amount, fee: Number(om.fee_cents), total: amount + Number(om.fee_cents), cuvori_fee: 0, kind, held: heldCents(c) });
+      if (other && other.status === "open" && other.url && other.client_reference_id === c.id && om.kind === kind && Number(om.amount_cents) === amount && Number.isSafeInteger(Number(om.fee_cents)) && Number.isSafeInteger(Number(om.connect_cents || 0)))
+        return json(200, { url: other.url, amount, fee: Number(om.fee_cents), connect: Number(om.connect_cents || 0), total: amount + Number(om.fee_cents) + Number(om.connect_cents || 0), cuvori_fee: 0, kind, held: heldCents(c) });
     }
     // code: the page says it in the client's language and reloads the Order, so they see the new details
     return json(409, { error: "The order changed, reload", code: "order_changed" });
   }
   // only one live Checkout per Order: the previous page (another tab, an old link) can no longer be paid
   if (prev && prev !== session.id && isSession(prev) && !replacedDone) await closePage(prev, c.id);
-  return json(200, { url: session.url, amount, fee, total, cuvori_fee: 0, kind, held: heldCents(c) });
+  return json(200, { url: session.url, amount, fee, connect, total, cuvori_fee: 0, kind, held: heldCents(c) });
 });

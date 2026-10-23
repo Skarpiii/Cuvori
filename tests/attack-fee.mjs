@@ -1,7 +1,9 @@
 // The processing fee: the highest card rate is charged up front and the surplus over the provider's real fee is
 // refunded to the card automatically. These checks prove Cuvori nets exactly zero on every payment, that the fee
 // refund is never mistaken for Order money (price refunds, dashboard refunds, chargebacks), and that it happens
-// exactly once even when things are delivered twice, fail half-way, or the provider's fee is not known yet.
+// exactly once even when things are delivered twice, fail half-way, or the provider's fee is not known yet. Since schema
+// v50 the page has a third line, Stripe's payout fees, which Cuvori keeps (it pays Stripe's monthly Connect bill): the card
+// fee is what is charged above the price and that line, and the balance holds the price plus that line.
 import { DB, STRIPE, hooks, req, signed, call, mk, moneyOut, reset, fns, fund, pay, past } from "./fn-harness.mjs";
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
@@ -12,16 +14,19 @@ const fundRow = (c) => DB.order_payments.find(p => p.order_id === c.id && p.kind
 const feeRefunds = (pi) => STRIPE.refunds.filter(r => r.payment_intent === pi && r.metadata.kind === "fee_surplus");
 const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
 const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.event === ev);
+// Stripe's payout fees (schema v50) are the third line on the page, Cuvori's to keep (they pay Stripe's monthly Connect bill);
+// the card fee is what is charged above the price and that line
+const connectOf = (s) => Number(s.metadata && s.metadata.connect_cents || 0);
 
 // ---------- F1: a European card — the fee line is the ceiling, the real fee is lower, the difference goes back ----------
 {
   const c = mk({ amount_cents: 10000 }); const before = STRIPE.balance; const f = await fund(fx, c);
-  const s = f.session, pi = s.payment_intent, row = fundRow(c), actual = chargeOf(pi).balance_transaction.fee, collected = s.amount_total - 10000;
+  const s = f.session, pi = s.payment_intent, row = fundRow(c), actual = chargeOf(pi).balance_transaction.fee, collected = s.amount_total - 10000 - connectOf(s);
   info(`F1 price 10000, fee line ${collected} (ceiling), provider took ${actual}`);
   vuln(!row || row.fee_refund_cents !== collected - actual, `F1a the ledger records the fee refund -> fee_refund_cents=${row && row.fee_refund_cents} (expected ${collected - actual}), ref=${row && row.fee_refund_ref}`);
   vuln(feeRefunds(pi).length !== 1 || feeRefunds(pi)[0].amount !== collected - actual, `F1b exactly one fee refund at Stripe for ${collected - actual} -> ${JSON.stringify(feeRefunds(pi).map(r => r.amount))}`);
   vuln(c.funded_cents !== 10000 || c.status !== "funded" || moneyOut(c).refunded !== 0, `F1c the Order still holds the full price -> funded=${c.funded_cents}, status=${c.status}, Order money refunded=${moneyOut(c).refunded}`);
-  vuln(STRIPE.balance - before !== 10000, `F1d Cuvori's balance holds exactly the price after the fee refund -> ${STRIPE.balance - before} (must be 10000: what came in, minus the provider's fee, minus the surplus refund)`);
+  vuln(STRIPE.balance - before !== 10000 + connectOf(s), `F1d Cuvori's balance holds exactly the price plus the payout fee after the fee refund -> ${STRIPE.balance - before} (must be ${10000 + connectOf(s)}: what came in, minus the provider's fee, minus the surplus refund)`);
   vuln(events(c, "fee_refunded").length !== 1, `F1e one 'fee_refunded' event for the Order screen -> ${events(c, "fee_refunded").length}`);
   reset();
 }
@@ -29,19 +34,19 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
 {
   const c = mk({ amount_cents: 10000 }); const before = STRIPE.balance;
   const r0 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  const s = STRIPE.sessions[c.stripe_checkout_id]; const collected = s.amount_total - 10000;
+  const s = STRIPE.sessions[c.stripe_checkout_id]; const collected = s.amount_total - 10000 - connectOf(s);
   const paid = pay(c.stripe_checkout_id, { fee: collected });
   await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: paid } })));
   const row = fundRow(c);
   vuln(r0.status !== 200 || !row || row.fee_refund_cents !== 0 || feeRefunds(paid.payment_intent).length, `F2a fee equal to the ceiling -> fee_refund_cents=${row && row.fee_refund_cents}, refunds=${feeRefunds(paid.payment_intent).length} (must be 0 and none)`);
-  vuln(STRIPE.balance - before !== 10000 || events(c, "fee_exact").length !== 1, `F2b balance holds the price (${STRIPE.balance - before}) and one 'fee_exact' event (${events(c, "fee_exact").length})`);
+  vuln(STRIPE.balance - before !== 10000 + connectOf(s) || events(c, "fee_exact").length !== 1, `F2b balance holds the price plus the payout fee (${STRIPE.balance - before}, must be ${10000 + connectOf(s)}) and one 'fee_exact' event (${events(c, "fee_exact").length})`);
   reset();
 }
 // ---------- F3: the provider's fee is ABOVE the ceiling (rare) — nothing can be taken from the card; recorded, not hidden ----------
 {
   const c = mk({ amount_cents: 10000 });
   const r0 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  const s = STRIPE.sessions[c.stripe_checkout_id]; const collected = s.amount_total - 10000;
+  const s = STRIPE.sessions[c.stripe_checkout_id]; const collected = s.amount_total - 10000 - connectOf(s);
   const paid = pay(c.stripe_checkout_id, { fee: collected + 40 });
   await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: paid } })));
   const row = fundRow(c); const ev = events(c, "fee_exact")[0];
@@ -67,7 +72,7 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   info(`F5a right after payment (fee unknown): webhook ${f.webhook.status}, funded=${c.funded_cents}, fee_refund_cents=${row && row.fee_refund_cents}, provider_fee_cents=${row && row.provider_fee_cents}`);
   const r1 = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: f.session } })));   // a re-delivery meanwhile changes nothing
   vuln(feeRefunds(pi).length || c.funded_cents !== 10000 || (row && Number.isInteger(row.fee_refund_cents)), `F5b no fee refund while the provider's fee is unknown, the payment itself is recorded -> refunds=${feeRefunds(pi).length}, funded=${c.funded_cents}, fee_refund_cents=${row && row.fee_refund_cents}`);
-  const collected = f.session.amount_total - 10000, actual = saved.fee;
+  const collected = f.session.amount_total - 10000 - connectOf(f.session), actual = saved.fee;
   ch.balance_transaction = { ...saved, status: "available", currency: "eur" };
   row.created_at = past(1);                                                    // old enough for the job to look at it
   const job = await call(fx.autoRelease, req("POST", "x", {}));
@@ -132,7 +137,7 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   const c = mk({ amount_cents: 10000 }); const f = await fund(fx, c); c.amount_cents = 13000; c.price = 130;
   const r0 = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, country: "LT", customer: "consumer" } }));
   const s = STRIPE.sessions[c.stripe_checkout_id]; const q = r0.json || {};
-  vuln(r0.status !== 200 || s.amount_total - 3000 !== Math.ceil((3000 + 25) / (1 - 0.0325)) - 3000, `F10a a top-up with a declared EEA country is still quoted at the ceiling -> fee ${s.amount_total - 3000} (ceiling ${Math.ceil((3000 + 25) / (1 - 0.0325)) - 3000}), HTTP ${r0.status} ${JSON.stringify(q).slice(0, 80)}`);
+  vuln(r0.status !== 200 || s.amount_total - 3000 - connectOf(s) !== Math.ceil((3000 + connectOf(s) + 25) / (1 - 0.0325)) - 3000 - connectOf(s), `F10a a top-up with a declared EEA country is still quoted at the ceiling -> card fee ${s.amount_total - 3000 - connectOf(s)} (ceiling on the increase plus its payout fee ${connectOf(s)}: ${Math.ceil((3000 + connectOf(s) + 25) / (1 - 0.0325)) - 3000 - connectOf(s)}), HTTP ${r0.status} ${JSON.stringify(q).slice(0, 80)}`);
   const paid = pay(c.stripe_checkout_id);
   await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: paid } })));
   const rows = DB.order_payments.filter(p => p.order_id === c.id && p.kind === "fund");
@@ -290,8 +295,8 @@ const events = (c, ev) => DB.order_events.filter(e => e.order_id === c.id && e.e
   { const c = mk({ amount_cents: 10000 }); await checkout(c); const sess = STRIPE.sessions[c.stripe_checkout_id]; const before = STRIPE.balance; const s = pay(c.stripe_checkout_id);
     const held = { status: STRIPE.intents[s.payment_intent].status, captured: chargeOf(s.payment_intent).captured };
     const w = await webhook(s); const p = STRIPE.intents[s.payment_intent];
-    vuln(sess.params["payment_intent_data[capture_method]"] !== "manual" || held.status !== "requires_capture" || held.captured || w.status !== 200 || p.status !== "succeeded" || c.status !== "funded" || c.funded_cents !== 10000 || STRIPE.balance - before !== 10000 || feeRefunds(s.payment_intent).length !== 1,
-      `F15 a normal payment -> page capture_method=${sess.params["payment_intent_data[capture_method]"]}, after paying ${JSON.stringify(held)} (must be a hold), webhook ${w.status}: payment ${p.status}, Order ${c.status} with ${c.funded_cents}, Cuvori's balance +${STRIPE.balance - before} (must be exactly the price 10000), fee refunds ${feeRefunds(s.payment_intent).length}`); }
+    vuln(sess.params["payment_intent_data[capture_method]"] !== "manual" || held.status !== "requires_capture" || held.captured || w.status !== 200 || p.status !== "succeeded" || c.status !== "funded" || c.funded_cents !== 10000 || STRIPE.balance - before !== 10000 + connectOf(s) || feeRefunds(s.payment_intent).length !== 1,
+      `F15 a normal payment -> page capture_method=${sess.params["payment_intent_data[capture_method]"]}, after paying ${JSON.stringify(held)} (must be a hold), webhook ${w.status}: payment ${p.status}, Order ${c.status} with ${c.funded_cents}, Cuvori's balance +${STRIPE.balance - before} (must be exactly the price plus the payout fee, ${10000 + connectOf(s)}), fee refunds ${feeRefunds(s.payment_intent).length}`); }
   // the webhook and the page's own check arrive together: charged once, recorded once
   { const c = mk({ amount_cents: 10000 }); await checkout(c); const s = pay(c.stripe_checkout_id);
     const [w, k] = await Promise.all([webhook(s), call(fx.confirm, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }))]);

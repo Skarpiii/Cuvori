@@ -12,6 +12,7 @@ export const conv = uuid();
 export const DB = { rpc_calls: [], profiles: Object.values(users), user_flags: [], messages: [], contracts: [], order_events: [], order_payments: [], order_milestones: [], money_keys: [], site_settings: [],
   payout_details: [{ id: users.ed.id, methods: [], note: "", stripe_account_id: "acct_1EditorAAAAAAAA", stripe_payouts_enabled: true },
                    { id: users.ed2.id, methods: [], note: "", stripe_account_id: "acct_1SecondBBBBBBBB", stripe_payouts_enabled: true }] };
+export const CONNECT = { percent: 0.25, fixed_cents: 210 };   // the fee table's "connect" row (schema v50); a test may change it
 export const STRIPE = { platform: "acct_1CuvoriPlatformAA", sessions: {}, charges: {}, intents: {}, transfers: [], refunds: [], reversals: [], disputes: {}, idem: new Map(), balance: 0, settleDelay: false,
   accounts: { acct_1EditorAAAAAAAA: { id: "acct_1EditorAAAAAAAA", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed.id } },
               acct_1SecondBBBBBBBB: { id: "acct_1SecondBBBBBBBB", payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] }, metadata: { cuvori_user: users.ed2.id } } } };
@@ -55,9 +56,9 @@ export function stripeHandle(path, method, p) {
   if (seg[1] === "checkout" && seg[2] === "sessions" && seg[4] === "expire") { const s = STRIPE.sessions[seg[3]]; if (!s) return err(404, "No such checkout.session", "resource_missing"); if (s.status !== "open") return err(400, "Only Checkout Sessions with a status in [\"open\"] can be expired."); s.status = "expired"; return [200, s]; }   // like Stripe: a paid page cannot be expired
   if (seg[1] === "checkout" && seg[2] === "sessions" && seg[3] && method === "GET") return STRIPE.sessions[seg[3]] ? [200, STRIPE.sessions[seg[3]]] : err(404, "No such checkout.session", "resource_missing");
   if (path === "/checkout/sessions") {
-    const id = rid("cs"); const a0 = +p.get("line_items[0][price_data][unit_amount]"), a1 = +(p.get("line_items[1][price_data][unit_amount]") || 0);
-    STRIPE.sessions[id] = { id, object: "checkout.session", created: Math.floor(Date.now() / 1000), mode: "payment", status: "open", payment_status: "unpaid", payment_intent: null, url: "https://checkout.stripe.com/" + id, client_reference_id: p.get("client_reference_id"), amount_total: a0 + a1, currency: p.get("line_items[0][price_data][currency]"), amounts: [a0, a1],
-      metadata: { contract_id: p.get("metadata[contract_id]"), amount_cents: p.get("metadata[amount_cents]"), fee_cents: p.get("metadata[fee_cents]"), kind: p.get("metadata[kind]"), ...(p.get("metadata[quote]") != null ? { quote: p.get("metadata[quote]") } : {}) }, params: Object.fromEntries(p) };
+    const id = rid("cs"); const a0 = +p.get("line_items[0][price_data][unit_amount]"), a1 = +(p.get("line_items[1][price_data][unit_amount]") || 0), a2 = +(p.get("line_items[2][price_data][unit_amount]") || 0);
+    STRIPE.sessions[id] = { id, object: "checkout.session", created: Math.floor(Date.now() / 1000), mode: "payment", status: "open", payment_status: "unpaid", payment_intent: null, url: "https://checkout.stripe.com/" + id, client_reference_id: p.get("client_reference_id"), amount_total: a0 + a1 + a2, currency: p.get("line_items[0][price_data][currency]"), amounts: [a0, a1],
+      metadata: { contract_id: p.get("metadata[contract_id]"), amount_cents: p.get("metadata[amount_cents]"), fee_cents: p.get("metadata[fee_cents]"), ...(p.get("metadata[connect_cents]") != null ? { connect_cents: p.get("metadata[connect_cents]") } : {}), kind: p.get("metadata[kind]"), ...(p.get("metadata[quote]") != null ? { quote: p.get("metadata[quote]") } : {}) }, params: Object.fromEntries(p) };
     return [200, STRIPE.sessions[id]];
   }
   if (seg[1] === "charges" && seg[2] && method === "GET") { const ch = STRIPE.charges[seg[2]]; return ch ? [200, ch] : err(404, "No such charge", "resource_missing"); }
@@ -123,7 +124,10 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname === "/auth/v1/user") { const t = (init.headers.Authorization || "").replace("Bearer ", ""); return tokens[t] ? res(200, tokens[t]) : res(403, { code: 403, error_code: "bad_jwt", msg: "invalid JWT: unable to parse or verify signature" }); }
   if (u.pathname.startsWith("/rest/v1/rpc/")) { const fn = u.pathname.split("/")[4], args = JSON.parse(body); DB.rpc_calls.push({ fn, args });
     if (hooks.rpc) { const h = await hooks.rpc(fn, args); if (h) return res(h[0], h[1]); }
-    if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country == null || args.p_country === "US" ? 3.25 : 1.5; /* no country = the ceiling row, what the page and the checkout use */ const total = Math.ceil((p + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25 }); }
+    if (fn === "order_quote") { const p = args.p_price_cents; if (!Number.isInteger(p) || p < 0) return res(400, { message: "bad_price" }); const pct = args.p_country == null || args.p_country === "US" ? 3.25 : 1.5; /* no country = the ceiling row, what the page and the checkout use */
+      // like schema v50: Stripe's payout fees as their own line (the "connect" row: 0.25% + 210 cents; a top-up pays the percentage only), and the card fee on price + that line
+      const connect = p > 0 ? Math.ceil(p * CONNECT.percent / 100) + (args.p_topup ? 0 : CONNECT.fixed_cents) : 0, base = p + connect;
+      const total = Math.ceil((base + 25) / (1 - pct / 100)); return res(200, { price_cents: p, processing_cents: total - base, connect_cents: connect, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: 25, connect_schedule_id: 4, connect_percent: CONNECT.percent, connect_fixed_cents: CONNECT.fixed_cents, topup: !!args.p_topup }); }
     if (fn === "expire_jobs") return res(200, 0);
     if (fn === "rate_limit_for") return res(200, true);      // the older per-minute-only limit (schema v30): always lets through here
     if (fn === "rate_limit_tries") {                   // like the database function (schema v31): this person's tries of this kind, per minute and per day
