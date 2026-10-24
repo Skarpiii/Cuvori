@@ -348,12 +348,17 @@ export function verifyWebhook(rawBody, sigHeader, secret = WEBHOOK_SECRET, toler
 // the whole key. The Netlify log says why once per start, with the key's first 3 characters only.
 const SERVICE_KEY_NAME = env("SUPABASE_SECRET_KEY") ? "SUPABASE_SECRET_KEY" : "SUPABASE_SERVICE_ROLE_KEY";
 const SERVICE_KEY_WHOLE = /^[A-Za-z0-9._-]+$/.test(SERVICE_KEY);
+// for stripe-status: whether the database key can be used at all (never the key), so the admin panel can say "ON, but
+// paused" and name the setting, as it does for the Stripe key
+export const SERVICE_KEY_OK = !!SERVICE_KEY && SERVICE_KEY_WHOLE;
 let serviceKeyLogged = false;
+// Every button then answers "payments paused" with the code the page says in the person's language (fnPlain in
+// index.html); the admin also reads this sentence, which names the setting to correct.
 function requireServiceKey() {
-  if (!SERVICE_KEY) throw fail("Database access is not configured. Please contact support.", 503);
+  if (!SERVICE_KEY) throw fail("Payments are paused: there is no database key in Netlify (SUPABASE_SECRET_KEY, or the older SUPABASE_SERVICE_ROLE_KEY).", 503, PAUSED);
   if (!SERVICE_KEY_WHOLE) {
     if (!serviceKeyLogged) { serviceKeyLogged = true; console.error(`Database paused: ${SERVICE_KEY_NAME} in Netlify has a space, a line break or another character that is not part of a Supabase key (it starts with "${SERVICE_KEY.slice(0, 3)}"); copy the key again from Supabase, in one piece`); }
-    throw fail("Database access is not configured. Please contact support.", 503);
+    throw fail(`Payments are paused: the database key in Netlify (${SERVICE_KEY_NAME}) has a space, a line break or another character that is not part of a Supabase key. It must be copied again from Supabase, in one piece.`, 503, PAUSED);
   }
 }
 async function sbFetch(path, init = {}) {

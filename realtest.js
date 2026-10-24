@@ -846,6 +846,11 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
   { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON, but paused') && tx.includes('STRIPE_SECRET_KEY') && tx.includes('sk_live_'),'a Stripe key that is not a secret key: the admin panel says "ON, but paused" and what to correct'); }
   await p.evaluate(()=>{ window.__mockStripeKeyOk=true; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  // the same for a database key in Netlify that can't be used: "ON, but paused", and which setting to correct
+  await p.evaluate(()=>{ window.__mockDbKeyOk=false; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+  { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON, but paused') && tx.includes('SUPABASE_SECRET_KEY') && tx.includes('SUPABASE_SERVICE_ROLE_KEY') && !tx.includes('STRIPE_SECRET_KEY) can'),'a database key that cannot be used: the admin panel says "ON, but paused" and names the setting'); }
+  await p.evaluate(()=>{ window.__mockDbKeyOk=true; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
   // a web-address setting in Netlify written loosely or not at all (attack-settings.mjs): the payment functions keep working and the admin sees which one to correct
   await p.evaluate(()=>{ window.__mockSettingsNotes=['SITE_URL is not a web address, so Cuvori uses https://cuvori.io instead. Correct it in Netlify under Project configuration → Environment variables.']; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
