@@ -83,5 +83,21 @@ const v52 = steps.find(p => /\(v52\)/.test(p)) || "";
 check(/Database error deleting user/.test(v52) && /Logs → Postgres/.test(v52) && /has_money_held/.test(v52),
   "v52: SETUP says what the dashboard shows when Delete user is refused, and where the reason is (Logs → Postgres, has_money_held)");
 
+// the account move, safe end to end: new payments paused first (the fee table's ANY card row set to payer = platform, which
+// pauses every payment), a wait for payment pages still open (up to 90 minutes), enough Netlify credits for the production
+// deploy in the middle, what to do with a refund that can never be sent, and the way back if the switch still refuses
+const pauseAt = move.search(/payer[^.]{0,40}\*\*platform/);
+check(pauseAt > 0 && pauseAt < move.indexOf("orders_with_money_on_the_way()") && /2 hours/.test(move) && /15 credits/.test(move),
+  "moving to another Stripe account: new payments are paused first, then a 2-hour wait for open payment pages, with 15 Netlify credits at hand");
+check(/order_id, provider_ref/.test(move) && /old keys back/.test(move) && /payer[^.]{0,60}back to \*\*client/.test(move),
+  "moving to another Stripe account: says how to find a refund that can never be sent, the way back, and to set payer back to client at the end");
+// going live: the live Connect webhook secret too (step 3)
+check(/\(3\)[^]*STRIPE_CONNECT_WEBHOOK_SECRET[^]*\(4\)/.test(live), "going live (Part 5, step 9) puts the live Connect webhook's signing secret in STRIPE_CONNECT_WEBHOOK_SECRET in step (3)");
+// the list of Netlify settings names SITE_URL, and the short ways of writing an address leave a reminder note
+const vars = steps.find(p => /^6\.\s+Netlify → \*\*Project configuration\*\* → \*\*Environment variables\*\* → add:/.test(p)) || "";
+check(/`SITE_URL`\s*=\s*`?https:\/\/cuvori\.io/.test(vars) && /reminder/.test(vars), "Part 5, step 6 lists SITE_URL = https://cuvori.io, and says a short address leaves a reminder note");
+// which deploy runs the hourly job: Netlify's Deploys page says, not a commit written into these notes long ago
+check(!/main@e2120de/.test(howto) && /top of the Deploys page|top of the \*\*Deploys\*\* page/.test(howto), "the how-to sends you to the top of the Deploys page to see which deploy runs the hourly job (no old deploy name)");
+
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);

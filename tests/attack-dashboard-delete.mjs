@@ -7,7 +7,9 @@
 // Now a trigger before that delete refuses it with a message saying what to finish first. The owner can still delete on
 // purpose, in one SQL-editor run, with set_config('cuvori.delete_with_money_held', 'yes', true) before the delete.
 // D1 the client of a funded Order, D2 the freelancer, D3 a chargeback being decided and a card being charged right now,
-// D4 what still works (normal), D5 deleting on purpose, D6 the proper ways are unchanged (normal), D7 running v52.
+// D4 what still works (normal), D5 deleting on purpose, D6 the proper ways are unchanged (normal), D7 running v52, D8 the
+// delete as Supabase's own dashboard makes it: as its auth role (supabase_auth_admin), which may delete sign-ins but has no
+// right to Cuvori's functions — the check must work for that role too, not only for the database owner.
 // Every check is rolled back.
 // Run: node tests/attack-dashboard-delete.mjs   (needs the local Postgres of tests/db; it is started here)
 import fs from "node:fs";
@@ -118,6 +120,19 @@ const saidMoney = (s) => s.startsWith("refused") && /money/i.test(s);
     vuln(!r.ok || rows.length !== 2 || !rows.every(l => /^v52 applied/.test(l)) || !saidMoney(pick(r, "delete")) || pick(r, "after") !== "sign-in kept, profile as it was, Order funded holding 10000",
       `D7 running v52 twice -> ${r.ok ? rows.map(l => `"${l.slice(0, 80)}"`).join(" then ") || "no result row" : "error: " + r.err.split("\n").find(x => /ERROR/.test(x))}; then Delete user on the client -> ${short(pick(r, "delete"))}`);
   }
+}
+{ // D8 as Supabase's auth role: the role the dashboard's Delete user uses. It may delete sign-ins, nothing of Cuvori's.
+  const AUTH = `do $$ begin if not exists (select 1 from pg_roles where rolname = 'supabase_auth_admin') then create role supabase_auth_admin nologin; end if; end $$;
+    grant usage on schema auth to supabase_auth_admin; grant select, delete on auth.users to supabase_auth_admin;`;
+  const r = tx(`${AUTH}
+    select 'may call has_money_held itself: ' || has_function_privilege('supabase_auth_admin', 'public.has_money_held(uuid)', 'execute');
+    set local role supabase_auth_admin; ${TRY("held", "delete from auth.users where id = '00000000-0000-0000-0000-000000008c61'")} ${TRY("finished", "delete from auth.users where id = '00000000-0000-0000-0000-000000008c63'")} reset role;
+    ${STATE("8c61", "after")}
+    select 'finished client: ' || case when exists (select 1 from auth.users where id = ${U("8c63")}) then 'sign-in kept' else 'sign-in gone' end
+      || ', her Order ' || coalesce((select status from public.contracts where id = ${O2}), 'gone');`);
+  vuln(pick(r, "may call has_money_held itself") !== "false" || !saidMoney(pick(r, "held")) || pick(r, "after") !== "sign-in kept, profile as it was, Order funded holding 10000"
+       || pick(r, "finished") !== "deleted" || pick(r, "finished client") !== "sign-in gone, her Order completed",
+    `D8 as Supabase's auth role (may call Cuvori's check itself: ${pick(r, "may call has_money_held itself")}): the client of the funded Order -> ${short(pick(r, "held"))}; afterwards ${pick(r, "after")}; a client whose Order is finished -> ${pick(r, "finished")}, ${pick(r, "finished client")} (must be: refused with the money named, kept; deleted, the Order kept)`);
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;

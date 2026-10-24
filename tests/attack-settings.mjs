@@ -18,7 +18,8 @@
 // A1 the usual ways of writing an address, A2 not an address at all, A3 a key pasted into the wrong field, A4 ALLOWED_ORIGINS
 // written loosely, A5 "*" and nonsense in ALLOWED_ORIGINS, A6 SUPABASE_URL, A7 what stays as it was (normal), A8 a line
 // break or tab inside an address, A9 SITE_URL not set, A10 ALLOWED_ORIGINS can't lock the page out, A11 notes name the
-// setting only.
+// setting only, A12 an "@" inside an address (the part before it is a user name to a web address, so "cuvori.io@evil.com"
+// means evil.com): never read as an address.
 // Run: node tests/attack-settings.mjs
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -37,6 +38,8 @@ const CHILD = `
     const st = (await import(root + "/netlify/functions/stripe-status.mjs")).default;
     const r = await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io" } }));
     Object.assign(out, { status: r.status, cors: r.headers.get("access-control-allow-origin"), body: await r.text() });
+    // the same call from a stranger's website: no allow-origin, so the browser never lets that site read the answer
+    out.corsStranger = (await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://evil.example" } }))).headers.get("access-control-allow-origin");
     const wh = (await import(root + "/netlify/functions/stripe-webhook.mjs")).default;
     out.webhook = (await wh(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-webhook", { method: "POST", body: "{}" }))).status;
   } catch (e) { out.error = String(e && e.message); }
@@ -114,8 +117,8 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     `A7a correct settings -> ${said(ok)}; notes ${JSON.stringify(ok.notes)} (normal: no note)`);
   vuln(local.error || local.site !== "http://localhost:8888" || !local.origins?.includes("http://localhost:8888"), `A7b local testing, SITE_URL "localhost:8888" -> ${local.error || local.site} (normal: http://localhost:8888)`);
   vuln(none.error || none.site !== "https://cuvori.netlify.app", `A7c SITE_URL not set -> ${none.error || none.site} (normal: Netlify's own address, as before; A9 checks the note)`);
-  const evil = load({ SITE_URL: "https://cuvori.io" });
-  vuln(!works(evil), `A7d the page on cuvori.io may call the functions -> allow-origin ${evil.cors} (normal)`);
+  const evil = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: "https://main--cuvori.netlify.app" });
+  vuln(!works(evil) || evil.corsStranger !== null, `A7d the page on cuvori.io may call the functions (allow-origin ${evil.cors}); a stranger's website may not (allow-origin ${evil.corsStranger}) (normal: cuvori.io yes, the stranger null)`);
 }
 { // A8 a line break or a tab inside an address is never glued into a made-up one
   for (const [name, v] of [["SITE_URL", "cuvori.io\nwww.cuvori.io"], ["SITE_URL", "cuvori\t.io"], ["SITE_URL", "https://cuvo\r\nri.io"], ["SUPABASE_URL", "tnxujwlfatcvxzevllfr.supa\nbase.co"]]) {
@@ -145,6 +148,13 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   const shown = JSON.stringify(r.notes || []) + (r.body || "");
   vuln(!works(r) || r.site !== "https://www.cuvori.io" || !noted(r, "SITE_URL") || !noted(r, "ALLOWED_ORIGINS") || !noted(r, "SUPABASE_URL") || /www\.cuvori\.io|main--cuvori|tnxujwlfatcvxzevllfr/.test(shown),
     `A11 three settings written the short way -> ${said(r)}; notes: ${JSON.stringify(r.notes).slice(0, 200)} (must name the three settings, and none of the addresses read from them)`);
+}
+{ // A12 an "@" inside an address: "cuvori.io@evil.com" is the website evil.com, so it is never used
+  for (const [name, v] of [["SITE_URL", "cuvori.io@evil.com"], ["SITE_URL", "https://cuvori.io@evil.com"], ["ALLOWED_ORIGINS", "cuvori.io@evil.com"], ["SUPABASE_URL", "x@other-project.supabase.co"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const bad = name === "SITE_URL" ? r.site !== "https://cuvori.io" : name === "ALLOWED_ORIGINS" ? (r.origins || []).some(o => /evil/.test(o)) : r.supabase !== "https://tnxujwlfatcvxzevllfr.supabase.co";
+    vuln(!works(r) || bad || !noted(r, name), `A12 ${name} = ${JSON.stringify(v)} -> ${said(r)}${name === "SUPABASE_URL" ? ", database " + r.supabase : ""} (must never use the address after the "@"; a note names ${name})`);
+  }
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;

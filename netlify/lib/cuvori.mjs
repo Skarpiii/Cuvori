@@ -21,6 +21,8 @@ function originOf(value) {
   // a line break, tab or other space inside (a paste that wrapped, two lines in one field): not one address. The address
   // reader would quietly drop line breaks and tabs and glue the rest into a made-up address Stripe would send clients to.
   if (/[\s\x00-\x1f\x7f]/.test(typed)) return null;
+  // an "@": what comes before it is a user name, so "cuvori.io@evil.com" is the website evil.com. Never an address here.
+  if (typed.includes("@")) return null;
   let rest = typed.replace(/^\/+/, ""), scheme = null;
   const m = /^(https?)(?::\/*|\/+)(.*)$/i.exec(rest);
   if (m) { scheme = m[1].toLowerCase(); rest = m[2]; }
