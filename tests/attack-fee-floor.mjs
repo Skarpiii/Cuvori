@@ -7,7 +7,8 @@
 // with the payment named; no rate lives in code. Rows that don't decide the checkout price are saved as before.
 // F1 lowering the ANY row below a real card cost, F2 raising it (normal), F3 a row that doesn't decide the checkout price
 // (normal), F4 a new ANY row below the floor, F5 what doesn't count: old payments, unsettled payments, a row set to
-// platform or switched off (normal), F6 a client trying (normal), F7 running v53. Every check is rolled back.
+// platform or switched off (normal), F6 a client trying (normal), F7 running v53, F8 a row that did not decide the price
+// changed into one that does. Every check is rolled back.
 // Run: node tests/attack-fee-floor.mjs   (needs the local Postgres of tests/db; it is started here)
 import fs from "node:fs";
 import path from "node:path";
@@ -102,6 +103,13 @@ const short = (s) => s.slice(0, 150);
     vuln(!r.ok || rows.length !== 2 || !rows.every(l => /^v53 applied/.test(l)) || !refused(pick(r, "low")) || pick(r, "up") !== "ok",
       `F7 running v53 twice -> ${r.ok ? rows.map(l => `"${l.slice(0, 60)}"`).join(" then ") || "no result row" : "error: " + r.err.split("\n").find(x => /ERROR/.test(x))}; then 1.5% -> ${refused(pick(r, "low")) ? "refused" : pick(r, "low")}, 4% -> ${pick(r, "up")}`);
   }
+}
+{ // F8 a low row that does not decide the checkout price (a consumer row, method card) is saved, then changed into one that does
+  const r = tx(`${SAVE("consumer", "401", '{"region":"ANY","customer_kind":"consumer","method":"card","percent":1,"fixed_cents":0}')}
+    ${as("401")} select 'turned: ' || public.admin_set_fee_schedule(jsonb_build_object('id', (select id from public.fee_schedules where customer_kind = 'consumer' and method = 'card'), 'customer_kind', 'any')); ${owner}
+    select 'row: ' || customer_kind || ' ' || percent from public.fee_schedules where method = 'card' and region = 'ANY' and country is null;`);
+  vuln(pick(r, "consumer") !== "ok" || !refused(pick(r, "turned")) || pick(r, "row") !== "consumer 1.0000",
+    `F8 a 1% consumer card row (does not decide the price) -> ${pick(r, "consumer")}; then changed to any customer, so it would decide it -> ${short(pick(r, "turned"))}; the row: ${pick(r, "row")} (must be: saved, refused, still consumer)`);
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;

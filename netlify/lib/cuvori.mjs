@@ -7,8 +7,9 @@ const env = (name) => String(process.env[name] || "").trim();
 // https://cuvori.io (http stays only for local testing). One that is not a web address at all never stops the payment
 // functions — before, it made this file throw as it loaded, so every function, the webhook and the hourly job stopped at
 // once: it is left out (ALLOWED_ORIGINS) or replaced by Cuvori's own address, and the admin page says which setting to
-// correct (SETTINGS_NOTES, sent by stripe-status). What was typed is never written to the log or shown anywhere: a key
-// pasted into the wrong field must not travel further. Only the setting's name and the address Cuvori uses are.
+// correct (SETTINGS_NOTES, sent by stripe-status, which anyone can read). What was typed, and the address read from it, is
+// never written to the log or shown anywhere: a key or password pasted into the wrong field must not travel further. Only
+// the setting's name is, and Cuvori's own address when that is used instead.
 export const SETTINGS_NOTES = [];
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 // a real host name: letters, digits and hyphens, at most 63 to a part and 253 in all, ending in a name (com, io, xn--…).
@@ -34,16 +35,20 @@ function originOf(value) {
 }
 const note = (text) => { SETTINGS_NOTES.push(text); console.error("Netlify setting:", text); };
 const WHERE = "Correct it in Netlify under Project configuration → Environment variables.";
-function addressSetting(name, value, fallback) {
+function addressSetting(name, value, fallback, kind = null) {
   if (!value) return fallback;
   const o = originOf(value);
   if (!o) { note(`${name} is not a web address, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
-  if (o.corrected) note(`${name} is not written as a full web address; Cuvori reads it as ${o.origin}. ${WHERE}`);
+  if (kind && !kind.ok(o.origin)) { note(`${name} is not ${kind.what}, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
+  if (o.corrected) note(`${name} is not written as a full web address; Cuvori corrected it. Check it in Netlify under Project configuration → Environment variables.`);
   return o.origin;
 }
 const CUVORI_SITE = "https://cuvori.io";
-// The project address is public (it is in the page too); a missing or broken setting must not take every payment function down.
-export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), "https://tnxujwlfatcvxzevllfr.supabase.co");
+// The project address is public (it is in the page too); a missing or broken setting must not take every payment function
+// down. Only a Supabase project address (….supabase.co, or a local one for testing) is used: every call to it carries the
+// secret database key, so the Supabase dashboard's own address pasted in by mistake, or any other website, never gets it.
+const SUPABASE_PROJECT = { what: "a Supabase project address (….supabase.co)", ok: (o) => { const h = new URL(o).hostname; return h.endsWith(".supabase.co") || LOCAL_HOSTS.includes(h); } };
+export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), "https://tnxujwlfatcvxzevllfr.supabase.co", SUPABASE_PROJECT);
 // Legacy service-role keys are JWTs; new secret keys use only the apikey header. When both are set, the new secret key
 // is used: Supabase is phasing the old keys out, and an old key switched off in Supabase must never shadow a working new one.
 export const SERVICE_KEY = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
@@ -66,24 +71,24 @@ export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
 export const SITE_URL = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
 if (!env("SITE_URL")) note(SITE_URL === CUVORI_SITE ? `SITE_URL is not set; Cuvori uses ${CUVORI_SITE}. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`
   : `SITE_URL is not set, so Stripe sends clients back to ${SITE_URL} after paying, which may show an older copy of the page. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`);
-// the page may live on another host (GitHub Pages) and call these functions across origins. An explicit list replaces
-// the defaults; entries may be separated by commas, spaces or semicolons. "*" (every website) is never accepted: an entry
-// that is not one web address is left out, and a list with nothing usable left falls back to the defaults.
+// the page may live on another host (GitHub Pages) and call these functions across origins. The page's own addresses
+// (SITE_URL, cuvori.io, www.cuvori.io) are always allowed, so no setting can lock the page out of its payment functions;
+// ALLOWED_ORIGINS adds more, separated by commas or semicolons. An entry that is not one web address — "*" for every
+// website, or one with a space or line break inside it from a paste that wrapped — is left out, never split into pieces.
 const DEFAULT_ORIGINS = [...new Set([SITE_URL, "https://cuvori.io", "https://www.cuvori.io"])];
 function originsSetting(value) {
   if (!value) return DEFAULT_ORIGINS;
-  const list = [], fixed = [];
-  let left = 0;
-  for (const entry of value.split(/[\s,;]+/).filter(Boolean)) {
+  const list = [];
+  let left = 0, fixed = 0;
+  for (const entry of value.split(/[,;]+/).map(e => e.trim()).filter(Boolean)) {
     const o = originOf(entry);
     if (!o) { left++; continue; }
-    if (o.corrected) fixed.push(o.origin);
+    if (o.corrected) fixed++;
     list.push(o.origin);
   }
-  if (left) note(`ALLOWED_ORIGINS has ${left} ${left === 1 ? "entry" : "entries"} that ${left === 1 ? "is" : "are"} not one web address ("*" for every website is never allowed); ${left === 1 ? "it is" : "they are"} left out. ${WHERE}`);
-  if (fixed.length) note(`ALLOWED_ORIGINS is not written as full web addresses; Cuvori reads ${fixed.join(", ")}. ${WHERE}`);
-  if (!list.length) { note(`ALLOWED_ORIGINS has no usable address, so Cuvori uses ${DEFAULT_ORIGINS.join(", ")}. ${WHERE}`); return DEFAULT_ORIGINS; }
-  return [...new Set(list)];
+  if (left) note(`ALLOWED_ORIGINS has ${left} ${left === 1 ? "entry" : "entries"} that ${left === 1 ? "is" : "are"} not one web address ("*" for every website is never allowed); ${left === 1 ? "it is" : "they are"} left out. Cuvori's own addresses stay allowed. ${WHERE}`);
+  if (fixed) note(`ALLOWED_ORIGINS has ${fixed} ${fixed === 1 ? "entry" : "entries"} not written as a full web address; Cuvori corrected ${fixed === 1 ? "it" : "them"}. Check it in Netlify under Project configuration → Environment variables.`);
+  return [...new Set([...DEFAULT_ORIGINS, ...list])];
 }
 export const ALLOWED_ORIGINS = originsSetting(env("ALLOWED_ORIGINS"));
 export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too

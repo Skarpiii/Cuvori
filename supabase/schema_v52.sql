@@ -7,8 +7,11 @@
 -- Delete user) deletes the sign-in row straight away, and the trigger behind it (on_auth_user_deleted, v35) then purged
 -- the person's data without that check: a client or a freelancer with EUR 100 held could be removed in the middle of it,
 -- with the money still on the Order and nobody to approve, deliver or be paid.
--- Now a trigger before that delete refuses it, with a message in the dashboard saying what to finish first. Deleting on
--- purpose anyway is still possible, in one SQL-editor run:
+-- Now a trigger before that delete refuses it. The dashboard shows only Supabase's own words ("Failed to delete user:
+-- Database error deleting user"); the reason below, with what to finish first, is under Logs → Postgres, and
+-- select public.has_money_held('<the user id>'); answers true while money is still on the way. (This comment was
+-- corrected on 2026-10-24, after v52 was run; the SQL is unchanged.) Deleting on purpose anyway is still possible, in one
+-- SQL-editor run:
 --   select set_config('cuvori.delete_with_money_held', 'yes', true);
 --   delete from auth.users where id = '<the user id>';
 -- The Order and its money then stay on record as before (v35). Nothing else changes. Safe to run more than once.

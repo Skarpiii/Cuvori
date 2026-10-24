@@ -72,5 +72,16 @@ const move = steps.find(p => /^10\.\s+Moving to another Stripe account/.test(p))
 check(move.includes(PROD) && /hourly job/.test(move) && move.indexOf(PROD) < move.indexOf("stripe_platform_switch()"),
   `moving to another Stripe account (Part 5, step 10) updates production before stripe_platform_switch(), pointing to ${PROD}`);
 
+// and before any key changes for the move, nothing may still be owed through the old account: card-fee refunds owed to
+// clients can only be sent with the old keys, and in live mode stripe_platform_switch() waits for them — with the new keys
+// on both deploys they would never be sent, the switch would refuse for good, and every payment would stay paused
+const keysAt = move.indexOf("put the new account's keys");
+check(/orders_with_money_on_the_way\(\)/.test(move) && /fee_refund_cents is null/.test(move) && move.indexOf("fee_refund_cents is null") < keysAt && keysAt > 0,
+  "moving to another Stripe account: the check that nothing is held and no card-fee refund is owed comes before the new keys");
+// Supabase's own Delete user (v52): the dashboard shows only its own words; where the reason is
+const v52 = steps.find(p => /\(v52\)/.test(p)) || "";
+check(/Database error deleting user/.test(v52) && /Logs → Postgres/.test(v52) && /has_money_held/.test(v52),
+  "v52: SETUP says what the dashboard shows when Delete user is refused, and where the reason is (Logs → Postgres, has_money_held)");
+
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);
