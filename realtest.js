@@ -823,6 +823,17 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   // cancellation: before funding either side walks away; after funding the freelancer can give the money back
   await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(600);
   ok((await p.textContent('#adminBody')).includes('a €500 Order') && (await p.textContent('#adminBody')).includes('card fee €7.92') && (await p.textContent('#adminBody')).includes('payout fee (Stripe) €3.35') && (await p.textContent('#adminBody')).includes('total €511.27') && await p.locator('.f-pct').count()>=4 && (await p.textContent('#adminBody')).includes('stripe · ANY · any · connect'),'admin sees the fee table with the connect row and a worked example with the payout fee');
+  // v53: the ANY card row can't be saved below what a card really cost on a payment of the last 12 months. A settled payment of
+  // €100 (+ €2.35 payout fee) on which Stripe took €4.00: 1.5% + 25c would have collected €1.82 -> refused with the payment named;
+  // 4% + 25c (€4.53) is saved
+  await p.evaluate(()=>{ const c=window.__mockdb.contracts.find(x=>x.payment_mode==='escrow'); window.__mockdb.order_payments.push({id:'pay-floor-1',order_id:c.id,kind:'fund',amount_cents:10000,fee_cents:370,connect_cents:235,provider:'stripe',provider_ref:'pi_floor1',status:'succeeded',provider_fee_cents:400,fee_refund_cents:0,created_at:new Date(Date.now()-30*864e5).toISOString()}); });
+  { const row=p.locator('.admin-row',{hasText:'stripe · ANY · any · any'}).first(); await row.locator('.f-pct').fill('1.5'); await row.locator('.f-fix').fill('25'); await row.locator('[data-fsave]').click(); await p.waitForTimeout(500);
+    const tx=await p.textContent('#feeNotice'); const pct=await db(()=>window.__mockdb.fee_schedules.find(x=>x.region==='ANY'&&x.method==='any').percent);
+    ok(tx.includes('not saved: at 1.5% + 25 cents this row would have collected EUR 1.82 for the card fee on a payment of EUR 102.35') && tx.includes('but Stripe took EUR 4.00') && pct===1.5,
+      `admin lowers the ANY card row to 1.5% + 25c, below the €4.00 Stripe took on a €102.35 payment last month: the fee tab says what would have been collected and what Stripe took, the row stays at ${pct}% (seed)`);
+    await row.locator('.f-pct').fill('4'); await row.locator('[data-fsave]').click(); await p.waitForTimeout(600);
+    ok(await db(()=>window.__mockdb.fee_schedules.find(x=>x.region==='ANY'&&x.method==='any').percent===4),'at 4% + 25c the row is saved');
+    await p.evaluate(()=>{ window.__mockdb.order_payments=window.__mockdb.order_payments.filter(x=>x.id!=='pay-floor-1'); window.__mockdb.fee_schedules.find(x=>x.region==='ANY'&&x.method==='any').percent=1.5; }); await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500); }
   // a Stripe key in Netlify that is not a secret key: the admin panel says "ON, but paused" and what to correct, not "ON"
   await p.evaluate(()=>{ window.__mockStripeKeyOk=false; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
