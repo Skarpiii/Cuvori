@@ -17,6 +17,9 @@ const HOST_OK = (h) => h.length <= 253 && h.split(".").length >= 2 && h.split(".
   && /^([a-z]{2,63}|xn--[a-z0-9-]{1,59})$/.test(h.split(".").pop());
 function originOf(value) {
   const typed = String(value || "").trim();
+  // a line break, tab or other space inside (a paste that wrapped, two lines in one field): not one address. The address
+  // reader would quietly drop line breaks and tabs and glue the rest into a made-up address Stripe would send clients to.
+  if (/[\s\x00-\x1f\x7f]/.test(typed)) return null;
   let rest = typed.replace(/^\/+/, ""), scheme = null;
   const m = /^(https?)(?::\/*|\/+)(.*)$/i.exec(rest);
   if (m) { scheme = m[1].toLowerCase(); rest = m[2]; }
@@ -25,7 +28,8 @@ function originOf(value) {
   let url; try { url = new URL("https://" + rest); } catch { return null; }
   const local = LOCAL_HOSTS.includes(url.hostname);
   if (!local && !HOST_OK(url.hostname)) return null;
-  const origin = `${local ? scheme || "http" : "https"}://${url.host}`;
+  const host = scheme === "http" && url.port === "80" ? url.hostname : url.host;   // http's own port, written out: not a port of its own
+  const origin = `${local ? scheme || "http" : "https"}://${host}`;
   return { origin, corrected: origin !== typed.replace(/\/+$/, "").toLowerCase() };
 }
 const note = (text) => { SETTINGS_NOTES.push(text); console.error("Netlify setting:", text); };
@@ -56,9 +60,12 @@ export const STRIPE_MODE = !STRIPE_KEY_WHOLE ? null : /^(sk|rk)_live_/.test(STRI
 export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 // the optional second endpoint, for events about the freelancers' own Stripe accounts: read like every other setting
 export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
-// Where Stripe sends people back (after paying, after setting up payouts). Not set: Netlify's own address (URL). Set but
-// not a web address: Cuvori's own address, never Netlify's, which may serve an older copy of the page.
+// Where Stripe sends people back (after paying, after setting up payouts). Not set: Netlify's own address (URL), and the
+// admin page says so, since that address may serve an older copy of the page. Set but not a web address: Cuvori's own
+// address, never Netlify's.
 export const SITE_URL = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
+if (!env("SITE_URL")) note(SITE_URL === CUVORI_SITE ? `SITE_URL is not set; Cuvori uses ${CUVORI_SITE}. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`
+  : `SITE_URL is not set, so Stripe sends clients back to ${SITE_URL} after paying, which may show an older copy of the page. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`);
 // the page may live on another host (GitHub Pages) and call these functions across origins. An explicit list replaces
 // the defaults; entries may be separated by commas, spaces or semicolons. "*" (every website) is never accepted: an entry
 // that is not one web address is left out, and a list with nothing usable left falls back to the defaults.

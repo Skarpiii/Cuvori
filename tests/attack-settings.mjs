@@ -8,8 +8,12 @@
 // (ALLOWED_ORIGINS) or replaced by Cuvori's own address; the admin page says which setting to correct. What was typed is
 // never written to the log or shown anywhere (a key pasted into the wrong field must not travel further), and "*" never
 // lets every website in.
+// A line break or a tab inside an address (a paste that wrapped, two lines in one field) is never glued together into a
+// made-up address that Stripe would send clients to: it counts as not an address. And when SITE_URL is not set at all,
+// the admin page says so, since Stripe then sends clients back to Netlify's own address, which may show an older page.
 // A1 the usual ways of writing an address, A2 not an address at all, A3 a key pasted into the wrong field, A4 ALLOWED_ORIGINS
-// written loosely, A5 "*" and nonsense in ALLOWED_ORIGINS, A6 SUPABASE_URL, A7 what stays as it was (normal).
+// written loosely, A5 "*" and nonsense in ALLOWED_ORIGINS, A6 SUPABASE_URL, A7 what stays as it was (normal), A8 a line
+// break or tab inside an address, A9 SITE_URL not set.
 // Run: node tests/attack-settings.mjs
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -45,7 +49,7 @@ const said = (r) => r.error ? `stops: "${r.error}"` : `loads; SITE_URL ${r.site}
 const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.includes(name)) && (r.body || "").includes(name);
 
 { // A1 the ways people write cuvori.io
-  for (const v of ["cuvori.io", "www.cuvori.io/", "https//cuvori.io", "https:/cuvori.io", "http://cuvori.io", "https://cuvori.io/orders?x=1#top", "  CUVORI.IO  "]) {
+  for (const v of ["cuvori.io", "www.cuvori.io/", "https//cuvori.io", "https:/cuvori.io", "http://cuvori.io", "https://cuvori.io/orders?x=1#top", "  CUVORI.IO  ", "http://cuvori.io:80"]) {
     const r = load({ SITE_URL: v });
     const want = v.includes("www") ? "https://www.cuvori.io" : "https://cuvori.io";
     vuln(!works(r) || r.site !== want, `A1 SITE_URL written as ${JSON.stringify(v)} -> ${said(r)} (must load and read it as ${want})`);
@@ -70,6 +74,9 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   const r = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: "cuvori.io, www.cuvori.io/ ;https://main--cuvori.netlify.app" });
   vuln(!works(r) || JSON.stringify(r.origins) !== JSON.stringify(["https://cuvori.io", "https://www.cuvori.io", "https://main--cuvori.netlify.app"]),
     `A4 ALLOWED_ORIGINS "cuvori.io, www.cuvori.io/ ;https://main--cuvori.netlify.app" -> ${said(r)} (must load with the three addresses)`);
+  const lines = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: "https://cuvori.io\nhttps://www.cuvori.io" });
+  vuln(!works(lines) || JSON.stringify(lines.origins) !== JSON.stringify(["https://cuvori.io", "https://www.cuvori.io"]),
+    `A4b ALLOWED_ORIGINS on two lines -> ${said(lines)} (normal: one address per line, both kept)`);
 }
 { // A5 "*" never lets every website in; nonsense is left out; nothing usable at all -> the default list
   const star = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: "*" });
@@ -94,9 +101,22 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   vuln(!works(ok) || !Array.isArray(ok.notes) || ok.notes.length !== 0 || JSON.stringify(ok.origins) !== JSON.stringify(["https://cuvori.io", "https://www.cuvori.io"]) || !/"settingsNotes":\[\]/.test(ok.body || ""),
     `A7a correct settings -> ${said(ok)}; notes ${JSON.stringify(ok.notes)} (normal: no note)`);
   vuln(local.error || local.site !== "http://localhost:8888" || !local.origins?.includes("http://localhost:8888"), `A7b local testing, SITE_URL "localhost:8888" -> ${local.error || local.site} (normal: http://localhost:8888)`);
-  vuln(none.error || none.site !== "https://cuvori.netlify.app", `A7c SITE_URL not set -> ${none.error || none.site} (normal: Netlify's own address, as before)`);
+  vuln(none.error || none.site !== "https://cuvori.netlify.app", `A7c SITE_URL not set -> ${none.error || none.site} (normal: Netlify's own address, as before; A9 checks the note)`);
   const evil = load({ SITE_URL: "https://cuvori.io" });
   vuln(!works(evil), `A7d the page on cuvori.io may call the functions -> allow-origin ${evil.cors} (normal)`);
+}
+{ // A8 a line break or a tab inside an address is never glued into a made-up one
+  for (const [name, v] of [["SITE_URL", "cuvori.io\nwww.cuvori.io"], ["SITE_URL", "cuvori\t.io"], ["SITE_URL", "https://cuvo\r\nri.io"], ["SUPABASE_URL", "tnxujwlfatcvxzevllfr.supa\nbase.co"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const used = name === "SITE_URL" ? r.site : r.supabase, want = name === "SITE_URL" ? "https://cuvori.io" : "https://tnxujwlfatcvxzevllfr.supabase.co";
+    vuln(!works(r) || used !== want || !noted(r, name) || !r.notes.some(n => n.includes("is not a web address")),
+      `A8 ${name} with a line break or tab inside (${JSON.stringify(v)}) -> ${r.error || used}; note: ${r.notes ? JSON.stringify(r.notes).slice(0, 110) : "none"} (must use ${want} and say ${name} is not a web address, never a glued-together address)`);
+  }
+}
+{ // A9 SITE_URL not set: Netlify's own address is used as before, and the admin page says so
+  const r = load({ SITE_URL: null });
+  vuln(!works(r) || r.site !== "https://cuvori.netlify.app" || !noted(r, "SITE_URL") || !r.notes.some(n => n.includes("not set") && n.includes("https://cuvori.netlify.app")),
+    `A9 SITE_URL not set -> ${said(r)}; note: ${r.notes ? JSON.stringify(r.notes).slice(0, 140) : "none"} (must say SITE_URL is not set and where Stripe sends clients back)`);
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;
