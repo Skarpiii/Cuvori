@@ -3,7 +3,9 @@
 // branch deploy. So every such step must point to the one how-to that rebuilds `main` (Part 3, item 8), and that how-to
 // must name Netlify's buttons exactly and pick the retry the deploy rule (tools/netlify-skip-build.sh) never cancels.
 // "Trigger deploy" builds the production branch only, and a plain "Retry with latest branch commit" is cancelled by the
-// deploy rule when only notes or tests changed since the last build. Run: node tests/setup-deploys.mjs
+// deploy rule when only notes or tests changed since the last build. The hourly job runs on production, which keeps the keys
+// it was built with: going live and moving to another Stripe account must update production too (section 4).
+// Run: node tests/setup-deploys.mjs
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -56,6 +58,19 @@ const rule = (base, head) => spawnSync("bash", [path.join(root, "tools/netlify-s
 check(rule(built, notes) === 0, "a plain retry after a notes-only upload is cancelled by the deploy rule (so the how-to must not use it)");
 check(rule(notes, notes) === 1, "a retry without cache (Netlify then gives the same commit twice) always builds");
 fs.rmSync(T, { recursive: true, force: true });
+
+// 4. the hourly job runs on production and keeps the keys it was built with: going live and moving to another Stripe account
+// must update production too (Part 3, item 7), and for the move before stripe_platform_switch() — otherwise the hourly job,
+// still on the old keys, remembers the old account again (every payment on main stays paused) or is paused itself
+const PROD = "Part 3, item 7";
+const item7 = steps.find(p => /^7\.\s/.test(p) && /production branch/.test(p)) || "";
+check(/value in Netlify was changed[^]*production gets it only[^]*\*\*Deploy project without cache\*\*/.test(item7), "item 7 says how production gets a changed value (its next production deploy)");
+const live = steps.find(p => /^9\.\s+Go live/.test(p)) || "";
+check(live.includes(PROD) && /hourly job/.test(live) && /live keys/.test(live.slice(live.indexOf(PROD) - 300, live.indexOf(PROD) + 300)) && live.indexOf(PROD) > live.indexOf("(3)"),
+  `going live (Part 5, step 9) updates production with the live keys after (3), pointing to ${PROD}`);
+const move = steps.find(p => /^10\.\s+Moving to another Stripe account/.test(p)) || "";
+check(move.includes(PROD) && /hourly job/.test(move) && move.indexOf(PROD) < move.indexOf("stripe_platform_switch()"),
+  `moving to another Stripe account (Part 5, step 10) updates production before stripe_platform_switch(), pointing to ${PROD}`);
 
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);
