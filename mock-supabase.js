@@ -577,7 +577,7 @@
     const res=(status,data)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});
     const me=uid()?db.profiles.find(p=>p.id===uid()):null;
     if(name==="stripe-status"){ if(window.__mockStatusDown) throw new TypeError("Failed to fetch");   // the payment functions can't be reached
-      return res(200,{escrow:window.__mockEscrow,stripeKeyOk:window.__mockStripeKeyOk!==false,autoReleaseDays:7}); }
+      return res(200,{escrow:window.__mockEscrow,stripeKeyOk:window.__mockStripeKeyOk!==false,autoReleaseDays:7,settingsNotes:window.__mockSettingsNotes||[]}); }
     if(!window.__mockEscrow) return res(503,{error:"Escrow payments are not configured yet"});
     if(!me) return res(401,{error:"Sign in first"});
     const forced=window.__mockFnFail&&window.__mockFnFail[name]; if(forced==="down") throw new TypeError("Failed to fetch");   // no readable answer at all

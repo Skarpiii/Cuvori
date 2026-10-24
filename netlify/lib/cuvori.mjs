@@ -2,17 +2,44 @@ import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const env = (name) => String(process.env[name] || "").trim();
-function configuredOrigin(value, name) {
-  if (!value) throw new Error(`Missing configuration: ${name}`);
-  let url;
-  try { url = new URL(value); } catch { throw new Error(`Invalid configuration: ${name}`); }
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash)
-    throw new Error(`Invalid origin configuration: ${name}`);
-  return url.origin;
+// The web addresses in the settings (SUPABASE_URL, SITE_URL, ALLOWED_ORIGINS) are read the way people write them:
+// "cuvori.io", "www.cuvori.io/", "https//cuvori.io", "http://cuvori.io" and "https://cuvori.io/anything" all mean
+// https://cuvori.io (http stays only for local testing). One that is not a web address at all never stops the payment
+// functions — before, it made this file throw as it loaded, so every function, the webhook and the hourly job stopped at
+// once: it is left out (ALLOWED_ORIGINS) or replaced by Cuvori's own address, and the admin page says which setting to
+// correct (SETTINGS_NOTES, sent by stripe-status). What was typed is never written to the log or shown anywhere: a key
+// pasted into the wrong field must not travel further. Only the setting's name and the address Cuvori uses are.
+export const SETTINGS_NOTES = [];
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+// a real host name: letters, digits and hyphens, at most 63 to a part and 253 in all, ending in a name (com, io, xn--…).
+// Keys never pass: they hold underscores, or parts far longer than 63, or end in digits.
+const HOST_OK = (h) => h.length <= 253 && h.split(".").length >= 2 && h.split(".").every(l => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l))
+  && /^([a-z]{2,63}|xn--[a-z0-9-]{1,59})$/.test(h.split(".").pop());
+function originOf(value) {
+  const typed = String(value || "").trim();
+  let rest = typed.replace(/^\/+/, ""), scheme = null;
+  const m = /^(https?)(?::\/*|\/+)(.*)$/i.exec(rest);
+  if (m) { scheme = m[1].toLowerCase(); rest = m[2]; }
+  else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rest)) return null;                 // another kind of address (ftp://, file://)
+  if (!rest) return null;
+  let url; try { url = new URL("https://" + rest); } catch { return null; }
+  const local = LOCAL_HOSTS.includes(url.hostname);
+  if (!local && !HOST_OK(url.hostname)) return null;
+  const origin = `${local ? scheme || "http" : "https"}://${url.host}`;
+  return { origin, corrected: origin !== typed.replace(/\/+$/, "").toLowerCase() };
 }
-// The project address is public (it is in the page too); a missing variable must not take every payment function down.
-export const SUPABASE_URL = configuredOrigin(env("SUPABASE_URL") || "https://tnxujwlfatcvxzevllfr.supabase.co", "SUPABASE_URL");
+const note = (text) => { SETTINGS_NOTES.push(text); console.error("Netlify setting:", text); };
+const WHERE = "Correct it in Netlify under Project configuration → Environment variables.";
+function addressSetting(name, value, fallback) {
+  if (!value) return fallback;
+  const o = originOf(value);
+  if (!o) { note(`${name} is not a web address, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
+  if (o.corrected) note(`${name} is not written as a full web address; Cuvori reads it as ${o.origin}. ${WHERE}`);
+  return o.origin;
+}
+const CUVORI_SITE = "https://cuvori.io";
+// The project address is public (it is in the page too); a missing or broken setting must not take every payment function down.
+export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), "https://tnxujwlfatcvxzevllfr.supabase.co");
 // Legacy service-role keys are JWTs; new secret keys use only the apikey header. When both are set, the new secret key
 // is used: Supabase is phasing the old keys out, and an old key switched off in Supabase must never shadow a working new one.
 export const SERVICE_KEY = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
@@ -29,11 +56,29 @@ export const STRIPE_MODE = !STRIPE_KEY_WHOLE ? null : /^(sk|rk)_live_/.test(STRI
 export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 // the optional second endpoint, for events about the freelancers' own Stripe accounts: read like every other setting
 export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
-export const SITE_URL = configuredOrigin(env("SITE_URL") || env("URL"), "SITE_URL or URL");
-// the page may live on another host (GitHub Pages) and call these functions across origins
-// An explicit list replaces the defaults; wildcard origins are not accepted.
-export const ALLOWED_ORIGINS = [...new Set((env("ALLOWED_ORIGINS") || `${SITE_URL},https://cuvori.io,https://www.cuvori.io`).split(",").map(s => s.trim()).filter(Boolean).map(s => configuredOrigin(s, "ALLOWED_ORIGINS")))];
-if (!ALLOWED_ORIGINS.length) throw new Error("ALLOWED_ORIGINS must contain at least one origin");
+// Where Stripe sends people back (after paying, after setting up payouts). Not set: Netlify's own address (URL). Set but
+// not a web address: Cuvori's own address, never Netlify's, which may serve an older copy of the page.
+export const SITE_URL = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
+// the page may live on another host (GitHub Pages) and call these functions across origins. An explicit list replaces
+// the defaults; entries may be separated by commas, spaces or semicolons. "*" (every website) is never accepted: an entry
+// that is not one web address is left out, and a list with nothing usable left falls back to the defaults.
+const DEFAULT_ORIGINS = [...new Set([SITE_URL, "https://cuvori.io", "https://www.cuvori.io"])];
+function originsSetting(value) {
+  if (!value) return DEFAULT_ORIGINS;
+  const list = [], fixed = [];
+  let left = 0;
+  for (const entry of value.split(/[\s,;]+/).filter(Boolean)) {
+    const o = originOf(entry);
+    if (!o) { left++; continue; }
+    if (o.corrected) fixed.push(o.origin);
+    list.push(o.origin);
+  }
+  if (left) note(`ALLOWED_ORIGINS has ${left} ${left === 1 ? "entry" : "entries"} that ${left === 1 ? "is" : "are"} not one web address ("*" for every website is never allowed); ${left === 1 ? "it is" : "they are"} left out. ${WHERE}`);
+  if (fixed.length) note(`ALLOWED_ORIGINS is not written as full web addresses; Cuvori reads ${fixed.join(", ")}. ${WHERE}`);
+  if (!list.length) { note(`ALLOWED_ORIGINS has no usable address, so Cuvori uses ${DEFAULT_ORIGINS.join(", ")}. ${WHERE}`); return DEFAULT_ORIGINS; }
+  return [...new Set(list)];
+}
+export const ALLOWED_ORIGINS = originsSetting(env("ALLOWED_ORIGINS"));
 export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
 // Cuvori's conservative per-payment total cap, including the quoted fee.
 // Provider limits also depend on currency/payment method and must be checked at Checkout.

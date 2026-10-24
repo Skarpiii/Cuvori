@@ -839,6 +839,13 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
   { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON, but paused') && tx.includes('STRIPE_SECRET_KEY') && tx.includes('sk_live_'),'a Stripe key that is not a secret key: the admin panel says "ON, but paused" and what to correct'); }
   await p.evaluate(()=>{ window.__mockStripeKeyOk=true; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  // a web-address setting in Netlify written loosely or not at all (attack-settings.mjs): the payment functions keep working and the admin sees which one to correct
+  await p.evaluate(()=>{ window.__mockSettingsNotes=['SITE_URL is not a web address, so Cuvori uses https://cuvori.io instead. Correct it in Netlify under Project configuration → Environment variables.']; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+  { const tx=await p.textContent('#adminBody'); ok(tx.includes('Netlify setting: SITE_URL is not a web address, so Cuvori uses https://cuvori.io instead') && tx.includes('Protected payments:'),'a Netlify address setting that had to be replaced: the admin panel names it and says what Cuvori uses'); }
+  await p.evaluate(()=>{ window.__mockSettingsNotes=[]; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+  ok(!(await p.textContent('#adminBody')).includes('Netlify setting:'),'settings in order: no note');
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
   { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON — clients fund Orders through Stripe') && !tx.includes('ON, but paused'),'a real secret key: the admin panel says plain "ON" again'); }
   await newOrder('Quick teaser',200);

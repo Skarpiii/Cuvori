@@ -47,6 +47,7 @@ echo "== payout fee line";  out=$(node tests/attack-connect-fee.mjs 2>/dev/null 
 echo "== Stripe switches during a payment (database)"; out=$(node tests/attack-stripe-switch.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== Supabase's Delete user (database)"; out=$(node tests/attack-dashboard-delete.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== card-fee floor (database)"; out=$(node tests/attack-fee-floor.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== address settings";  out=$(node tests/attack-settings.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limit on tries";   out=$(node tests/attack-rate.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limits match";     out=$(node tests/limits-match.mjs | tail -1); echo "$out"; echo "$out" | grep -q " 0 failed" || r=1
 echo "== deploy skip rule"; out=$(bash tests/netlify-skip.sh | tail -1); echo "$out"; echo "$out" | grep -q "all .* checks passed" || r=1
