@@ -19,7 +19,12 @@
 // written loosely, A5 "*" and nonsense in ALLOWED_ORIGINS, A6 SUPABASE_URL, A7 what stays as it was (normal), A8 a line
 // break or tab inside an address, A9 SITE_URL not set, A10 ALLOWED_ORIGINS can't lock the page out, A11 notes name the
 // setting only, A12 an "@" inside an address (the part before it is a user name to a web address, so "cuvori.io@evil.com"
-// means evil.com): never read as an address.
+// means evil.com): never read as an address. A13 a character that is not a plain letter, digit or sign (an invisible one
+// pasted along, a look-alike letter from another alphabet, a full-width dot): the address reader would quietly turn it into
+// another website (cuvori.io + an invisible space + evil.com is cuvori.ioevil.com; a Cyrillic "о" in cuvori.io is a domain
+// anyone can register), so it counts as not an address. A14 SITE_URL that leads somewhere other than cuvori.io (a typo, a
+// password-like value, an address with a folder, whose folder is dropped): it is used, and the admin page says Stripe sends
+// clients and freelancers to another website — without repeating it.
 // Run: node tests/attack-settings.mjs
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -154,6 +159,33 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
     const bad = name === "SITE_URL" ? r.site !== "https://cuvori.io" : name === "ALLOWED_ORIGINS" ? (r.origins || []).some(o => /evil/.test(o)) : r.supabase !== "https://tnxujwlfatcvxzevllfr.supabase.co";
     vuln(!works(r) || bad || !noted(r, name), `A12 ${name} = ${JSON.stringify(v)} -> ${said(r)}${name === "SUPABASE_URL" ? ", database " + r.supabase : ""} (must never use the address after the "@"; a note names ${name})`);
+  }
+}
+{ // A13 a character that is not a plain letter, digit or sign: never turned into another website
+  const cases = [["SITE_URL", "cuvori.io\u200bevil.com"], ["SITE_URL", "https://cuvori.io\u200bevil.com"], ["SITE_URL", "cuvori.io\u3002evil.com"], ["SITE_URL", "cuvori.io\uff0eevil.com"],
+                 ["SITE_URL", "cuv\u043eri.io"], ["SITE_URL", "https://cuv\u043eri.io"], ["SITE_URL", "cuvori.io\u00ad"],
+                 ["SUPABASE_URL", "other\u200bproject.supabase.co"], ["ALLOWED_ORIGINS", "https://cuvori.io\u200bevil.com"], ["ALLOWED_ORIGINS", "main--cuv\u043eri.netlify.app"]];
+  for (const [name, v] of cases) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const bad = name === "SITE_URL" ? r.site !== "https://cuvori.io" : name === "SUPABASE_URL" ? r.supabase !== "https://tnxujwlfatcvxzevllfr.supabase.co"
+      : JSON.stringify(r.origins) !== JSON.stringify(["https://cuvori.io", "https://www.cuvori.io"]);
+    const why = name === "ALLOWED_ORIGINS" ? "not one web address" : "is not a web address";
+    vuln(!works(r) || bad || !noted(r, name) || !r.notes.some(n => n.includes(why)),
+      `A13 ${name} = ${JSON.stringify(v)} -> ${said(r)}${name === "SUPABASE_URL" ? ", database " + r.supabase : ""}; note: ${r.notes ? JSON.stringify(r.notes).slice(0, 110) : "none"} (must count as not a web address: ${name === "ALLOWED_ORIGINS" ? "left out" : "Cuvori's own address used"}, with a note)`);
+  }
+}
+{ // A14 SITE_URL leads to a website other than cuvori.io: used, and the admin page says so without repeating it
+  const OTHER = "a website other than cuvori.io";
+  for (const [v, site] of [["cuvori.co", "https://cuvori.co"], ["MySECRETdoNotShow0.Secret", "https://mysecretdonotshow0.secret"], ["https://egidijus.github.io/cuvori/", "https://egidijus.github.io"], ["https://xn--cuvri-lye.io", "https://xn--cuvri-lye.io"]]) {
+    const r = load({ SITE_URL: v });
+    const shown = JSON.stringify(r.notes || []) + (r.body || "") + r.log;
+    const repeated = /cuvori\.co[^a-z]|secretdonotshow|github|cuvri/i.test(shown);
+    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => n.includes(OTHER)) || repeated,
+      `A14 SITE_URL = ${JSON.stringify(v)} -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 160) : "none"}; repeated: ${repeated ? "YES" : "no"} (must say Stripe sends people to ${OTHER}, never which one)`);
+  }
+  for (const v of ["cuvori.io", "https://www.cuvori.io", "https://cuvori.io/#home", "localhost:8888", "http://127.0.0.1:8888"]) {
+    const r = load({ SITE_URL: v });
+    vuln(r.error || (r.notes || []).some(n => n.includes(OTHER)), `A14b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no "other website" note)`);
   }
 }
 console.log(out.join("\n"));

@@ -13,14 +13,17 @@ const env = (name) => String(process.env[name] || "").trim();
 export const SETTINGS_NOTES = [];
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 // a real host name: letters, digits and hyphens, at most 63 to a part and 253 in all, ending in a name (com, io, xn--…).
-// Keys never pass: they hold underscores, or parts far longer than 63, or end in digits.
+// Cuvori's own keys (Stripe's, Supabase's) never pass: they hold underscores, or parts far longer than 63, or end in digits.
 const HOST_OK = (h) => h.length <= 253 && h.split(".").length >= 2 && h.split(".").every(l => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l))
   && /^([a-z]{2,63}|xn--[a-z0-9-]{1,59})$/.test(h.split(".").pop());
 function originOf(value) {
   const typed = String(value || "").trim();
   // a line break, tab or other space inside (a paste that wrapped, two lines in one field): not one address. The address
   // reader would quietly drop line breaks and tabs and glue the rest into a made-up address Stripe would send clients to.
-  if (/[\s\x00-\x1f\x7f]/.test(typed)) return null;
+  // The same for any character that is not a plain letter, digit or sign: the reader drops invisible ones (cuvori.io, an
+  // invisible space, evil.com becomes cuvori.ioevil.com), turns a full-width dot into a dot, and turns a look-alike letter
+  // from another alphabet (a Cyrillic "о" in cuvori.io) into a different domain that anyone can register.
+  if (/[^\x21-\x7e]/.test(typed)) return null;
   // an "@": what comes before it is a user name, so "cuvori.io@evil.com" is the website evil.com. Never an address here.
   if (typed.includes("@")) return null;
   let rest = typed.replace(/^\/+/, ""), scheme = null;
@@ -71,6 +74,12 @@ export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
 // admin page says so, since that address may serve an older copy of the page. Set but not a web address: Cuvori's own
 // address, never Netlify's.
 export const SITE_URL = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
+// SITE_URL set to a website other than cuvori.io (a typo such as cuvori.co, a password pasted into the wrong field, an
+// address with a folder, whose folder is dropped): used as it is, since that may be on purpose, but the admin page says so.
+// Which website it is stays unsaid, like everything read from a setting.
+const CUVORI_HOSTS = ["cuvori.io", "www.cuvori.io"];
+if (env("SITE_URL") && ![...CUVORI_HOSTS, ...LOCAL_HOSTS].includes(new URL(SITE_URL).hostname))
+  note(`SITE_URL leads to a website other than cuvori.io, so Stripe sends clients there after paying, and freelancers after setting up payouts. If that is not on purpose, correct it in Netlify under Project configuration → Environment variables.`);
 if (!env("SITE_URL")) note(SITE_URL === CUVORI_SITE ? `SITE_URL is not set; Cuvori uses ${CUVORI_SITE}. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`
   : `SITE_URL is not set, so Stripe sends clients back to ${SITE_URL} after paying, which may show an older copy of the page. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`);
 // the page may live on another host (GitHub Pages) and call these functions across origins. The page's own addresses

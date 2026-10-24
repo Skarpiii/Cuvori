@@ -10,9 +10,15 @@
 // D4 what still works (normal), D5 deleting on purpose, D6 the proper ways are unchanged (normal), D7 running v52, D8 the
 // delete as Supabase's own dashboard makes it: as its auth role (supabase_auth_admin), which may delete sign-ins but has no
 // right to Cuvori's functions — the check must work for that role too, not only for the database owner.
+// Schema v54: an invite remembers who used it and who made it, and the database refused to delete a sign-in an invite still
+// pointed to, so Delete user failed ("Database error deleting user") for every freelancer (they all join with an invite)
+// and for the admin who made invites, even with no money on the way; v52's "delete anyway" steps failed the same way, and
+// the admin page could not delete an admin who had made invites. D9 a freelancer who joined with an invite, D10 the same
+// with money on the way (refused for the money, then deleted on purpose), D11 the admin who made invites, D12 running v54.
 // Every check is rolled back.
 // Run: node tests/attack-dashboard-delete.mjs   (needs the local Postgres of tests/db; it is started here)
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -133,6 +139,56 @@ const saidMoney = (s) => s.startsWith("refused") && /money/i.test(s);
   vuln(pick(r, "may call has_money_held itself") !== "false" || !saidMoney(pick(r, "held")) || pick(r, "after") !== "sign-in kept, profile as it was, Order funded holding 10000"
        || pick(r, "finished") !== "deleted" || pick(r, "finished client") !== "sign-in gone, her Order completed",
     `D8 as Supabase's auth role (may call Cuvori's check itself: ${pick(r, "may call has_money_held itself")}): the client of the funded Order -> ${short(pick(r, "held"))}; afterwards ${pick(r, "after")}; a client whose Order is finished -> ${pick(r, "finished")}, ${pick(r, "finished client")} (must be: refused with the money named, kept; deleted, the Order kept)`);
+}
+// ---------- v54: people who joined with an invite, or made invites ----------
+// 9a01 a freelancer who joined with the code CUV-9A01-TEST (no Order); 8c62 (the freelancer of the funded Order) joined with
+// CUV-8C62-TEST; 9a03 an admin who made the code CUV-9A03-FREE (not used yet)
+const hashOf = (code) => crypto.createHash("sha256").update(code).digest("hex");
+const INVITES = `
+  insert into auth.users (id, email, raw_user_meta_data) values (${U("9a01")}, 'ina9a01@t.com', '{"first_name":"Ina"}'), (${U("9a03")}, 'ada9a03@t.com', '{"first_name":"Ada"}');
+  update public.profiles set role = 'editor' where id = ${U("9a01")};
+  update public.profiles set is_admin = true where id = ${U("9a03")};
+  insert into public.invites (code_hash, note, used_by, used_at) values ('${hashOf("CUV-9A01-TEST")}', 'for Ina', ${U("9a01")}, now() - interval '5 days'), ('${hashOf("CUV-8C62-TEST")}', 'for Sven', ${U("8c62")}, now() - interval '9 days');
+  insert into public.invites (code_hash, note, created_by) values ('${hashOf("CUV-9A03-FREE")}', 'made by Ada', ${U("9a03")});`;
+const INV = (code, label) => `select '${label}: ' || coalesce((select case when used_at is not null then 'used' else 'free' end || ', used by ' || coalesce(used_by::text, 'nobody') || ', made by ' || coalesce(created_by::text, 'nobody') from public.invites where code_hash = '${hashOf(code)}'), 'gone');`;
+const GONE = (who, label) => `select '${label}: ' || case when exists (select 1 from auth.users where id = ${U(who)}) then 'sign-in kept' else 'sign-in gone' end || ', profile ' || coalesce((select case when deleted_at is null then 'as it was' else 'emptied' end from public.profiles where id = ${U(who)}), 'gone');`;
+{ // D9 a freelancer who joined with an invite and has no money on the way: Delete user works, as the owner and as Supabase's auth role
+  const AUTH = `do $$ begin if not exists (select 1 from pg_roles where rolname = 'supabase_auth_admin') then create role supabase_auth_admin nologin; end if; end $$;
+    grant usage on schema auth to supabase_auth_admin; grant select, delete on auth.users to supabase_auth_admin;`;
+  const r = tx(`${INVITES} ${DEL("9a01")} ${GONE("9a01", "after")} ${INV("CUV-9A01-TEST", "invite")}
+    ${as("8c63")} select 'code again: ' || public.redeem_invite('CUV-9A01-TEST'); ${owner}`);
+  const a = tx(`${INVITES} ${AUTH} set local role supabase_auth_admin; ${TRY("authrole", "delete from auth.users where id = '00000000-0000-0000-0000-000000009a01'")} reset role; ${GONE("9a01", "after")}`);
+  vuln(pick(r, "delete") !== "deleted" || pick(r, "after") !== "sign-in gone, profile gone" || pick(r, "invite") !== "used, used by nobody, made by nobody" || pick(r, "code again") !== "used",
+    `D9 Delete user on a freelancer who joined with an invite (no Order, no money) -> ${short(pick(r, "delete"))}; afterwards: ${pick(r, "after")}; the invite: ${pick(r, "invite")}; someone else typing that code again -> ${pick(r, "code again")} (must be deleted; the invite stays used, so the code never works again)`);
+  vuln(pick(a, "authrole") !== "deleted" || pick(a, "after") !== "sign-in gone, profile gone",
+    `D9b the same as Supabase's auth role (the role the dashboard's button uses) -> ${short(pick(a, "authrole"))}; afterwards: ${pick(a, "after")} (must be deleted)`);
+}
+{ // D10 a freelancer who joined with an invite and is owed EUR 100: refused for the money (not a database error), and deleting on purpose works
+  const r = tx(`${INVITES} ${DEL("8c62")} ${STATE("8c62")}
+    select set_config('cuvori.delete_with_money_held', 'yes', true); ${DEL("8c62", "purpose")} ${STATE("8c62", "then")} ${INV("CUV-8C62-TEST", "invite")}`);
+  vuln(!saidMoney(pick(r, "delete")) || pick(r, "after") !== "sign-in kept, profile as it was, Order funded holding 10000"
+       || pick(r, "purpose") !== "deleted" || pick(r, "then") !== "sign-in gone, profile emptied, Order funded holding 10000" || pick(r, "invite") !== "used, used by nobody, made by nobody",
+    `D10 Delete user on the freelancer owed EUR 100 who joined with an invite -> ${short(pick(r, "delete"))}; then v52's "delete anyway" -> ${short(pick(r, "purpose"))}; afterwards: ${pick(r, "then")}; the invite: ${pick(r, "invite")} (must be refused for the money, then deleted on purpose with the Order kept)`);
+}
+{ // D11 the admin who made invites: Delete user, and the admin page's Delete by another admin
+  const r = tx(`${INVITES} ${DEL("9a03")} ${GONE("9a03", "after")} ${INV("CUV-9A03-FREE", "invite")}`);
+  const p = tx(`${INVITES} ${as("401")} select 'admin page: ' || public.admin_delete_user(${U("9a03")}); ${owner} ${GONE("9a03", "after")} ${INV("CUV-9A03-FREE", "invite")}`);
+  vuln(pick(r, "delete") !== "deleted" || pick(r, "after") !== "sign-in gone, profile gone" || pick(r, "invite") !== "free, used by nobody, made by nobody",
+    `D11 Delete user on the admin who made an invite -> ${short(pick(r, "delete"))}; afterwards: ${pick(r, "after")}; the unused invite: ${pick(r, "invite")} (must be deleted; the invite stays, still usable)`);
+  vuln(pick(p, "admin page") !== "ok" || pick(p, "after") !== "sign-in gone, profile gone",
+    `D11b the admin page's Delete on that admin, by another admin -> ${short(pick(p, "admin page"))}; afterwards: ${pick(p, "after")} (must be ok)`);
+}
+{ // D12 running v54 (twice: the SQL editor may be run again)
+  const f = path.join(root, "supabase/schema_v54.sql");
+  if (!fs.existsSync(f)) vuln(true, "D12 supabase/schema_v54.sql is missing, so Supabase's Delete user still fails for everyone who joined with an invite");
+  else {
+    const r = tx(`\\i ${f}
+\\i ${f}
+      ${INVITES} ${DEL("9a01")} ${GONE("9a01", "after")}`);
+    const rows = r.out.split("\n").filter(l => /^v54 /.test(l));
+    vuln(!r.ok || rows.length !== 2 || !rows.every(l => /^v54 applied/.test(l)) || pick(r, "delete") !== "deleted",
+      `D12 running v54 twice -> ${r.ok ? rows.map(l => `"${l.slice(0, 80)}"`).join(" then ") || "no result row" : "error: " + r.err.split("\n").find(x => /ERROR/.test(x))}; then Delete user on the invited freelancer -> ${short(pick(r, "delete"))}`);
+  }
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;
