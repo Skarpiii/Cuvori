@@ -455,6 +455,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
     await p.click('#stripeConnectBtn');
     ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE') && !(await p.textContent('#toastWrap')).includes('Nothing was charged'),`Payout details, ${code}: the freelancer reads it in plain words`);
   }
+  // the money is still settling, a chargeback is open, the freelancer's account isn't ready: said in the person's words, never the server's English sentence
+  for (const [code, want] of [["settling","The payment provider is still settling the card payment. Cuvori retries this automatically every hour — nothing to do."],["chargeback_open","A card chargeback is open on this Order, so no money can move until the bank decides."],["freelancer_not_ready","This freelancer's Stripe account can't receive money right now. Ask them in the chat to check Settings → Payout details."]]) {
+    await p.evaluate((code)=>{ window.__mockFnFail={"stripe-connect":[409,{error:"SERVER SENTENCE",code}]}; document.querySelector('#toastWrap').innerHTML=''; },code);
+    await p.click('#stripeConnectBtn');
+    ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE'),`a money step answers ${code}: the person reads it in plain words in their language`);
+  }
   await p.evaluate(()=>{ window.__mockFnFail=null; });
   await p.click('#stripeConnectBtn'); await p.waitForTimeout(1200);
   ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'after Stripe onboarding: ready');

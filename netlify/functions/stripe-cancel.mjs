@@ -16,7 +16,7 @@ export default safe(async (req) => {
   if (c.payment_mode !== "escrow") return bad("This order is not holding money", 409);
   const held = heldCents(c);
   if (!held) return bad("This order is not holding money", 409);
-  if (chargebackOpen(c)) return bad("A card chargeback is open on this payment. Nothing can move until the bank decides.", 409);
+  if (chargebackOpen(c)) return json(409, { error: "A card chargeback is open on this payment. Nothing can move until the bank decides.", code: "chargeback_open" });
   let row = c.status === "resolving" && c.resolution === "refund" && c.resolved_by === me.id ? c : null;   // resume
   if (!row) {
     if (!["funded", "delivered"].includes(c.status)) return bad("This order cannot be cancelled right now", 409);

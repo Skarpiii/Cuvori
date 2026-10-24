@@ -205,6 +205,8 @@ export function sameMode(c) {
 const SETTLING = "The card payment is still settling at the payment provider. Cuvori retries this every hour; nothing needs to be done.";
 const NOT_READY = "The freelancer's Stripe account is not ready to receive money. Once they finish their Stripe setup, Cuvori retries this every hour.";
 const CHARGEBACK = "A card chargeback is open on this payment. Nothing can move until the bank decides.";
+// Each of these three is sent with a code (settling, freelancer_not_ready, chargeback_open), so the page says it in the
+// person's language; the English sentence is for the Order's note and the admin.
 
 // ---- Stripe (form-encoded REST) ----
 function encode(obj, prefix) {
@@ -867,7 +869,7 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   if (!Number.isInteger(editorCents) || editorCents <= 0) throw new Error("bad release amount");
   if (purpose === "release" && editorCents > heldCents(c)) throw new Error("bad release amount");
   sameMode(c);
-  if (chargebackOpen(c)) throw fail(CHARGEBACK);
+  if (chargebackOpen(c)) throw fail(CHARGEBACK, 409, "chargeback_open");
   // a transfer for the same milestone / the same settlement attempt is never made twice. Whole-order releases carry
   // the attempt (the decision's timestamp): a later, different decision on the same Order may transfer again.
   const attemptTag = milestoneId || purpose !== "release" ? "" : String(c.resolved_at || "");
@@ -877,7 +879,7 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   // Existing transfers above still need reconciliation; a ban blocks new transfers.
   if (await isBanned(c.editor)) throw fail("This freelancer cannot receive payments", 409);
   const acct = await payoutAccount(c.editor);
-  if (!accountReady(acct)) throw fail(NOT_READY);
+  if (!accountReady(acct)) throw fail(NOT_READY, 409, "freelancer_not_ready");
   // tie the transfer to the card charge when there is exactly one: Stripe then allows it before the money
   // has settled. Several charges (top-ups) or a re-payment draw on the balance instead.
   const funds = await fundRows(c);
@@ -896,8 +898,8 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
       throw e;
     }
   } catch (e) {
-    if (stripeCode(e) === "balance_insufficient" || /insufficient funds/i.test(e.message)) throw fail(SETTLING);
-    if (/capabilit|destination|No such account|payouts/i.test(e.message) && e.status === 400) throw fail(NOT_READY);
+    if (stripeCode(e) === "balance_insufficient" || /insufficient funds/i.test(e.message)) throw fail(SETTLING, 409, "settling");
+    if (/capabilit|destination|No such account|payouts/i.test(e.message) && e.status === 400) throw fail(NOT_READY, 409, "freelancer_not_ready");
     if (e.network) throw fail("The payment provider did not answer. Nothing was lost — please try again in a minute.", 503);
     throw e;
   }
@@ -912,7 +914,7 @@ export const FEE_REFUND = (r) => !!(r && r.metadata && r.metadata.kind === "fee_
 export async function refundToClient(c, cents) {
   if (!Number.isInteger(cents) || cents <= 0) throw new Error("bad refund amount");
   sameMode(c);
-  if (chargebackOpen(c)) throw fail(CHARGEBACK);
+  if (chargebackOpen(c)) throw fail(CHARGEBACK, 409, "chargeback_open");
   const funds = await fundRows(c);
   const sources = funds.length ? funds.map(f => ({ pi: f.provider_ref, amount: f.amount_cents })).reverse() : (c.stripe_payment_intent ? [{ pi: c.stripe_payment_intent, amount: nz(c.funded_cents) || centsOf(c) || 0 }] : []);
   if (!sources.length) throw new Error("no payment to refund");
@@ -936,9 +938,9 @@ export async function refundToClient(c, cents) {
     }
     return ids.join(",");
   } catch (e) {
-    if (stripeCode(e) === "balance_insufficient" || /insufficient funds/i.test(e.message)) throw fail("The payment provider cannot pay this refund yet (balance still settling). Cuvori retries every hour.");
+    if (stripeCode(e) === "balance_insufficient" || /insufficient funds/i.test(e.message)) throw fail("The payment provider cannot pay this refund yet (balance still settling). Cuvori retries every hour.", 409, "settling");
     // Stripe has two codes for "this payment was charged back, it can't be refunded"
-    if (["charge_disputed", "refund_disputed_payment"].includes(stripeCode(e)) || /charged back/i.test(e.message)) throw fail(CHARGEBACK);
+    if (["charge_disputed", "refund_disputed_payment"].includes(stripeCode(e)) || /charged back/i.test(e.message)) throw fail(CHARGEBACK, 409, "chargeback_open");
     if (e.network) throw fail("The payment provider did not answer. Nothing was lost — please try again in a minute.", 503);
     throw e;
   }
@@ -967,7 +969,7 @@ async function settleLocked(c0, actor, ev) {
   // fresh row: the amounts were decided when the Order was claimed, and a milestone release that was already
   // running at that moment may have moved money since. Whatever is settled here never exceeds what is held now.
   let c = (await db.contract(c0.id)) || c0;
-  if (chargebackOpen(c)) throw fail(CHARGEBACK);
+  if (chargebackOpen(c)) throw fail(CHARGEBACK, 409, "chargeback_open");
   if (c.status !== c0.status) throw fail("The order changed a moment ago — reload the page.", 409);
   const editorCents = nz(c.split_editor_cents), refundCents = nz(c.refund_cents);
   const now = new Date().toISOString();
@@ -1042,7 +1044,7 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
   const c = await db.contract(c0.id);
   if (!c) throw fail("Order not found", 404);
   if (!["funded", "delivered"].includes(c.status)) throw fail("Nothing to release right now", 409);
-  if (chargebackOpen(c)) throw fail(CHARGEBACK);
+  if (chargebackOpen(c)) throw fail(CHARGEBACK, 409, "chargeback_open");
   if (m.amount_cents > heldCents(c)) throw fail("Not enough money is held for this milestone", 409);
   const claimed = await db.claimMilestone(m.id, ["submitted", "approved"], { status: "approved", approved_at: m.approved_at || new Date().toISOString(), auto_release_at: null });
   if (!claimed) throw fail("This milestone was just changed, reload", 409);

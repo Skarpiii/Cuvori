@@ -12,7 +12,7 @@ export default safe(async (req) => {
   const c = await db.contract(id);
   if (!c || c.client !== me.id) return bad("Not your order", 403);
   if (c.payment_mode !== "escrow") return bad("Nothing to release right now", 409);
-  if (chargebackOpen(c)) return bad("A card chargeback is open on this payment. Nothing can move until the bank decides.", 409);
+  if (chargebackOpen(c)) return json(409, { error: "A card chargeback is open on this payment. Nothing can move until the bank decides.", code: "chargeback_open" });
   if (await isBanned(c.editor)) return bad("This order is under review by Cuvori", 409);
 
   if (milestone_id) {
@@ -20,7 +20,7 @@ export default safe(async (req) => {
     const m = await db.milestone(milestone_id);
     if (!m || m.order_id !== c.id) return bad("Not your milestone", 403);
     const acct = await orderPayoutAccount(c);
-    if (!accountReady(acct)) return bad("The freelancer's Stripe account is not ready yet", 409);
+    if (!accountReady(acct)) return json(409, { error: "The freelancer's Stripe account is not ready yet", code: "freelancer_not_ready" });
     const transfer = await releaseMilestone(c, m, me.id, "approve");
     return json(200, { ok: true, transfer, released: m.amount_cents });
   }
@@ -40,7 +40,7 @@ export default safe(async (req) => {
     // does not block the release.
     if (owedCents(c) >= MIN_TOPUP_CENTS) return bad("The price increase you agreed to is not paid yet. Fund it first, then release the payment. If something is wrong, open a dispute.", 409);
     const acct = await orderPayoutAccount(c);
-    if (!accountReady(acct)) return bad("The freelancer's Stripe account is not ready yet", 409);
+    if (!accountReady(acct)) return json(409, { error: "The freelancer's Stripe account is not ready yet", code: "freelancer_not_ready" });
     // Nothing can be paid into the Order once it is closed: its Stripe payment page is closed first.
     if ((await closeCheckout(c)) === "paid") return bad("A payment for this order has just come in. Reload the page and try again.", 409);
     const now = new Date().toISOString();

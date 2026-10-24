@@ -16,7 +16,7 @@ export default safe(async (req) => {
   const c = await db.contract(body.contract_id);
   if (!c) return bad("Not found", 404);
   if (c.payment_mode !== "escrow") return bad("This order is not holding money", 409);
-  if (chargebackOpen(c)) return bad("A card chargeback is open on this payment. Nothing can move until the bank decides.", 409);
+  if (chargebackOpen(c)) return json(409, { error: "A card chargeback is open on this payment. Nothing can move until the bank decides.", code: "chargeback_open" });
   const total = heldCents(c);                                            // what is still held: released milestones stay released
   if (!total) return bad("This order is not holding money", 409);
 
