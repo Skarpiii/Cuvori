@@ -9,8 +9,9 @@
 -- Now admin_set_fee_schedule refuses to save a client-paid Stripe card row that decides the checkout price when that row
 -- would have collected less than Stripe really took on any payment settled in the last 12 months, and says which
 -- payment and by how much. No rate is written in code: the floor is what cards actually cost on Cuvori's own payments.
--- Rows that do not decide the checkout price (a country or region row, a consumer/business row, the payout-fee row, a
--- row set to payer = platform or switched off) are saved as before. Nothing else changes. Safe to run more than once.
+-- Rows that never decide the card fee at checkout (a country or region row, a consumer/business row, the payout-fee row),
+-- and rows set to payer = platform or switched off (those pause payments instead), are saved as before. (This comment was
+-- corrected on 2026-10-24, after v53 was run; the SQL is unchanged.) Nothing else changes. Safe to run more than once.
 
 create or replace function public.admin_set_fee_schedule(p jsonb)
 returns text language plpgsql security definer set search_path = public as $$

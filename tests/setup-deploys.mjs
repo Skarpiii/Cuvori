@@ -86,9 +86,17 @@ check(/Database error deleting user/.test(v52) && /Logs → Postgres/.test(v52) 
 // the account move, safe end to end: new payments paused first (the fee table's ANY card row set to payer = platform, which
 // pauses every payment), a wait for payment pages still open (up to 90 minutes), enough Netlify credits for the production
 // deploy in the middle, what to do with a refund that can never be sent, and the way back if the switch still refuses
-const pauseAt = move.search(/payer[^.]{0,40}\*\*platform/);
-check(pauseAt > 0 && pauseAt < move.indexOf("orders_with_money_on_the_way()") && /2 hours/.test(move) && /15 credits/.test(move),
-  "moving to another Stripe account: new payments are paused first, then a 2-hour wait for open payment pages, with 15 Netlify credits at hand");
+// The checks that need no pause come first (the SQL check, the fee row still saving, no unpaid agreed increase), so a
+// problem is found while payments still work; the pause comes after them, with a check that it worked, and the SQL check
+// is run again after the wait; credits for the move and for undoing it (45); the new account set up before anything moves.
+const pauseAt = move.search(/payer[^.]{0,40}\*\*platform/), firstCheck = move.indexOf("orders_with_money_on_the_way()");
+check(pauseAt > 0 && firstCheck > 0 && firstCheck < pauseAt && move.indexOf("press **Save** without changing anything") < pauseAt && move.indexOf("press **Save** without changing anything") > 0
+      && /price increase[^.]*unpaid[^.]*now/.test(move.slice(0, pauseAt)) && /again[^.]{0,80}both are 0/.test(move.slice(pauseAt)) && /2 hours/.test(move) && /45 credits/.test(move),
+  "moving to another Stripe account: the checks come before the pause (the SQL check, Save on the unchanged row, unpaid increases), the SQL check again after the wait, 45 credits");
+check(/Payments are paused at the moment/.test(move.slice(pauseAt)) && /stripe · ANY · any · card/.test(move) && /never[^.]{0,30}connect/.test(move),
+  "moving to another Stripe account: says how to see that the pause worked, which rows to pause, and never the connect row");
+check(/set \*\*payer\*\* back to \*\*client[^.]*try (again )?another/.test(move) && /Don.t refund Orders early/.test(move) && /webhook destinations/.test(move.slice(0, pauseAt)),
+  "moving to another Stripe account: a way out while waiting (payer back to client, try another time), no early refunds, the new account set up first");
 check(/order_id, provider_ref/.test(move) && /old keys back/.test(move) && /payer[^.]{0,60}back to \*\*client/.test(move),
   "moving to another Stripe account: says how to find a refund that can never be sent, the way back, and to set payer back to client at the end");
 // going live: the live Connect webhook secret too (step 3)
@@ -98,6 +106,14 @@ const vars = steps.find(p => /^6\.\s+Netlify → \*\*Project configuration\*\* �
 check(/`SITE_URL`\s*=\s*`?https:\/\/cuvori\.io/.test(vars) && /reminder/.test(vars), "Part 5, step 6 lists SITE_URL = https://cuvori.io, and says a short address leaves a reminder note");
 // which deploy runs the hourly job: Netlify's Deploys page says, not a commit written into these notes long ago
 check(!/main@e2120de/.test(howto) && /top of the Deploys page|top of the \*\*Deploys\*\* page/.test(howto), "the how-to sends you to the top of the Deploys page to see which deploy runs the hourly job (no old deploy name)");
+
+// the go-live checklist (Part 15) sends you to Part 5, step 9, all four steps, instead of an older, shorter copy of it
+const p15 = steps.find(p => /^5\.\s+\*\*Test in test mode\*\*/.test(p)) || "";
+check(/Part 5, step 9/.test(p15) && /all four/.test(p15) && /Part 3, item 7/.test(p15) && !/stripe_set_mode/.test(p15), "the go-live checklist (Part 15, item 5) points to all four steps of Part 5, step 9, production included");
+// short addresses only work with today's code: until production has it, write them in full
+check(/in full[^.]*until production|until production[^.]*in full/.test(vars), "Part 5, step 6: addresses in full until production has today's code");
+// Part 13: the rows the floor leaves alone are named rightly (the payout-fee row is quoted, as its own line)
+check(!/Rows the checkout never quotes with/.test(text) && /never decide the card fee/.test(text), "Part 13: the rows the card-fee floor leaves alone are described rightly");
 
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);
