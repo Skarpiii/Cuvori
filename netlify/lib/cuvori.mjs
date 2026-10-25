@@ -520,10 +520,14 @@ export async function ledger(c, row, same) {
   }
   return false;
 }
+// The chat card ("Order funded", "Payment released", …). Written after the money has moved, so, like the history line above,
+// a card that cannot be saved (the database did not answer for a moment) is written to the log and never fails the step:
+// the person is told what really happened, and Stripe is never asked to send a payment again that is already recorded.
 export async function contractEvent(c, ev, sender, extra) {
   if (!c) return;
   await db.insert("messages", { conversation_id: c.conversation_id, sender: sender || c.editor, kind: "contract", body: c.title,
-    payload: { contract_id: c.id, event: ev, title: c.title, price: c.price, currency: c.currency, pricing: c.pricing, status: c.status, amount_cents: c.amount_cents, ...(extra || {}) } });
+    payload: { contract_id: c.id, event: ev, title: c.title, price: c.price, currency: c.currency, pricing: c.pricing, status: c.status, amount_cents: c.amount_cents, ...(extra || {}) } })
+    .catch(e => console.error("chat card not saved", ev, c.id, e.message));
 }
 // The ledger lines money came into an Order by. Refunds, a chargeback and the card-fee surplus all go by them, so a first
 // payment counted on the Order without its line (its save failed, see saveFirstLine) gets its line from Stripe's record

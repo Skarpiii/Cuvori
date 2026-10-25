@@ -49,6 +49,7 @@ echo "== Supabase's Delete user (database)"; out=$(node tests/attack-dashboard-d
 echo "== card-fee floor (database)"; out=$(node tests/attack-fee-floor.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== address settings";  out=$(node tests/attack-settings.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== refusals in the person's language"; out=$(node tests/attack-error-codes.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== chat cards after money moved"; out=$(node tests/attack-chat-card.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limit on tries";   out=$(node tests/attack-rate.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limits match";     out=$(node tests/limits-match.mjs | tail -1); echo "$out"; echo "$out" | grep -q " 0 failed" || r=1
 echo "== deploy skip rule"; out=$(bash tests/netlify-skip.sh | tail -1); echo "$out"; echo "$out" | grep -q "all .* checks passed" || r=1
