@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairPayoutLines } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, settle, releaseMilestone, json, heldCents, isBanned, orderPayoutAccount, accountReady, chargebackOpen, repayWon, coverChargeback, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairPayoutLines, retryLateRefunds } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -93,5 +93,10 @@ export default async () => {
     try { const c = await db.contract(row.order_id); if (!c) continue; if ((await settleFee(c, row)) !== "pending") feesSettled++; }
     catch (e) { failed.push({ id: row.order_id, why: "fee: " + e.message }); console.error("fee settle retry failed for", row.order_id, e.message); }
   }
-  return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled, linesAdded });
+  // late payments charged but not back on the card yet (Stripe refused the refund, or did not answer): tried again until
+  // the money is back; Stripe itself stops sending them again after about 3 days
+  let lateRefunded = 0;
+  try { const r = await retryLateRefunds(); lateRefunded = r.done; failed.push(...r.failed); }
+  catch (e) { failed.push({ id: null, why: "late payments: " + e.message }); console.error("late payments check failed", e.message); }
+  return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled, linesAdded, lateRefunded });
 };

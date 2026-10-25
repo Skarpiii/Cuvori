@@ -1162,7 +1162,56 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
 // payment page) goes back to the card — all of it except the card fee Stripe kept on it. Stripe does not return its fee on
 // a refund, and Cuvori pays no fees. When Stripe's fee is not known yet (or is in another currency) nothing is refunded
 // now: the error makes Stripe send the payment again later. The Order's history says what happened, once.
+// When the refund does not go through (Stripe refuses it, its fee is not known yet, Stripe does not answer), the Order's
+// note says so ("Needs a hand") and the hourly run tries again (retryLateRefunds) until the money is back on the card —
+// Stripe itself stops sending the payment again after about 3 days. Once it is back, the note goes.
+const LATE_DUE = "late_refund:";
+const lateNote = (pi) => (n) => n.startsWith(`late payment ${pi} `);
 async function refundOrphan(s, why) {
+  try {
+    const r = await refundOrphanNow(s, why);
+    await lateRefundDone(s);
+    return r;
+  } catch (e) {
+    await lateRefundDue(s, why, e).catch(x => console.error("late payment not noted", s && s.payment_intent, x && x.message));
+    throw e;
+  }
+}
+async function lateRefundDue(s, why, e) {
+  const pi = s.payment_intent;
+  const reason = /card fee Stripe kept on it is not known/.test(String(e && e.message)) ? "Stripe's card fee on it is not known yet" : failNote(e, `refund of late payment ${pi}`);
+  const text = `late payment ${pi} (${(nz(s.amount_total) / 100).toFixed(2)} ${String(s.currency || "").toUpperCase()}) was charged but has not gone back to the card yet: ${reason}. The hourly run tries again; if this note stays, check by hand`;
+  if (isUuid(s.client_reference_id) && (await db.contract(s.client_reference_id).catch(() => null))) await putNote(s.client_reference_id, n => addNote(n, text, lateNote(pi)));
+  // what the hourly run needs to try again (the payment, its page and its Order), kept until the money is back
+  await db.insert("money_keys", { scope: LATE_DUE + pi, key: JSON.stringify({ id: s.id, payment_intent: pi, client_reference_id: s.client_reference_id || null, amount_total: nz(s.amount_total), currency: s.currency || null, mode: STRIPE_MODE || null, why: String(why).slice(0, 200) }) })
+    .catch(x => { if (x.status !== 409) throw x; });                              // already waiting: kept as it is
+}
+async function lateRefundDone(s) {
+  const pi = s.payment_intent;
+  await db.remove("money_keys", `scope=eq.${q(LATE_DUE + pi)}`).catch(() => {});
+  if (isUuid(s.client_reference_id)) { const c = await db.contract(s.client_reference_id).catch(() => null); if (c && hasNote(c.money_error, lateNote(pi))) await putNote(c.id, n => dropNote(n, lateNote(pi))); }
+}
+// The hourly run: late payments charged but not back on the card yet. A payment that has been recorded on an Order since
+// is never refunded here (its note and its reminder just go).
+export async function retryLateRefunds() {
+  const due = (await db.select("money_keys", `scope=like.${q(LATE_DUE)}*&select=scope,key&limit=20`)) || [];
+  let done = 0; const failed = [];
+  for (const row of due) {
+    let s; try { s = JSON.parse(row.key); } catch { s = null; }
+    if (!s || !isPi(s.payment_intent)) { failed.push({ id: row.scope, why: "late payment: unreadable reminder" }); continue; }
+    if (s.mode && STRIPE_MODE && s.mode !== STRIPE_MODE) continue;                   // paid in the other mode: these keys cannot refund it (kept for when they can)
+    const unlock = isUuid(s.client_reference_id) ? await lockOrder(s.client_reference_id).catch(() => null) : () => {};
+    if (!unlock) { failed.push({ id: s.client_reference_id, why: `late payment ${s.payment_intent}: the Order is busy` }); continue; }
+    try {
+      if (await contractByPi(s.payment_intent)) { await lateRefundDone(s); continue; }          // on an Order after all: not a late payment
+      await refundOrphan(s, s.why || "late payment");
+      done++;
+    } catch (e) { failed.push({ id: s.client_reference_id, why: `late payment ${s.payment_intent}: ${e && e.message}` }); console.error("late payment refund retry failed", s.payment_intent, e && e.message); }
+    finally { await unlock(); }
+  }
+  return { done, failed };
+}
+async function refundOrphanNow(s, why) {
   const p = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge.balance_transaction" });
   const ch = p && p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
   const bt = ch && ch.balance_transaction && typeof ch.balance_transaction === "object" ? ch.balance_transaction : null;
@@ -1249,8 +1298,18 @@ export async function applyPaidSession(s) {
   const unlock = await lockOrder(id);
   try { return await applyPaidSessionNow(s); } finally { await unlock(); }
 }
+// A Stripe page Cuvori made carries its Order's id (and the same id in its metadata). Any other page — something else sold
+// through the same Stripe account — is left alone: never charged, released or refunded here. A database that does not
+// answer is an error (the webhook then fails and Stripe sends it again), never "not Cuvori's".
+async function cuvoriPage(s) {
+  const id = s && s.client_reference_id;
+  if (!isUuid(id)) return false;
+  if (s.metadata && s.metadata.contract_id === id) return true;
+  return !!(await db.contract(id));
+}
 async function applyPaidSessionNow(s) {
   if (!s || (s.mode !== undefined && s.mode !== "payment")) return "ignored";
+  if (!(await cuvoriPage(s))) return "ignored";
   // test and live never mix: right before a payment is taken or counted, the database's mode is asked again, not the
   // answer from up to a minute ago (on launch day the database may have just been switched)
   await checkStripeMode(true);
