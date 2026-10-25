@@ -86,8 +86,8 @@ for (const [what, error] of [
   hooks.stripe = async (path, method) => (method === "POST" && path === "/refunds" ? [400, { error }] : null);
   const r = await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: c.id } }));
   reset();
-  vuln(r.status !== 409 || (r.json && r.json.error) !== CHARGEBACK || c.money_error !== CHARGEBACK || moneyOut(c).refunded !== 0,
-    `I4 the freelancer cancels, the refund is refused with ${what} -> ${r.status} ${JSON.stringify(r.json).slice(0, 90)}; note ${JSON.stringify(c.money_error).slice(0, 90)} (must be Cuvori's chargeback sentence; nothing moves)`);
+  vuln(r.status !== 409 || (r.json && r.json.error) !== CHARGEBACK || c.money_error !== `Money step stopped (settlement): ${CHARGEBACK}` || moneyOut(c).refunded !== 0,
+    `I4 the freelancer cancels, the refund is refused with ${what} -> ${r.status} ${JSON.stringify(r.json).slice(0, 90)}; note ${JSON.stringify(c.money_error).slice(0, 120)} (must be Cuvori's chargeback sentence, under the step's heading; nothing moves)`);
 }
 
 // ---------- I5: the test copy of Stripe answers "still in use" the way Stripe's docs describe ----------

@@ -50,8 +50,10 @@ export default safe(async (req) => {
       }
       // a fresh decision: ids left by an interrupted earlier settlement must not make this one skip a move (what they
       // moved is already in the counters; the provider is asked before any transfer or refund is made anyway)
-      // only while the price and what was paid in are still the ones the decision was worked out from
-      const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(${from.join(",")})&${moneyUnchanged(c)}`, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, money_error: null, stripe_transfer_id: null, stripe_refund_id: null });
+      // only while the price and what was paid in are still the ones the decision was worked out from. The Order's note
+      // is left as it is: a stopped step's note goes once the settlement goes through, any other note stays until the
+      // admin marks it as handled (a decision does not sort out, say, a top-up that may not be recorded).
+      const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(${from.join(",")})&${moneyUnchanged(c)}`, { status: "resolving", resolution: decision, split_editor_cents: editorCents, refund_cents: refundCents, resolved_by: me.id, resolved_at: now, auto_release_at: null, stripe_transfer_id: null, stripe_refund_id: null });
       row = rows && rows[0] || null;
     } finally { await unlock(); }
     if (!row) return bad("The order changed a moment ago. Reload the page and decide again.", 409);

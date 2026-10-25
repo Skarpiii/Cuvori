@@ -461,6 +461,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
     await p.click('#stripeConnectBtn');
     ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE'),`a money step answers ${code}: the person reads it in plain words in their language`);
   }
+  // every other refusal a payment button can get carries a code too: the person reads it in their language
+  for (const [code, want] of [["signed_out","Please sign in again, then try once more."],["not_professional","Only professionals can receive payouts."],["connect_check","Your Stripe connection needs a check by Cuvori support before you can be paid. Nothing was changed. Please contact Cuvori support."],["setup_changed","Your Stripe setup changed a moment ago. Reload the page and try again."],["busy","Another payment step on this Order is still running. Please try again in a moment."]]) {
+    await p.evaluate((code)=>{ window.__mockFnFail={"stripe-connect":[409,{error:"SERVER SENTENCE",code}]}; document.querySelector('#toastWrap').innerHTML=''; },code);
+    await p.click('#stripeConnectBtn');
+    ok(await until(async()=>(await p.textContent('#toastWrap')).includes(want)) && !(await p.textContent('#toastWrap')).includes('SERVER SENTENCE'),`Payout details answers ${code}: the freelancer reads it in plain words`);
+  }
   await p.evaluate(()=>{ window.__mockFnFail=null; });
   await p.click('#stripeConnectBtn'); await p.waitForTimeout(1200);
   ok((await p.textContent('#stripeBox')).includes('Ready to receive'),'after Stripe onboarding: ready');
@@ -554,6 +560,12 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo');
   ok(await until(async()=>(await p.textContent('#toastWrap')).includes("Couldn't reach the payment service, so it isn't known yet whether this went through. Reload the page to check before trying again.")) && !(await p.textContent('#toastWrap')).includes('Failed to fetch') && await db(()=>window.__mockdb.contracts.at(-1).status)==='delivered',
     'approving while the payment service cannot be reached: the client is told it is not known yet whether it went through, and to reload and check');
+  // the Order changed a moment ago (another tab, the freelancer): said in the client's language, never the server's English sentence
+  await p.evaluate(()=>{ window.__mockFnFail={"stripe-release":[409,{error:"The order changed a moment ago. Reload the page and try again.",code:"order_changed"}]}; document.querySelector('[data-lang="lt"]').click(); document.querySelector('#toastWrap').innerHTML=''; });
+  await openOrders(); await p.click('[data-caction="release"]'); await p.waitForTimeout(400); await p.click('#omGo');
+  ok(await until(async()=>(await p.textContent('#toastWrap')).includes('Šis užsakymas ką tik pasikeitė. Perkraukite puslapį ir bandykite dar kartą.')) && !(await p.textContent('#toastWrap')).includes('The order changed') && await db(()=>window.__mockdb.contracts.at(-1).status)==='delivered',
+    'Release refused because the Order changed: the client reads it in Lithuanian, nothing moved');
+  await p.evaluate(()=>{ document.querySelector('#modalRoot').innerHTML=''; document.querySelector('[data-lang="en"]').click(); });
   await p.evaluate(()=>{ window.__mockFnFail=null; }); await openOrders();
   await p.click('[data-caction="release"]'); await p.waitForTimeout(400);
   ok((await modal()).includes('This releases €500 to Maya') && (await p.textContent('#omGo')).includes('Yes, release €500'),'releasing money asks once more, with the amount');
@@ -879,6 +891,19 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok((await p.textContent('#adminBody')).includes('Card cost not covered: Stripe took €0.40 more in card fees') && (await p.textContent('#adminBody .admin-stats')).includes('€0.40 card cost paid by Cuvori (1 order)'),'admin sees a card cost that was not covered, with the amount and what to do');
   if(process.env.SHOT){ await p.locator('#adminBody .admin-stats').screenshot({path:process.env.SHOT+'-stats.png'}); await p.locator('.admin-row',{hasText:'Card cost not covered'}).screenshot({path:process.env.SHOT+'-row.png'}); }
   await p.evaluate(()=>{ window.__mockdb.contracts.forEach(c=>{ delete c.fee_short_cents; }); });
+  // a note stays until the admin has dealt with it: "Mark as handled" removes it; the hourly run's own notes have no such button
+  await p.evaluate(()=>{ const cs=window.__mockdb.contracts.filter(x=>x.payment_mode==='escrow'); cs[0].money_error='top-up pi_3RealTopup1 may not be recorded — check by hand · Also: counter update failed for milestone m-real-1'; cs[1].money_error='chargeback won; re-payment pending · Also: top-up pi_3RealTopup2 may not be recorded — check by hand'; window.__noteIds=[cs[0].id,cs[1].id]; });
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(300); await p.click('.admin-tab[data-atab="contracts"]'); await p.waitForTimeout(600);
+  const noteRow=(i)=>p.locator(`.admin-row[data-cid="${i}"]`);
+  const [nid, aid] = await p.evaluate(()=>window.__noteIds);
+  ok((await noteRow(nid).textContent()).includes('Needs a hand: top-up pi_3RealTopup1') && (await noteRow(nid).innerText()).includes('\nAlso: counter update failed for milestone m-real-1') && await noteRow(nid).locator('[data-clearnote]').count()===1 && await noteRow(aid).locator('[data-clearnote]').count()===0 && (await noteRow(aid).textContent()).includes('removes it itself'),
+    'admin sees "Mark as handled" under a note (two things on one Order: each on its own line), and none under a note the hourly run removes itself');
+  await noteRow(nid).locator('[data-clearnote]').click(); await p.waitForTimeout(300);
+  ok((await modal()).includes('Do it only once you have sorted out everything in it') && (await modal()).includes('top-up pi_3RealTopup1') && (await modal()).includes('Also: counter update failed'),'marking a note as handled asks once more, showing all of the note');
+  await p.click('#cnGo'); await p.waitForTimeout(800);
+  ok(await p.evaluate((i)=>window.__mockdb.contracts.find(x=>x.id===i).money_error===null, nid) && (await p.textContent('#toastWrap')).includes('Note removed') && !(await p.textContent('#adminBody')).includes('pi_3RealTopup1') && await p.evaluate((i)=>window.__mockdb.contracts.find(x=>x.id===i).money_error, aid)==='chargeback won; re-payment pending · Also: top-up pi_3RealTopup2 may not be recorded — check by hand',
+    'the admin marks it as handled: that note is gone, the other one stays');
+  await p.evaluate((i)=>{ window.__mockdb.contracts.find(x=>x.id===i).money_error=null; }, aid);
   // ---------- bad actors ----------
   await p.click('.admin-tab[data-atab="bad"]'); await p.waitForTimeout(600);
   ok((await p.textContent('#adminBody')).includes('Nobody on the list'),'bad actors list empty after a split');

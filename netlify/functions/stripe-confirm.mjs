@@ -2,17 +2,17 @@
 // page asks here; the function looks the Checkout session up at Stripe itself and, if it is paid, funds the
 // Order exactly as the webhook would. So a lost, late or misconfigured webhook can never leave a paid
 // Order unfunded. Safe to call any number of times.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, readJson, safe, limitTries, applyPaidSession, isSession } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, refuse, readJson, safe, limitTries, applyPaidSession, isSession } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
-  if (!escrowEnabled()) return bad("Protected payments are not configured yet", 503);
+  if (!escrowEnabled()) return refuse(503, "Protected payments are not configured yet", "payments_paused");
   const me = await userFromRequest(req);
-  if (!me) return bad("Sign in first", 401);
+  if (!me) return refuse(401, "Sign in first", "signed_out");
   await limitTries(me, "pay_confirm");         // at most about 10 tries a minute and 50 a day: nobody can use up Stripe's limits for everyone
   const { contract_id: id, session_id: sid } = await readJson(req);
   const c = await db.contract(id);
-  if (!c || (c.client !== me.id && c.editor !== me.id)) return bad("Not your order", 403);
+  if (!c || (c.client !== me.id && c.editor !== me.id)) return refuse(403, "Not your order", "not_your_order");
   const unchecked = () => json(200, { status: c.status, funded_cents: c.funded_cents || 0, checked: false });
   if (c.payment_mode !== "escrow") return unchecked();
   // The page the client has just paid: Stripe puts its id into the return link. It can differ from the page now on the

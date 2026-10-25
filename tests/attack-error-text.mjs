@@ -145,7 +145,7 @@ const plain = (note, start) => String(note || "") === `${start}${MISSING} (Netli
   const c = mk(); await fund(fx, c); c.status = "delivered";
   refuseAt(/^\/transfers$/);
   const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  vuln(!plain(c.money_error, "") || (r.json && r.json.ref) !== refOf(c.money_error),
+  vuln(!plain(c.money_error, "Money step stopped (settlement): ") || (r.json && r.json.ref) !== refOf(c.money_error),
     `N1 the client's release, Stripe refuses the payout -> ${r.status} ${shown(r.json, 80)}; note the client and freelancer can read: ${shown(c.money_error)} (must be plain words with a log ref, the same ref as the answer; Stripe's text only in the log)`);
   reset(); onlyDue(c);
   c.resolved_at = new Date(Date.parse(c.resolved_at) - 11 * 60e3).toISOString();         // the hourly job takes up releases stuck for over 10 minutes
@@ -158,7 +158,7 @@ const plain = (note, start) => String(note || "") === `${start}${MISSING} (Netli
   DB.order_milestones.push(m, { id: uuid(), order_id: c.id, title: "Part 2", amount_cents: 10000, status: "pending", position: 2 });
   refuseAt(/^\/transfers$/);
   const r = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, milestone_id: m.id } }));
-  vuln(!plain(c.money_error, ""), `N2 a milestone payout, Stripe refuses it -> ${r.status}; note: ${shown(c.money_error)} (must be plain words with a log ref)`);
+  vuln(!plain(c.money_error, `Money step stopped (milestone ${m.id}): `), `N2 a milestone payout, Stripe refuses it -> ${r.status}; note: ${shown(c.money_error)} (must be plain words with a log ref)`);
   reset();
   const again = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, milestone_id: m.id } }));
   vuln(again.status !== 200 || c.released_cents !== 10000 || c.money_error, `N2 once fixed, the milestone is paid out -> ${again.status}, released ${c.released_cents}, note gone: ${!c.money_error}`);
@@ -187,13 +187,13 @@ const plain = (note, start) => String(note || "") === `${start}${MISSING} (Netli
     const c = mk(); await fund(fx, c); c.status = "delivered";
     hooks.stripe = async (path, method) => (method === "POST" && path === "/transfers" ? answer : null);
     await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-    vuln(c.money_error !== want, `N5 ${what} -> note: ${shown(c.money_error)} (Cuvori's own sentence, as before)`);
+    vuln(c.money_error !== `Money step stopped (settlement): ${want}`, `N5 ${what} -> note: ${shown(c.money_error)} (Cuvori's own sentence, as before, under the step's heading)`);
     reset();
   }
   const c = mk(); await fund(fx, c); c.status = "delivered";
   hooks.stripe = async (path, method) => { if (method === "POST" && path === "/transfers") throw new TypeError("fetch failed"); return null; };
   await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
-  vuln(c.money_error !== "The payment provider did not answer. Nothing was lost — please try again in a minute.", `N6 Stripe does not answer a payout -> note: ${shown(c.money_error)} (Cuvori's own sentence, as before)`);
+  vuln(c.money_error !== "Money step stopped (settlement): The payment provider did not answer. Nothing was lost — please try again in a minute.", `N6 Stripe does not answer a payout -> note: ${shown(c.money_error)} (Cuvori's own sentence, as before, under the step's heading)`);
   reset();
 }
 
