@@ -673,9 +673,9 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const fx2 = mk({ status: "funded", funded_cents: 15000, amount_cents: 13000, price: 130 }); const r2 = await click(fx2);
   vuln(r0.status !== 409 || r0.json?.code !== "needs_check" || !String(f0.money_error || "").includes("amount paid in is missing"), `B34c a paid Order without the amount paid in -> ${r0.status} ${r0.json?.code}, note ${JSON.stringify(f0.money_error || null)}`);
   vuln(r2.status !== 409 || r2.json?.code !== "needs_check" || !String(fx2.money_error || "").includes("more was paid in (€150.00) than the Order's price (€130.00)"), `B34c more paid in than the price -> ${r2.status} ${r2.json?.code}, note ${JSON.stringify(fx2.money_error || null)}`);
-  // d) another note already on the Order is never written over; once the record checks out, this check's own note goes
+  // d) another note already on the Order is never written over (this check's note goes before it); once the record checks out, this check's own note goes
   const other = mk({ funded_at: new Date().toISOString(), money_error: "Stripe account check: something else" }); await click(other);
-  vuln(other.money_error !== "Stripe account check: something else", `B34d another note on the Order -> ${JSON.stringify(other.money_error)} (must stay as it was)`);
+  vuln(!String(other.money_error || "").startsWith("Payment record needs checking: ") || !String(other.money_error).endsWith(" · Also: Stripe account check: something else"), `B34d another note on the Order -> ${JSON.stringify(other.money_error)} (the other note must stay, this check's note with it)`);
   const fixed = mk({ funded_at: new Date().toISOString() }); await click(fixed); const noted = fixed.money_error;
   fixed.funded_at = null; const rFixed = await click(fixed);                       // corrected by hand
   vuln(!noted || rFixed.status !== 200 || fixed.money_error != null || pagesOf(fixed).length !== 1, `B34d the record corrected by hand -> ${rFixed.status}, note before ${JSON.stringify(noted)}, after ${JSON.stringify(fixed.money_error ?? null)} (must be paid normally, the note gone)`);
@@ -741,7 +741,7 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const click = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
   const logged = []; const e0 = console.error; console.error = (...a) => { logged.push(a.map(String).join(" ")); };
   const a = mk({ funded_at: new Date().toISOString() }); await click(a);                                              // an empty note: written
-  const b = mk({ funded_at: new Date().toISOString(), money_error: "Stripe account check: something else" }); await click(b);   // another note: kept
+  const b = mk({ funded_at: new Date().toISOString(), money_error: "Stripe account check: something else" }); await click(b);   // another note: kept, this one added
   const d = mk({ funded_at: new Date().toISOString() });
   hooks.db = async (method, table, search) => (method === "PATCH" && table === "contracts" && search.includes(`id=eq.${d.id}`) ? new Response(JSON.stringify({ message: "timeout" }), { status: 503 }) : null);
   const rd = await click(d); reset();                                                                                    // the note can't be saved
@@ -749,8 +749,8 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const line = (c) => logged.find(l => l.startsWith("Payment record needs checking") && l.includes(c.id) && l.includes("a payment time"));
   vuln(!line(a) || !line(a).includes("(noted on the Order)") || !String(a.money_error || "").startsWith("Payment record needs checking: "),
     `B39 an empty note -> note ${JSON.stringify(a.money_error ?? null)}, log ${JSON.stringify(line(a) || null)} (must be noted and logged)`);
-  vuln(!line(b) || !line(b).includes("not noted: the Order already has another note") || b.money_error !== "Stripe account check: something else",
-    `B39 another note on the Order -> note ${JSON.stringify(b.money_error)}, log ${JSON.stringify(line(b) || null)} (the other note must stay, the problem must be logged)`);
+  vuln(!line(b) || !line(b).includes("(noted on the Order)") || !String(b.money_error || "").startsWith("Payment record needs checking: ") || !String(b.money_error).endsWith(" · Also: Stripe account check: something else"),
+    `B39 another note on the Order -> note ${JSON.stringify(b.money_error)}, log ${JSON.stringify(line(b) || null)} (the other note must stay, the problem noted with it and logged)`);
   vuln(rd.status !== 409 || rd.json?.code !== "needs_check" || !line(d) || !line(d).includes("the note could not be saved"),
     `B39 the note can't be saved -> ${rd.status} ${rd.json?.code}, log ${JSON.stringify(line(d) || null)} (must still refuse, and be logged)`);
 }

@@ -808,23 +808,22 @@ export async function payoutAccount(editorId, why = {}) {
   return acct;
 }
 // The same for an Order. A problem on Cuvori's side is written on the Order, so the admin panel shows it under "Needs a
-// hand" — never over another note — and the note goes once the check works again. Cuvori's own clear refusals
+// hand", and the note goes once the check works again. Cuvori's own clear refusals
 // (payments paused, not configured) are not written: everyone is shown those already.
 // The note says in plain words what went wrong, never Stripe's own text: both people on the Order can read its notes,
 // and Stripe's text can name Cuvori's Stripe account or show the end of its key. The full error goes to the Netlify
 // function log under the ref the note gives, and only the owner sees that log.
 const CHECK_FAILED = "Stripe check failed: ", CHECK_NEEDED = "Stripe account check: ";
-// An empty note, or one of only spaces, says nothing (the admin panel shows no text for it), so it counts as no note at
-// all. One rule for every note Cuvori writes on an Order: Fund's payment-record note uses it too.
-export const blankNote = (c) => c.money_error == null || String(c.money_error).trim() === "";
-// Written over an empty note or over this check's own older note (its time and reason then stay current), never over
-// another — and only while the note still reads exactly what this request read: two checks of the same Order can overlap,
-// and the one that finishes last must not wipe out or replace what the other just found.
+// Written only while the note still reads exactly what this request read: two checks of the same Order can overlap, and
+// the one that finishes last must not wipe out or replace what the other just found.
 const noteStill = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${q(c.money_error)}`);
 const isCheckNote = (n) => n.startsWith(CHECK_FAILED) || n.startsWith(CHECK_NEEDED);
+// "Stripe check failed" is never added to another note: it says nothing a person must do, and the check writes it again
+// each time it fails. "Needs a check by hand" goes after the notes already there (it takes the place of this check's own
+// older note, so its ref and time stay current).
 async function writeCheckNote(c, text) {
-  if (notesOf(c.money_error).some(n => !isCheckNote(n))) return;              // never added to another note: the check runs again each time
-  await db.update("contracts", `id=eq.${c.id}&${noteStill(c)}`, { money_error: text }).catch(() => {});
+  if (text.startsWith(CHECK_FAILED) && notesOf(c.money_error).some(n => !isCheckNote(n))) return;
+  await db.update("contracts", `id=eq.${c.id}&${noteStill(c)}`, { money_error: addNote(c.money_error, text, isCheckNote) }).catch(() => {});
 }
 // ---- an Order's note: several at once ----
 // The admin panel shows an Order's note under "Needs a hand". More than one thing can need a look on the same Order, so a
@@ -835,10 +834,13 @@ async function writeCheckNote(c, text) {
 // retries the step), and a "Stripe check failed" note is dropped when another note is written (the check writes it again
 // if it still fails).
 export const ALSO = " · Also: ";
+// an empty note, or one of only spaces, says nothing (the admin panel shows no text for it): it counts as no note at all
 const notesOf = (note) => (note == null || String(note).trim() === "" ? [] : String(note).split(ALSO));
 const noteOf = (parts) => (parts.length ? parts.join(ALSO) : null);
 const isCbMark = (n) => /^chargeback(:| won)/.test(n);
-const rankOf = (n) => isCbMark(n) ? 0 : [FIRST_LINE_NOTE, MS_LINE_NOTE, REPAY_LINE_NOTE].some(p => n.startsWith(p)) ? 1 : isStepNote(n) ? 3 : 2;
+// (the account check's note comes after the other notes that need a person: the database empties a note that starts with it
+// when an unpaid Order is cancelled, schema v31, and that must never take another note with it)
+const rankOf = (n) => isCbMark(n) ? 0 : [FIRST_LINE_NOTE, MS_LINE_NOTE, REPAY_LINE_NOTE].some(p => n.startsWith(p)) ? 1 : isStepNote(n) ? 3 : n.startsWith(CHECK_NEEDED) ? 2.5 : 2;
 // the note with `text` added; replaces(part) says which notes the new one takes the place of (the next stage of the same
 // chargeback, an older stop of the same step)
 export function addNote(note, text, replaces = () => false) {

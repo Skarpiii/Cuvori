@@ -16,9 +16,12 @@
 // O8 the admin's decision on a dispute keeps the dispute's note, O9 a newer stop replaces an older stop's note, O10 an
 // empty note counts as none, O11 a full refund made in the Stripe dashboard, O12 a chargeback lost, O13 a chargeback won,
 // O14 a pull-back that failed and is made later, O15 two notes that need a person, O16 the hourly run's note stays first,
-// O17 a top-up's repair removes only that top-up's note, O18 the same note delivered twice is there once.
+// O17 a top-up's repair removes only that top-up's note, O18 the same note delivered twice is there once, O19 the payment
+// page's own note ("Payment record needs checking") with another note there, O20 that note going does not take a stopped
+// step's note with it, O21 the freelancer's account check ("needs a check by hand") with another note there, O22 "Stripe
+// check failed" is still not added to another note (the check writes it again each time).
 // Run: node tests/attack-order-notes.mjs
-import { DB, STRIPE, hooks, req, call, mk, fund, reset, fns, uuid, onlyDue, moneyOut, signed, pay, F } from "./fn-harness.mjs";
+import { DB, STRIPE, hooks, req, call, mk, fund, reset, fns, uuid, onlyDue, moneyOut, signed, pay, F, users } from "./fn-harness.mjs";
 const lib = await import(F + "../lib/cuvori.mjs");
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
@@ -235,6 +238,45 @@ const paidOut = async () => { const c = mk(); const f = await fund(fx, c); c.sta
   await call(fx.webhook, req("POST", "x", chargeEvent(ch)));
   vuln(c.money_error !== once || (c.money_error || "").split(" · Also: ").length !== 2, `O18 the same refund event delivered twice -> note ${shown(c.money_error)} (must be the same as after the first: two notes, not three)`);
   reset();
+}
+
+// ---------- the payment page's own note, and the freelancer's account check ----------
+const fundPage = (c) => call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, lang: "en" } }));
+const RECORD = "Payment record needs checking: ";
+const STEP_MS = "Money step stopped (milestone 11111111-2222-4333-8444-555555555555): The card payment is still settling at the payment provider. Cuvori retries this every hour; nothing needs to be done.";
+{ // O19 the record needs checking while another note is there: both are kept, and once the record checks out only its own goes
+  const c = mk({ funded_at: new Date().toISOString(), money_error: TOPUP });
+  const r = await fundPage(c); const both = c.money_error;
+  c.funded_at = null; const ok = await fundPage(c);                                                      // corrected by hand
+  vuln(r.status !== 409 || (r.json && r.json.code) !== "needs_check" || !String(both || "").startsWith(RECORD) || !String(both).endsWith(" · Also: " + TOPUP) || ok.status !== 200 || c.money_error !== TOPUP,
+    `O19 the payment record needs checking while the Order has a "check by hand" note -> ${r.status} ${r.json && r.json.code}; note ${shown(both)}; once corrected -> ${ok.status}, note ${shown(c.money_error)} (both kept, then only the record's note goes)`);
+  reset();
+}
+{ // O20 the record's note first and a stopped step's note after it: the record checking out removes only its own note
+  const c = mk({ funded_at: new Date().toISOString() });
+  await fundPage(c); c.money_error = c.money_error + " · Also: " + STEP_MS;
+  c.funded_at = null; const ok = await fundPage(c);
+  vuln(ok.status !== 200 || c.money_error !== STEP_MS, `O20 the record checks out while a stopped step's note sits after its note -> ${ok.status}; note ${shown(c.money_error)} (the step's note must stay)`);
+  reset();
+}
+{ // O21 the freelancer's Stripe account needs a check by hand while another note is there: added after it, renewed in place, and gone once the check works
+  const acct = STRIPE.accounts.acct_1EditorAAAAAAAA, owner = acct.metadata.cuvori_user;
+  const NEEDED = /^Stripe account check: the freelancer's Stripe account needs a check by hand \(Netlify log ref [0-9a-f]{8}\)$/;
+  const c = mk({ money_error: TOPUP });
+  acct.metadata.cuvori_user = users.ed2.id; const r = await fundPage(c); const first = c.money_error;
+  const again = await fundPage(c); const second = c.money_error; acct.metadata.cuvori_user = owner;
+  const ok = await fundPage(c);
+  const parts = (n) => String(n || "").split(" · Also: ");
+  vuln(r.status !== 409 || parts(first)[0] !== TOPUP || parts(first).length !== 2 || !NEEDED.test(parts(first)[1]) || parts(second).length !== 2 || !NEEDED.test(parts(second)[1]) || second === first
+       || again.status !== 409 || ok.status !== 200 || c.money_error !== TOPUP,
+    `O21 the freelancer's account needs a check while the Order has another note -> ${r.status}; note ${shown(first)}; again -> ${shown(second)}; once sorted out -> ${ok.status}, note ${shown(c.money_error)} (added after the other note, renewed in place, then only it goes)`);
+  reset();
+}
+{ // O22 "Stripe check failed" (Stripe did not answer) is still not added to another note: the check writes it again each time
+  const c = mk({ money_error: TOPUP });
+  hooks.stripe = async (p, method) => (p === "/accounts/acct_1EditorAAAAAAAA" && method === "GET") ? [500, { error: { type: "api_error", message: "Something went wrong on Stripe's end" } }] : null;
+  const r = await fundPage(c); reset();
+  vuln(r.status !== 500 || c.money_error !== TOPUP, `O22 Stripe fails during the account check on an Order with another note -> ${r.status}; note ${shown(c.money_error)} (must stay as it was)`);
 }
 
 console.error = realError;

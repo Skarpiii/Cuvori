@@ -411,7 +411,7 @@ if (!LIVE) {
     const back = STRIPE.refunds.filter(r => r.payment_intent === s.payment_intent).reduce((a, r) => a + r.amount, 0);
     vuln(c.status !== "accepted" || c.funded_cents || back <= 0, `N2 the owner switches to live while a test payment is being recorded -> webhook ${w.status}; Order ${c.status}, paid in ${c.funded_cents || 0}; given back to the card: ${back} (must be unpaid, the money back)`);
   }
-  // ---------- N5: the newest note replaces the check's own older one (current reason and time), never another note ----------
+  // ---------- N5: the newest note replaces the check's own older one (current reason and time); another note stays, first ----------
   {
     const c = mk({ money_error: "Stripe check failed: Stripe did not answer (Netlify log ref 1a2b3c4d)" });
     const notMine = () => { STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed2.id; }, mine = () => { STRIPE.accounts[ORIGINAL].metadata.cuvori_user = users.ed.id; };
@@ -422,7 +422,8 @@ if (!LIVE) {
     vuln(!NEEDED.test(c.money_error || "") || c.money_error === before, `N5 the same problem again -> the note is renewed (new ref, so its time is current): ${c.money_error !== before}`);
     const d = mk({ money_error: "top-up pi_x may not be recorded — check by hand" });
     notMine(); await fundIt(d); mine();
-    vuln(d.money_error !== "top-up pi_x may not be recorded — check by hand", `N5 an Order with another kind of note keeps it -> ${d.money_error}`);
+    const [first, second, more] = String(d.money_error || "").split(" · Also: ");
+    vuln(first !== "top-up pi_x may not be recorded — check by hand" || !NEEDED.test(second || "") || more !== undefined, `N5 an Order with another kind of note keeps it, the check's note after it -> ${d.money_error}`);
   }
 
   // ---------- N6: an empty note, or one of only spaces, never stops the check's own note (the same rule as Fund's note) ----------

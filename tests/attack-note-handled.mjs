@@ -4,7 +4,9 @@
 // until a person has dealt with them. admin_clear_order_note is that person's button: only an admin, only while the note
 // still reads what the admin saw, and never one of the notes Cuvori's hourly run works from (they go by themselves).
 // H1 the admin marks a note as handled, H2 a newer note came in meanwhile, H3 the hourly run's notes, H4 not an admin
-// (the client, the freelancer, someone signed out), H5 no note or no such Order, H6 running v55. Every check is rolled back.
+// (the client, the freelancer, someone signed out), H5 no note or no such Order, H6 running v55, H7 the database's own
+// clean-up of a Stripe-check note when an unpaid Order is cancelled never takes another note with it (the payment functions
+// put that note after the others, attack-order-notes.mjs O21). Every check is rolled back.
 // Run: node tests/attack-note-handled.mjs   (needs the local Postgres of tests/db; it is started here)
 import fs from "node:fs";
 import path from "node:path";
@@ -88,6 +90,17 @@ else {
     vuln(!r.ok || rows.length !== 2 || !rows.every(l => /^v55 applied/.test(l)) || pick(r, "clear") !== "ok",
       `H6 running v55 twice -> ${r.ok ? rows.map(l => `"${l.slice(0, 60)}"`).join(" then ") || "no result row" : "error: " + r.err.split("\n").find(x => /ERROR/.test(x))}; then marking a note handled -> ${pick(r, "clear")}`);
   }
+}
+{ // H7 an unpaid Order is cancelled: the database empties a note that is only the Stripe account check's, never one with another note in it
+  const U2 = "'30000000-0000-0000-0000-000000000001'";              // the unpaid direct Order (status accepted)
+  const set = (n) => `update public.contracts set money_error = ${lit(n)} where id = ${U2};`;
+  const cancel = `update public.contracts set status = 'cancelled' where id = ${U2};`;
+  const after = (label) => `select '${label}: ' || coalesce(money_error, '(none)') from public.contracts where id = ${U2};`;
+  const CHECK = "Stripe account check: the freelancer's Stripe account needs a check by hand (Netlify log ref 1a2b3c4d)";
+  const alone = tx(`${set(CHECK)} ${cancel} ${after("n")}`);
+  const both = tx(`${set(TOPUP + " · Also: " + CHECK)} ${cancel} ${after("n")}`);
+  vuln(pick(alone, "n") !== "(none)" || pick(both, "n") !== TOPUP + " · Also: " + CHECK,
+    `H7 an unpaid Order cancelled -> the account check's note alone: ${pick(alone, "n").slice(0, 60)}; another note first, the check's after it: ${pick(both, "n").slice(0, 90)} (alone: gone as before; with another note: all kept)`);
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;

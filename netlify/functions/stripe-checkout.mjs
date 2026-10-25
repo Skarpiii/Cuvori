@@ -2,7 +2,7 @@
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same three lines: the price, the card fee and
 // (since schema v50) Stripe's payout fee.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession, blankNote } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession, addNote, dropNote, hasNote } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -92,22 +92,21 @@ async function makePage(scope, params) {
 // the sentence here stays for the owner.
 const refuse = (status, error, code) => json(status, { error, code });
 // An Order whose payment record looks wrong is never paid until a person has looked at it. The owner sees it under "Needs a
-// hand" in the admin panel: the note is written over an empty note or over this check's own older note, never over
-// another, and only while the note still reads what this request read. It goes once the record checks out again.
+// hand" in the admin panel: the note goes with the notes already there (in the place of this check's own older note), only
+// while the note still reads what this request read. Once the record checks out again, only this note goes.
 // Both people on the Order can read its notes, so it says in plain words what looks wrong, nothing else.
 const RECORD_NOTE = "Payment record needs checking: ";
-const ownRecordNote = (c) => String(c.money_error || "").startsWith(RECORD_NOTE);
+const isRecordNote = (n) => n.startsWith(RECORD_NOTE);
 const noteFilter = (c) => (c.money_error == null ? "money_error=is.null" : `money_error=eq.${encodeURIComponent(c.money_error)}`);
 async function needsCheck(c, why) {
   const text = (RECORD_NOTE + why).slice(0, 300);
   let noted = "already noted on the Order";
-  if (c.money_error !== text) {
-    if (blankNote(c) || ownRecordNote(c)) {
-      const rows = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: text }).catch(() => null);
-      noted = !rows ? "the note could not be saved: the database did not answer"
-        : rows.length ? "noted on the Order"
-        : "this click did not save the note: it changed at the same moment (another click may have just written it)";
-    } else noted = "not noted: the Order already has another note";
+  if (!hasNote(c.money_error, n => n === text)) {
+    // with the notes already there (it takes the place of this check's own older note only)
+    const rows = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: addNote(c.money_error, text, isRecordNote) }).catch(() => null);
+    noted = !rows ? "the note could not be saved: the database did not answer"
+      : rows.length ? "noted on the Order"
+      : "this click did not save the note: it changed at the same moment (another click may have just written it)";
   }
   // always in the Netlify log too (only the owner sees it), so the problem is on record even when no note could be written
   console.error("Payment record needs checking", "order", c.id, why, `(${noted})`);
@@ -171,9 +170,10 @@ export default safe(async (req) => {
     return needsCheck(c, `more was paid in (${euro(fc)}) than the Order's price (${euro(price)}).`);
   // the record checks out: a note this check wrote earlier goes. The steps below then know it is gone, so the check of the
   // freelancer's Stripe account can still note its own finding for you on this very click.
-  if (ownRecordNote(c)) {
-    const gone = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: null }).catch(() => null);
-    if (gone && gone.length) c.money_error = null;
+  if (hasNote(c.money_error, isRecordNote)) {
+    const after = dropNote(c.money_error, isRecordNote);                             // only its own note; any other stays
+    const gone = await db.update("contracts", `id=eq.${c.id}&${noteFilter(c)}`, { money_error: after }).catch(() => null);
+    if (gone && gone.length) c.money_error = after;
   }
   const paidIn = c.status === "accepted" ? 0 : fc;
   if (c.status === "accepted") { amount = price; kind = "fund"; }
