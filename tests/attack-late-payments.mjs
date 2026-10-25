@@ -14,6 +14,12 @@
 // then taken by the hourly run, L4 the payment refunded by hand in Stripe meanwhile, L5 the payment recorded on its Order
 // after all, L6 a Cuvori page whose Order is gone (as before), L7 Stripe's card fee not known yet at first (as before),
 // L8 a late payment from the other Stripe mode (test money after launch day) is left for keys that can refund it.
+// A refund Stripe refuses for good (the client charged the payment back and the bank gave the money back to them) was tried
+// every hour forever, and its note came back after "Mark as handled". Now the tries have a clear end:
+// L9 a chargeback on the late payment: while the bank decides, Cuvori waits (no error every hour); decided for the client,
+// the reminder goes and the note says so; decided for Cuvori, the refund is made. L10 "Mark as handled" also stops the tries.
+// L11 the note never shows Cuvori's own "payments are paused: the Stripe key in Netlify…" sentence to the people on the
+// Order. L12 an Order busy at that minute is left for the next hourly run at once, without waiting.
 // Run: node tests/attack-late-payments.mjs
 import { DB, STRIPE, hooks, req, call, mk, fund, pay, signed, reset, fns, uuid } from "./fn-harness.mjs";
 const out = [];
@@ -107,6 +113,53 @@ const late = async (refund) => {
   const h = await hourly(); reset();
   vuln(!row || k.mode !== "test" || asked !== 0 || refundsOf(s.payment_intent).length !== 0 || JSON.stringify(h.json).includes(s.payment_intent),
     `L8 a late payment waiting from live mode while the keys are test keys -> remembered with its mode: ${k && k.mode}; Stripe asked about it ${asked} times, refunds ${refundsOf(s.payment_intent).length}, in the hourly run's failures: ${JSON.stringify(h.json).includes(s.payment_intent)} (must be left alone)`);
+}
+
+// ---------- the tries have an end ----------
+const disputed = (s, status) => { const ch = chargeOf(s.payment_intent); ch.disputed = true; STRIPE.disputes[ch.id] = { id: "dp_" + ch.id, status }; };
+const refusedWhileDisputed = () => null;                                   // the test Stripe itself refuses a refund on a charge with a dispute not won
+const reminded = (s) => DB.money_keys.some(k => k.scope === "late_refund:" + s.payment_intent);
+const triedIn = (h, s) => JSON.stringify(h.json || {}).includes(s.payment_intent);
+{ // L9 a chargeback on the late payment
+  const res = {};
+  for (const outcome of ["lost", "won"]) {
+    const { c, s } = await late(() => REFUSED); reset();
+    disputed(s, "needs_response");                                            // the client has charged it back; the bank is deciding
+    const w = await webhook(s); const h1 = await hourly(); const waiting = c.money_error;
+    STRIPE.disputes[chargeOf(s.payment_intent).id].status = outcome;         // the bank decides
+    const h2 = await hourly(); const h3 = await hourly();
+    res[outcome] = { w: w.status, waitingNote: waiting, h1Fails: triedIn(h1, s), h3Fails: triedIn(h3, s), note: c.money_error, reminded: reminded(s), back: backOf(s.payment_intent), refunds: refundsOf(s.payment_intent).length, total: s.amount_total, fee: chargeOf(s.payment_intent).balance_transaction.fee };
+  }
+  const L = res.lost, W = res.won;
+  vuln(L.w !== 200 || !/chargeback/.test(L.waitingNote || "") || !/waits for the bank/.test(L.waitingNote || "") || L.h1Fails
+       || !/went back to the client through their bank/.test(L.note || "") || L.reminded || L.refunds !== 0 || L.h3Fails
+       || W.reminded || W.refunds !== 1 || W.back !== W.total - W.fee || W.note != null,
+    `L9 a chargeback on the late payment -> while the bank decides: webhook ${L.w}, note ${shown(L.waitingNote)}, the hourly run reports it as failed: ${L.h1Fails}; decided for the client -> note ${shown(L.note)}, reminder kept: ${L.reminded}, refunds ${L.refunds}, still tried: ${L.h3Fails}; decided for Cuvori -> refunds ${W.refunds} of ${W.back} (paid ${W.total}, fee ${W.fee}), note ${shown(W.note)}, reminder kept: ${W.reminded}`);
+}
+{ // L10 you press "Mark as handled" on the note: the hourly run stops trying, and the note does not come back
+  const { c, s } = await late(() => REFUSED);
+  const noted = c.money_error; c.money_error = null;                         // Mark as handled (schema v55 empties the note)
+  let asked = 0; hooks.stripe = async (p, m) => { if (m === "POST" && p === "/refunds") { asked++; return REFUSED; } return null; };
+  const h = await hourly(); await hourly(); reset();
+  vuln(!String(noted || "").startsWith(`late payment ${s.payment_intent} `) || asked !== 0 || c.money_error != null || reminded(s) || triedIn(h, s),
+    `L10 "Mark as handled" on a late payment's note -> the hourly run tried the refund ${asked} times (must be 0), note ${shown(c.money_error)}, reminder kept: ${reminded(s)}`);
+}
+{ // L11 payments are paused by a key problem while the refund is tried: the note says it in plain words, not Cuvori's setting sentence
+  const { c, s } = await late(() => REFUSED); reset();
+  DB.site_settings.push({ key: "stripe_mode", value: "live" });             // keys and database in different modes: payments paused
+  await webhook(s); await hourly(); const noted = c.money_error;
+  DB.site_settings.splice(DB.site_settings.findIndex(r => r.key === "stripe_mode" && r.value === "live"), 1);
+  await webhook(s).catch(() => {});                                          // the mode is read again
+  vuln(/Netlify \(|STRIPE_SECRET_KEY|database is set to/.test(noted || "") || !/payments are paused/.test(noted || ""),
+    `L11 payments paused by a key problem during the retry -> note ${shown(noted)} (must say "payments are paused" in plain words, without Cuvori's setting sentence)`);
+}
+{ // L12 the Order is busy when the hourly run comes: left for the next run at once, then refunded once
+  const { c, s } = await late(() => REFUSED); reset();
+  DB.money_keys.push({ scope: `lock:${c.id}`, key: "claim:busy", created_at: new Date().toISOString() });
+  const t0 = Date.now(); await hourly(); const took = Date.now() - t0; const first = refundsOf(s.payment_intent).length;
+  DB.money_keys.splice(DB.money_keys.findIndex(k => k.scope === `lock:${c.id}`), 1);
+  await hourly();
+  vuln(took > 2500 || first !== 0 || refundsOf(s.payment_intent).length !== 1, `L12 the Order busy during the hourly run -> the run took ${(took / 1000).toFixed(1)} s (must not wait), refunds ${first}; next run -> refunds ${refundsOf(s.payment_intent).length} (must be 1)`);
 }
 
 console.error = realError;

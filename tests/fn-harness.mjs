@@ -62,6 +62,8 @@ export function stripeHandle(path, method, p) {
     return [200, STRIPE.sessions[id]];
   }
   if (seg[1] === "charges" && seg[2] && method === "GET") { const ch = STRIPE.charges[seg[2]]; return ch ? [200, ch] : err(404, "No such charge", "resource_missing"); }
+  if (path === "/disputes" && method === "GET") return [200, { data: Object.entries(STRIPE.disputes).filter(([chid]) => STRIPE.charges[chid] && (!p.get("payment_intent") || STRIPE.charges[chid].payment_intent === p.get("payment_intent")) && (!p.get("charge") || chid === p.get("charge")))
+    .map(([chid, d]) => ({ id: d.id || "dp_" + chid, object: "dispute", charge: chid, payment_intent: STRIPE.charges[chid].payment_intent, amount: STRIPE.charges[chid].amount, status: d.status })) }];   // a payment's chargebacks
   if (seg[1] === "disputes" && seg[2] && method === "GET") { const d = STRIPE.disputeObjs && STRIPE.disputeObjs[seg[2]]; return d ? [200, d] : err(404, "No such dispute", "resource_missing"); }
   if (seg[1] === "payment_intents" && method === "GET") { const pi = STRIPE.intents[seg[2]]; if (!pi) return err(404, "No such payment_intent", "resource_missing"); return [200, { ...pi, latest_charge: STRIPE.charges[pi.latest_charge] }]; }
   if (path === "/transfers" && method === "POST") {
