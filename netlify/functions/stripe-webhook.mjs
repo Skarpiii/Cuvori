@@ -1,10 +1,11 @@
 // Stripe → Cuvori. Hardened copy.
 // Platform endpoint events: checkout.session.completed, checkout.session.async_payment_succeeded,
-//   charge.refunded, charge.dispute.created, charge.dispute.closed. Connect endpoint (separate secret): account.updated.
+//   charge.refunded, charge.dispute.created, charge.dispute.funds_withdrawn, charge.dispute.closed. Connect endpoint
+//   (separate secret): account.updated.
 import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET, addNote, stepsOver } from "../lib/cuvori.mjs";
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
-// the events Cuvori acts on (the first five from Cuvori's own Stripe account, account.updated from the freelancers' accounts)
-const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "charge.refunded", "charge.dispute.created", "charge.dispute.closed", "account.updated"];
+// the events Cuvori acts on (the first six from Cuvori's own Stripe account, account.updated from the freelancers' accounts)
+const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed", "account.updated"];
 
 export default async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -43,6 +44,10 @@ export default async (req) => {
       const col = acctCols();                                               // the saved account of this Stripe mode; the other mode's is never touched
       await db.update("payout_details", `${col.id}=eq.${a.id}`, { [col.ready]: enabled });
     } else if (!fromConnect && event.type === "charge.dispute.created") {
+      await onDisputeCreated(o);
+    } else if (!fromConnect && event.type === "charge.dispute.funds_withdrawn") {
+      // Stripe took the money for a chargeback: also how the bank's inquiry shows when it becomes a chargeback (the same
+      // dispute, no new "created" notice). Recorded like a new chargeback; one already recorded is not counted twice.
       await onDisputeCreated(o);
     } else if (!fromConnect && event.type === "charge.dispute.closed") {
       await onDisputeClosed(o);

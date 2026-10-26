@@ -1632,6 +1632,21 @@ const pendingReversal = (c) => String(c.money_error || "").startsWith("chargebac
 const pendingRepay = (c) => String(c.money_error || "").startsWith("chargeback won");
 // an error with no answer from the provider or the database: fail the webhook so Stripe sends the event again
 const retryable = (e) => !!(e && (e.network || e.outcomeUnknown || e.shouldRetry || !e.status || e.status >= 500));
+// The bank only asks about the payment (an inquiry, Stripe's "warning" statuses: mostly American Express and Discover).
+// Stripe takes no money from Cuvori then, so nothing is frozen, pulled back or flagged: the Order's note asks you to answer
+// the bank in Stripe's dashboard, and the Order goes on as normal. The note goes when the inquiry ends or becomes a
+// chargeback; a chargeback runs the chargeback steps as usual — when Stripe takes the money (charge.dispute.funds_withdrawn,
+// the same dispute) or, if that notice never came, when the bank's decision for the client arrives (onDisputeClosed).
+const isInquiry = (o) => !!o && (o.status === "warning_needs_response" || o.status === "warning_under_review");
+const INQUIRY_HEAD = "the client's bank asked about payment ";
+const inquiryNoteOf = (pi) => (n) => n.startsWith(`${INQUIRY_HEAD}${pi} `);
+async function noteInquiry(c, o) {
+  const amount = Number.isInteger(o.amount) ? `${(o.amount / 100).toFixed(2)} ${String(o.currency || c.currency || "").toUpperCase()}, ` : "";
+  const text = `${INQUIRY_HEAD}${o.payment_intent} (${amount}inquiry ${o.id}): answer it in Stripe's dashboard under Disputes, with the Order's details. Nothing was taken from Cuvori and the Order goes on as normal; if the bank turns it into a chargeback, Cuvori handles it as a chargeback`;
+  await putNote(c.id, n => addNote(n, text, inquiryNoteOf(o.payment_intent)));
+  return "inquiry";
+}
+const dropInquiryNote = async (c, pi) => { if (c && hasNote(c.money_error, inquiryNoteOf(pi))) await putNote(c.id, n => dropNote(n, inquiryNoteOf(pi))); };
 export async function onDisputeCreated(o) {
   const initial = await contractByPi(o.payment_intent);
   if (!initial) {
@@ -1642,6 +1657,7 @@ export async function onDisputeCreated(o) {
     console.error("chargeback on a payment with no Order on record: answer it in Stripe's dashboard, under Disputes", "dispute", o && o.id, "payment", o && o.payment_intent, "amount", o && o.amount);
     return "ignored";
   }
+  if (isInquiry(o)) return noteInquiry(initial, o);                               // the bank only asks: nothing is frozen or pulled back
   const unlock = await lockOrder(initial.id);
   try { return await createDisputeLocked(initial.id, o); }
   finally { await unlock(); }
@@ -1666,6 +1682,7 @@ async function createDisputeLocked(id, o) {
     await contractEvent(u, "dispute", c0.client, { amount_cents: cents, label: "chargeback" });
     const flagged = await db.one("user_flags", `user_id=eq.${c0.client}&contract_id=eq.${c0.id}&kind=eq.chargeback&select=id`);
     if (!flagged) await db.insert("user_flags", { user_id: c0.client, kind: "chargeback", reason: `Chargeback ${o.id} on "${cut(c0.title, 120)}" (order was ${c0.status})`, contract_id: c0.id }).catch(() => {});
+    await dropInquiryNote(await db.contract(c0.id), o.payment_intent);           // the bank's inquiry became this chargeback: its note goes
   }
   await coverChargebackLocked(c0.id, o.id, cents);
   return "recorded";
@@ -1753,9 +1770,19 @@ async function syncReversals(c, disputeId) {
   return { row, net, atStripe };
 }
 export async function onDisputeClosed(o) {
-  const c0 = await contractByPi(o.payment_intent);
-  if (!c0 || c0.chargeback_id !== o.id) return "ignored";
-  const won = o.status === "won", lost = o.status === "lost";
+  let c0 = await contractByPi(o.payment_intent);
+  if (!c0) return "ignored";
+  if (c0.chargeback_id !== o.id) {
+    // Not recorded as a chargeback: an inquiry Cuvori only noted. It ended (its note goes), or the bank turned it into a
+    // chargeback Cuvori did not hear of: one decided for the client is recorded now and closed as the bank decided.
+    if (o.status !== "lost") { await dropInquiryNote(c0, o.payment_intent); return "ignored"; }
+    await onDisputeCreated(o);
+    c0 = await contractByPi(o.payment_intent);
+    if (!c0 || c0.chargeback_id !== o.id) return "ignored";
+  }
+  // warning_closed on a recorded chargeback: an inquiry recorded as one before this version (Stripe took nothing): the
+  // Order is unfrozen and what was pulled back is paid again, as when the bank sides with Cuvori
+  const won = o.status === "won" || o.status === "warning_closed", lost = o.status === "lost";
   if (!won && !lost) return "ignored";
   const unlock = await lockOrder(c0.id);
   try { return await closeDisputeLocked(c0, o, won, lost); }

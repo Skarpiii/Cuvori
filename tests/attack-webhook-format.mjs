@@ -43,7 +43,7 @@ for (const [name, ev] of [
 }
 
 // ---------- W4–W5: an event Cuvori handles, arriving without the object it is about ----------
-const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "account.updated", "charge.refunded", "charge.dispute.created", "charge.dispute.closed"];
+const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "account.updated", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed"];
 for (const type of HANDLED) {
   for (const [what, data] of [["no data", undefined], ["data without object", {}], ["object null", { object: null }], ["object a list", { object: [] }], ["object without id", { object: { object: "x" } }]]) {
     const before = snap();

@@ -52,6 +52,7 @@ echo "== refusals in the person's language"; out=$(node tests/attack-error-codes
 echo "== Order notes kept until handled"; out=$(node tests/attack-order-notes.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== marking an Order note as handled (database)"; out=$(node tests/attack-note-handled.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== late payments"; out=$(node tests/attack-late-payments.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== the bank asks about an Order's payment (inquiries)"; out=$(node tests/attack-inquiries.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== chat cards after money moved"; out=$(node tests/attack-chat-card.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limit on tries";   out=$(node tests/attack-rate.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== limits match";     out=$(node tests/limits-match.mjs | tail -1); echo "$out"; echo "$out" | grep -q " 0 failed" || r=1
