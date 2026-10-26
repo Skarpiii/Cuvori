@@ -26,6 +26,13 @@
 // chargeback that the bank later turns into a win for Cuvori ("late win") brings the money back to the card.
 // L13 an inquiry, L14 a part chargeback decided for the client, L15 a late win, L16 the watch for a late win is quiet
 // (once a day) and ends after 180 days.
+// And after a part chargeback decided for the client, the same payment coming in again (Stripe sending it again, the
+// client reloading the page they came back to) sent the bank's part to the card a second time, and so did a part refunded
+// by hand before the chargeback: what was refunded already was not counted. "Mark as handled" while Cuvori waited for the
+// bank ended the hourly run's look, so what the client was owed after the bank's decision never went back. And when Stripe
+// allows no refund on the payment (its chargeback record says so, or it refuses), Cuvori asked again every hour forever.
+// L17 the same payment again after a part chargeback, L18 refunded by hand first, then a part chargeback, L19 "Mark as
+// handled" while Cuvori waits for the bank, L20 Stripe allows no refund on the payment.
 // Run: node tests/attack-late-payments.mjs
 import { DB, STRIPE, hooks, req, call, mk, fund, pay, signed, reset, fns, uuid } from "./fn-harness.mjs";
 const out = [];
@@ -211,6 +218,75 @@ const dayLater = (s, days = 1) => { const r = reminder(s); if (!r) return; for (
   dayLater(s, 181); await hourly(); reset();
   vuln(askedSameDay !== 0 || askedNextDay < 1 || runs.some(h => JSON.stringify(h.json || {}).includes(s.payment_intent)) || reminder(s) || refundsOf(s.payment_intent).length !== 0,
     `L16 watching a lost chargeback -> Stripe asked ${askedSameDay} times in three runs the same day, ${askedNextDay} the next day; failures in the runs: ${runs.some(h => JSON.stringify(h.json || {}).includes(s.payment_intent))}; after 180 days the watch is ${reminder(s) ? "still on" : "over"}; refunds ${refundsOf(s.payment_intent).length}`);
+}
+
+// ---------- what was refunded already, "Mark as handled" while waiting, no refund allowed ----------
+const confirm = (c, s) => call(fx.confirm, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id, session_id: s.id } }));
+const eur = (cents) => (cents / 100).toFixed(2);
+{ // L17 a part chargeback (€30) decided for the client, then the same payment comes in again: nothing more goes back
+  const res = [];
+  for (const how of ["Stripe sends it again", "the client reloads the page"]) {
+    const { c, s } = await late(() => REFUSED); reset();
+    disputed(s, "lost"); STRIPE.disputes[chargeOf(s.payment_intent).id].amount = 3000;
+    await hourly(); const first = backOf(s.payment_intent), note = c.money_error;
+    const again = how === "Stripe sends it again" ? await webhook(s) : await confirm(c, s);
+    const runs = []; for (let i = 0; i < 2; i++) runs.push(await hourly());
+    dayLater(s); runs.push(await hourly());
+    const rest = s.amount_total - chargeOf(s.payment_intent).balance_transaction.fee - 3000;
+    res.push({ how, first, rest, status: again.status, back: backOf(s.payment_intent), refunds: refundsOf(s.payment_intent).length, same: c.money_error === note, note: c.money_error, state: reminder(s) && reminder(s).key.state, failed: runs.some(h => triedIn(h, s)) });
+  }
+  vuln(res.some(r => r.first !== r.rest || r.status !== 200 || r.back !== r.rest || r.refunds !== 1 || !r.same || r.state !== "watch" || r.failed),
+    `L17 the same payment again after a part chargeback (€30) -> ${res.map(r => `${r.how}: answer ${r.status}, back to the card ${eur(r.back)} in ${r.refunds} refund(s) (must stay ${eur(r.rest)} in 1), note unchanged: ${r.same}, reminder ${r.state}, failures: ${r.failed}`).join("; ")}`);
+}
+{ // L18 €20 refunded by hand in Stripe first, then a part chargeback (€30) decided for the client: only what is still owed goes back
+  const { c, s } = await late(() => REFUSED); reset();
+  const ch = chargeOf(s.payment_intent);
+  STRIPE.refunds.push({ id: "re_byhand18", amount: 2000, metadata: {}, payment_intent: s.payment_intent, charge: ch.id, status: "succeeded" }); ch.amount_refunded = 2000;
+  disputed(s, "lost"); STRIPE.disputes[ch.id].amount = 3000;
+  const h = await hourly(); await hourly();
+  const owed = s.amount_total - ch.balance_transaction.fee - 3000 - 2000, cuvori = backOf(s.payment_intent) - 2000;
+  vuln(cuvori !== owed || refundsOf(s.payment_intent).length !== 2 || !/30\.00 .*through their bank/.test(c.money_error || "") || !new RegExp(`${eur(owed).replace(".", "\\.")} .*back to the card`).test(c.money_error || "") || triedIn(h, s),
+    `L18 €20 refunded by hand, then a part chargeback (€30) decided for the client -> Cuvori sent ${eur(cuvori)} to the card (must be ${eur(owed)}: paid ${eur(s.amount_total)}, less the card fee ${eur(ch.balance_transaction.fee)}, the bank's 30.00 and your 20.00); failures: ${triedIn(h, s)}; note ${shown(c.money_error)}`);
+}
+{ // L19 "Mark as handled" on the note while Cuvori waits for the bank: the hourly run still looks, and the note does not come back meanwhile
+  const res = [];
+  for (const [outcome, part] of [["lost", 3000], ["won", 0]]) {
+    const { c, s } = await late(() => REFUSED); reset();
+    disputed(s, "needs_response"); if (part) STRIPE.disputes[chargeOf(s.payment_intent).id].amount = part;
+    await hourly(); const waiting = c.money_error;
+    c.money_error = null;                                                    // Mark as handled (schema v55 empties the note)
+    await hourly(); await hourly(); const meanwhile = c.money_error;
+    STRIPE.disputes[chargeOf(s.payment_intent).id].status = outcome;        // the bank decides
+    await hourly(); await hourly();
+    const owed = s.amount_total - chargeOf(s.payment_intent).balance_transaction.fee - part;
+    res.push({ outcome, waiting, meanwhile, back: backOf(s.payment_intent), owed, refunds: refundsOf(s.payment_intent).length });
+  }
+  vuln(res.some(r => !/waits for the bank/.test(r.waiting || "") || r.meanwhile != null || r.back !== r.owed || r.refunds !== 1),
+    `L19 "Mark as handled" while Cuvori waits for the bank -> ${res.map(r => `then ${r.outcome}: the note meanwhile ${shown(r.meanwhile)}, back to the card ${eur(r.back)} in ${r.refunds} refund(s) (must be ${eur(r.owed)} in 1)`).join("; ")}`);
+}
+{ // L20 Stripe allows no refund on the payment: Cuvori stops asking, and the note says what the client is still owed
+  const res = [];
+  for (const how of ["its chargeback record says so", "it refuses the refund"]) {
+    const { c, s } = await late(() => REFUSED); reset();
+    disputed(s, "lost"); const d = STRIPE.disputes[chargeOf(s.payment_intent).id]; d.amount = 3000;
+    if (how === "its chargeback record says so") d.is_charge_refundable = false;
+    let tries = 0; hooks.stripe = async (p, m, b) => { if (m === "POST" && p === "/refunds" && b.get("payment_intent") === s.payment_intent) { tries++; if (how === "it refuses the refund") return [400, { error: { type: "invalid_request_error", code: "charge_disputed", message: "Charge has been charged back; cannot issue a refund." } }]; } return null; };
+    const runs = []; for (let i = 0; i < 3; i++) runs.push(await hourly()); const firstTries = tries;
+    dayLater(s); runs.push(await hourly()); dayLater(s); runs.push(await hourly());
+    const owed = s.amount_total - chargeOf(s.payment_intent).balance_transaction.fee - 3000, note = c.money_error, state = reminder(s) && reminder(s).key.state;
+    c.money_error = null; dayLater(s); await hourly(); const after = reminder(s); reset();   // Mark as handled: you take it from here
+    res.push({ how, tries, firstTries, failed: runs.some(h => triedIn(h, s)), note, owed, state, refunds: refundsOf(s.payment_intent).length, after: !!after });
+  }
+  { // an inquiry Stripe says cannot be refunded at the moment: Cuvori waits, the hourly run looks again
+    const { c, s } = await late(() => REFUSED); reset();
+    disputed(s, "warning_needs_response"); STRIPE.disputes[chargeOf(s.payment_intent).id].is_charge_refundable = false;
+    let tries = 0; hooks.stripe = async (p, m, b) => { if (m === "POST" && p === "/refunds" && b.get("payment_intent") === s.payment_intent) tries++; return null; };
+    const runs = []; for (let i = 0; i < 2; i++) runs.push(await hourly()); reset();
+    res.push({ how: "an inquiry it says cannot be refunded", tries, firstTries: tries, failed: runs.some(h => triedIn(h, s)), note: c.money_error, inquiry: true, state: reminder(s) && reminder(s).key.state, refunds: refundsOf(s.payment_intent).length });
+  }
+  vuln(res.some(r => r.failed || r.refunds !== 0 || (r.inquiry ? r.tries !== 0 || !/waits/.test(r.note || "") || r.state !== "refund"
+         : r.tries !== (r.how === "it refuses the refund" ? r.firstTries : 0) || r.firstTries > 2 || !new RegExp(`still owed ${eur(r.owed).replace(".", "\\.")}`).test(r.note || "") || r.state !== "watch" || r.after)),
+    `L20 Stripe allows no refund on the payment -> ${res.map(r => `${r.how}: refunds tried ${r.tries}${r.inquiry ? "" : ` (${r.firstTries} the first time)`}, failures ${r.failed}, note ${shown(r.note)}${r.inquiry ? "" : `, then "Mark as handled" ends the watch: ${!r.after}`}`).join("; ")}`);
 }
 
 console.error = realError;

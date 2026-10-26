@@ -1166,8 +1166,11 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
 // note says so ("Needs a hand") and the hourly run tries again (retryLateRefunds) until the money is back on the card —
 // Stripe itself stops sending the payment again after about 3 days. Once it is back, the note goes.
 // The tries have an end. While the client's chargeback on the payment is open, Cuvori waits for the bank (Stripe refuses a
-// refund then); when the bank gives the money back to the client, there is nothing left to refund: the reminder goes and
-// the note says so. And when you mark the note as handled (schema v55), the tries stop.
+// refund then); when the bank gives the money back to the client, only what it did not give back (and was not refunded
+// already) goes to the card, and the note says so. When Stripe allows no refund on the payment any more, the note says what
+// the client is still owed, and nobody asks Stripe again every hour. And when you mark a refused refund's note as handled
+// (schema v55), the tries stop. Marking the note as handled while Cuvori waits for the bank does not end the wait: what the
+// client is owed once the bank has decided still goes back.
 const LATE_DUE = "late_refund:";
 const lateNote = (pi) => (n) => n.startsWith(`late payment ${pi} `);
 const lateHead = (s) => `late payment ${s.payment_intent} (${(nz(s.amount_total) / 100).toFixed(2)} ${String(s.currency || "").toUpperCase()})`;
@@ -1179,7 +1182,7 @@ async function refundOrphan(s, why) {
     throw e;
   }
   const quiet = (p) => p.catch(x => console.error("late payment note not saved", s && s.payment_intent, x && x.message));
-  if (out.r === "chargeback_open") await quiet(lateNoteAndRemind(s, why, `${lateHead(s)} was charged, and the client has opened a chargeback on it: Cuvori waits for the bank's decision (the hourly run looks again)`));
+  if (out.r === "chargeback_open") await quiet(lateWaiting(s, why, out.inquiry));
   else if (out.r === "charged_back") await quiet(lateChargedBack(s, why, out));
   else await lateRefundDone(s);
   return out.r;
@@ -1203,6 +1206,16 @@ async function lateNoteAndRemind(s, why, text) {
   }
   await remindLate(s, why, { noted }, noted);
 }
+// While the bank decides (or, after an inquiry, while Stripe allows no refund), Cuvori waits and the hourly run looks again,
+// also once you have marked the note as handled: the note is not what the hourly run goes by here. The note is written when
+// the wait starts, not again every hour, so "Mark as handled" removes it for good.
+async function lateWaiting(s, why, inquiry) {
+  if (s.waiting) return;                                                          // the hourly run's own reminder: waiting already
+  const text = inquiry ? `${lateHead(s)} was charged, and the client's bank has asked about it; Stripe allows no refund on it at the moment: Cuvori waits (the hourly run looks again)`
+    : `${lateHead(s)} was charged, and the client has opened a chargeback on it: Cuvori waits for the bank's decision (the hourly run looks again)`;
+  if (isUuid(s.client_reference_id) && (await db.contract(s.client_reference_id).catch(() => null))) await putNote(s.client_reference_id, n => addNote(n, text, lateNote(s.payment_intent)));
+  await remindLate(s, why, { noted: false, waiting: true });
+}
 // The hourly run's reminder for a late payment. state "refund" (default): try the refund again; "watch": the bank decided
 // for the client, and Cuvori looks once a day for 180 days whether the bank turns it into a win for Cuvori after all.
 async function remindLate(s, why, extra, replace = true) {
@@ -1219,18 +1232,30 @@ async function lateRefundDone(s) {
   if (isUuid(s.client_reference_id)) { const c = await db.contract(s.client_reference_id).catch(() => null); if (c && hasNote(c.money_error, lateNote(pi))) await putNote(c.id, n => dropNote(n, lateNote(pi))); }
 }
 // The bank gave the money back to the client: what it did not give back has gone to the card, and there is nothing left to
-// refund; the note says what happened, once. Cuvori keeps a quiet watch: banks sometimes turn a decision into a win for the
-// business later (Stripe calls it a late win), and then the money goes back to the card too.
-async function lateChargedBack(s, why, { bankTook, rest }) {
+// refund; the note says what happened, once. When Stripe allows no refund on the payment any more, the rest could not go to
+// the card: the note says what the client is still owed, for you to sort out ("Mark as handled" then ends it).
+// Cuvori keeps a quiet watch: banks sometimes turn a decision into a win for the business later (Stripe calls it a late
+// win), and then the money goes back to the card too.
+async function lateChargedBack(s, why, { bankTook, rest, stuck }) {
+  const pi = s.payment_intent;
   const eur = (cents) => `${(nz(cents) / 100).toFixed(2)} ${String(s.currency || "").toUpperCase()}`;
-  if (isUuid(s.client_reference_id) && (await db.contract(s.client_reference_id).catch(() => null)) && (await claimScope(`late_cb:${s.payment_intent}`).catch(() => false)))
-    await putNote(s.client_reference_id, n => addNote(n, `${lateHead(s)}: ${eur(bankTook)} went back to the client through their bank (they charged it back and the bank decided for them)${rest > 0 ? `; the other ${eur(rest)} went back to the card` : "; nothing is left to refund"}. Stripe's chargeback fee, if any, is in the Stripe dashboard`, lateNote(s.payment_intent)));
+  const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id).catch(() => null) : null;
+  let first = false, noted = false;
+  if (c) {
+    first = await claimScope(`late_cb:${pi}`).catch(() => false);
+    if (first) {
+      const row = await putNote(c.id, n => addNote(n, `${lateHead(s)}: ${eur(bankTook)} went back to the client through their bank (they charged it back and the bank decided for them)${stuck > 0 ? `; the other ${eur(stuck)} could not go back to the card, because Stripe allows no refund on this payment any more, so the client is still owed ${eur(stuck)}: check by hand` : rest > 0 ? `; the other ${eur(rest)} went back to the card` : "; nothing is left to refund"}. Stripe's chargeback fee, if any, is in the Stripe dashboard`, lateNote(pi)));
+      noted = !!row && hasNote(row.money_error, lateNote(pi));
+    } else noted = hasNote(c.money_error, lateNote(pi));
+  }
+  if (stuck > 0 && c && !first && !noted) { await db.remove("money_keys", `scope=eq.${q(LATE_DUE + pi)}`).catch(() => {}); return; }   // marked as handled: yours from here
   const now = Date.now();
-  await remindLate(s, why, { state: "watch", watch_until: new Date(now + 180 * 86400e3).toISOString(), checked_at: new Date(now).toISOString() });
+  await remindLate(s, why, { state: "watch", watch_until: new Date(now + 180 * 86400e3).toISOString(), checked_at: new Date(now).toISOString(), ...(stuck > 0 ? { stuck, noted } : {}) });
 }
 // The hourly run: late payments charged but not back on the card yet. A payment that has been recorded on an Order since
-// is never refunded here (its note and its reminder just go), and nor is one whose note you marked as handled. An Order
-// busy at that very minute (another payment step on it) is left for the next run, without waiting.
+// is never refunded here (its note and its reminder just go), and nor is one whose note you marked as handled (a refused
+// refund, or a rest Stripe allows no refund for; never a wait for the bank). An Order busy at that very minute (another
+// payment step on it) is left for the next run, without waiting.
 export async function retryLateRefunds() {
   const due = (await db.select("money_keys", `scope=like.${q(LATE_DUE)}*&select=scope,key&limit=20`)) || [];
   let done = 0; const failed = [];
@@ -1245,12 +1270,12 @@ export async function retryLateRefunds() {
     if (!unlock) continue;                                                           // busy right now: the next run
     try {
       const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id) : null;
-      if (!watch && c && s.noted && !hasNote(c.money_error, lateNote(s.payment_intent))) { await db.remove("money_keys", `scope=eq.${q(row.scope)}`); continue; }   // marked as handled
+      if ((!watch || s.stuck > 0) && c && s.noted && !hasNote(c.money_error, lateNote(s.payment_intent))) { await db.remove("money_keys", `scope=eq.${q(row.scope)}`); continue; }   // marked as handled
       if (watch) {
         const cb = await chargebackOn(s.payment_intent);
         if (cb.state === "lost") { await db.update("money_keys", `scope=eq.${q(row.scope)}`, { key: JSON.stringify({ ...s, checked_at: new Date().toISOString() }) }); continue; }
         // the bank changed its decision: the refund goes ahead as usual (it is a reminder to refund again)
-        await db.update("money_keys", `scope=eq.${q(row.scope)}`, { key: JSON.stringify({ ...s, state: "refund", noted: false }) });
+        await db.update("money_keys", `scope=eq.${q(row.scope)}`, { key: JSON.stringify({ ...s, state: "refund", noted: false, stuck: undefined }) });
       }
       if (await contractByPi(s.payment_intent)) { await lateRefundDone(s); continue; }          // on an Order after all: not a late payment
       const r = await refundOrphan(s, s.why || "late payment");
@@ -1261,13 +1286,16 @@ export async function retryLateRefunds() {
   return { done, failed };
 }
 // The newest chargeback on a payment: state "open" (the bank is deciding), "lost" (decided for the client; amount: what the
-// bank took back), "inquiry" (the bank only asks: a refund settles it), or null (none, or decided for Cuvori).
+// bank took back), "inquiry" (the bank only asks about the payment), or null (none, or decided for Cuvori). refundable:
+// Stripe's own yes/no on the chargeback (is_charge_refundable), whether the payment can still be refunded; null when Stripe
+// does not say.
 async function chargebackOn(pi) {
   const d = (((await stripe("GET", "/disputes", { payment_intent: pi, limit: 10 })).data) || [])[0];
-  if (!d || !d.status) return { state: null };
-  if (d.status === "lost") return { state: "lost", amount: d.amount };
-  if (d.status === "warning_needs_response" || d.status === "warning_under_review") return { state: "inquiry" };
-  return ["won", "warning_closed", "prevented"].includes(d.status) ? { state: null } : { state: "open" };
+  if (!d || !d.status) return { state: null, refundable: null };
+  const refundable = typeof d.is_charge_refundable === "boolean" ? d.is_charge_refundable : null;
+  if (d.status === "lost") return { state: "lost", amount: d.amount, refundable };
+  if (d.status === "warning_needs_response" || d.status === "warning_under_review") return { state: "inquiry", refundable };
+  return ["won", "warning_closed", "prevented"].includes(d.status) ? { state: null, refundable } : { state: "open", refundable };
 }
 async function refundOrphanNow(s, why) {
   const p = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge.balance_transaction" });
@@ -1278,32 +1306,40 @@ async function refundOrphanNow(s, why) {
   }
   const back = Math.max(ch.amount - bt.fee, 0), left = Math.max(back - nz(ch.amount_refunded), 0);   // what an earlier attempt refunded is not refunded twice
   console.error("refunding payment that cannot fund an order", s.id, why, { paid: ch.amount, card_fee: bt.fee, back });
-  let give = 0, bankTook = 0, lost = false;
+  let give = 0, bankTook = 0, lost = false, stuck = 0;
   if (left > 0) {
     // A chargeback on the payment (Stripe's guide to disputes): while the bank decides, Stripe refuses a refund, so Cuvori
-    // waits; once the bank gave the money back to the client, only what it did not give back still goes to the card. An
-    // inquiry (the bank only asks about the payment) is answered by refunding right away: that settles it without a fee.
+    // waits; once the bank gave the money back to the client, only what it did not give back, and what did not go back to
+    // the card already, still goes to the card. An inquiry (the bank only asks about the payment) is answered by refunding
+    // right away. (Stripe: only a full refund settles an inquiry without a chargeback fee; this refund keeps the card fee,
+    // so the bank can still turn the inquiry into a chargeback.) Stripe's own yes/no on the chargeback is asked too: when
+    // it says the payment cannot be refunded, Cuvori does not ask for a refund.
     for (let pass = 0; pass < 2; pass++) {
       const cb = ch.disputed === true || pass > 0 ? await chargebackOn(s.payment_intent) : { state: null };
       if (cb.state === "open") return { r: "chargeback_open" };
+      if (cb.state === "inquiry" && cb.refundable === false) return { r: "chargeback_open", inquiry: true };
       lost = cb.state === "lost";
       bankTook = lost ? (Number.isInteger(cb.amount) && cb.amount > 0 ? Math.min(cb.amount, ch.amount) : ch.amount) : 0;
-      give = lost ? Math.max(Math.min(left, back - bankTook), 0) : left;
+      // what is still owed: all but the card fee, less what already went back to the card (`left`) and the bank's part
+      give = lost ? Math.max(left - bankTook, 0) : left;
       if (give <= 0) break;
+      if (lost && cb.refundable === false) { stuck = give; give = 0; break; }      // Stripe allows no refund on it any more
       try {
         await moneyPost(`orphan:${s.payment_intent}:${nz(ch.amount_refunded)}`, "/refunds", { payment_intent: s.payment_intent, amount: give, metadata: { contract_id: s.client_reference_id || "", reason: why.slice(0, 200), kind: "late_payment" } });
         break;
       } catch (e) {
         const charged = ["charge_disputed", "refund_disputed_payment"].includes(stripeCode(e)) || /charged back|disputed/i.test(String(e && e.message));
         if (charged && pass === 0) { give = 0; continue; }                         // charged back a moment ago: what the bank decided, asked again
+        if (charged && lost) { stuck = give; give = 0; break; }                    // Stripe refuses the rest after the bank's decision: not asked again every hour
         throw e;
       }
     }
   }
+  if (stuck > 0) console.error("late payment: Stripe allows no refund of the rest after the chargeback; the client is still owed it", s.payment_intent, { still_owed: stuck });
   const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id).catch(() => null) : null;
   if (c && (give > 0 || (!lost && nz(ch.amount_refunded) === back)) && (await claimScope(`late:${s.payment_intent}`).catch(() => false)))
     await orderEvent(c, "late_payment_refunded", { amount_cents: give > 0 ? give : back, card_fee_cents: bt.fee, total_cents: ch.amount }, null);
-  return lost ? { r: "charged_back", bankTook, rest: give } : { r: "refunded" };
+  return lost ? { r: "charged_back", bankTook, rest: give, stuck } : { r: "refunded" };
 }
 // ---- hold first, charge after ----
 // On Stripe's page the card is only authorized (a hold, capture_method manual). The money is charged here, and only when the
