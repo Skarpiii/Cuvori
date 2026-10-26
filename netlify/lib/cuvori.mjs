@@ -1172,17 +1172,17 @@ const LATE_DUE = "late_refund:";
 const lateNote = (pi) => (n) => n.startsWith(`late payment ${pi} `);
 const lateHead = (s) => `late payment ${s.payment_intent} (${(nz(s.amount_total) / 100).toFixed(2)} ${String(s.currency || "").toUpperCase()})`;
 async function refundOrphan(s, why) {
-  let r;
-  try { r = await refundOrphanNow(s, why); }
+  let out;
+  try { out = await refundOrphanNow(s, why); }
   catch (e) {
     await lateRefundDue(s, why, e).catch(x => console.error("late payment not noted", s && s.payment_intent, x && x.message));
     throw e;
   }
   const quiet = (p) => p.catch(x => console.error("late payment note not saved", s && s.payment_intent, x && x.message));
-  if (r === "chargeback_open") await quiet(lateNoteAndRemind(s, why, `${lateHead(s)} was charged, and the client has opened a chargeback on it: Cuvori waits for the bank's decision (the hourly run looks again)`));
-  else if (r === "charged_back") await quiet(lateChargedBack(s));
+  if (out.r === "chargeback_open") await quiet(lateNoteAndRemind(s, why, `${lateHead(s)} was charged, and the client has opened a chargeback on it: Cuvori waits for the bank's decision (the hourly run looks again)`));
+  else if (out.r === "charged_back") await quiet(lateChargedBack(s, why, out));
   else await lateRefundDone(s);
-  return r;
+  return out.r;
 }
 async function lateRefundDue(s, why, e) {
   const pi = s.payment_intent;
@@ -1201,10 +1201,16 @@ async function lateNoteAndRemind(s, why, text) {
     const row = await putNote(s.client_reference_id, n => addNote(n, text, lateNote(pi)));
     noted = !!row && hasNote(row.money_error, lateNote(pi));
   }
-  const key = JSON.stringify({ id: s.id, payment_intent: pi, client_reference_id: s.client_reference_id || null, amount_total: nz(s.amount_total), currency: s.currency || null, mode: STRIPE_MODE || null, why: String(why).slice(0, 200), noted });
+  await remindLate(s, why, { noted }, noted);
+}
+// The hourly run's reminder for a late payment. state "refund" (default): try the refund again; "watch": the bank decided
+// for the client, and Cuvori looks once a day for 180 days whether the bank turns it into a win for Cuvori after all.
+async function remindLate(s, why, extra, replace = true) {
+  const pi = s.payment_intent;
+  const key = JSON.stringify({ id: s.id, payment_intent: pi, client_reference_id: s.client_reference_id || null, amount_total: nz(s.amount_total), currency: s.currency || null, mode: STRIPE_MODE || null, why: String(why).slice(0, 200), state: "refund", ...extra });
   await db.insert("money_keys", { scope: LATE_DUE + pi, key }).catch(async (x) => {
     if (x.status !== 409) throw x;
-    if (noted) await db.update("money_keys", `scope=eq.${q(LATE_DUE + pi)}`, { key });                // waiting already: kept, now with its note
+    if (replace) await db.update("money_keys", `scope=eq.${q(LATE_DUE + pi)}`, { key });            // waiting already: kept, now with what changed
   });
 }
 async function lateRefundDone(s) {
@@ -1212,11 +1218,15 @@ async function lateRefundDone(s) {
   await db.remove("money_keys", `scope=eq.${q(LATE_DUE + pi)}`).catch(() => {});
   if (isUuid(s.client_reference_id)) { const c = await db.contract(s.client_reference_id).catch(() => null); if (c && hasNote(c.money_error, lateNote(pi))) await putNote(c.id, n => dropNote(n, lateNote(pi))); }
 }
-// the bank gave the money back to the client: nothing left to refund, no more tries; the note says what happened, once
-async function lateChargedBack(s) {
-  await db.remove("money_keys", `scope=eq.${q(LATE_DUE + s.payment_intent)}`).catch(() => {});
+// The bank gave the money back to the client: what it did not give back has gone to the card, and there is nothing left to
+// refund; the note says what happened, once. Cuvori keeps a quiet watch: banks sometimes turn a decision into a win for the
+// business later (Stripe calls it a late win), and then the money goes back to the card too.
+async function lateChargedBack(s, why, { bankTook, rest }) {
+  const eur = (cents) => `${(nz(cents) / 100).toFixed(2)} ${String(s.currency || "").toUpperCase()}`;
   if (isUuid(s.client_reference_id) && (await db.contract(s.client_reference_id).catch(() => null)) && (await claimScope(`late_cb:${s.payment_intent}`).catch(() => false)))
-    await putNote(s.client_reference_id, n => addNote(n, `${lateHead(s)} went back to the client through their bank: they charged it back and the bank decided for them, so there is nothing left to refund (Stripe's chargeback fee, if any, is in the Stripe dashboard)`, lateNote(s.payment_intent)));
+    await putNote(s.client_reference_id, n => addNote(n, `${lateHead(s)}: ${eur(bankTook)} went back to the client through their bank (they charged it back and the bank decided for them)${rest > 0 ? `; the other ${eur(rest)} went back to the card` : "; nothing is left to refund"}. Stripe's chargeback fee, if any, is in the Stripe dashboard`, lateNote(s.payment_intent)));
+  const now = Date.now();
+  await remindLate(s, why, { state: "watch", watch_until: new Date(now + 180 * 86400e3).toISOString(), checked_at: new Date(now).toISOString() });
 }
 // The hourly run: late payments charged but not back on the card yet. A payment that has been recorded on an Order since
 // is never refunded here (its note and its reminder just go), and nor is one whose note you marked as handled. An Order
@@ -1228,11 +1238,20 @@ export async function retryLateRefunds() {
     let s; try { s = JSON.parse(row.key); } catch { s = null; }
     if (!s || !isPi(s.payment_intent)) { failed.push({ id: row.scope, why: "late payment: unreadable reminder" }); continue; }
     if (s.mode && STRIPE_MODE && s.mode !== STRIPE_MODE) continue;                   // paid in the other mode: these keys cannot refund it (kept for when they can)
+    const watch = s.state === "watch";
+    if (watch && !(Date.parse(s.watch_until) > Date.now())) { await db.remove("money_keys", `scope=eq.${q(row.scope)}`).catch(() => {}); continue; }   // 180 days: the watch ends
+    if (watch && Date.now() - Date.parse(s.checked_at) < 86400e3) continue;          // once a day
     const unlock = isUuid(s.client_reference_id) ? await lockOrder(s.client_reference_id, 0).catch(() => null) : () => {};
     if (!unlock) continue;                                                           // busy right now: the next run
     try {
       const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id) : null;
-      if (c && s.noted && !hasNote(c.money_error, lateNote(s.payment_intent))) { await db.remove("money_keys", `scope=eq.${q(row.scope)}`); continue; }   // marked as handled
+      if (!watch && c && s.noted && !hasNote(c.money_error, lateNote(s.payment_intent))) { await db.remove("money_keys", `scope=eq.${q(row.scope)}`); continue; }   // marked as handled
+      if (watch) {
+        const cb = await chargebackOn(s.payment_intent);
+        if (cb.state === "lost") { await db.update("money_keys", `scope=eq.${q(row.scope)}`, { key: JSON.stringify({ ...s, checked_at: new Date().toISOString() }) }); continue; }
+        // the bank changed its decision: the refund goes ahead as usual (it is a reminder to refund again)
+        await db.update("money_keys", `scope=eq.${q(row.scope)}`, { key: JSON.stringify({ ...s, state: "refund", noted: false }) });
+      }
       if (await contractByPi(s.payment_intent)) { await lateRefundDone(s); continue; }          // on an Order after all: not a late payment
       const r = await refundOrphan(s, s.why || "late payment");
       if (r !== "chargeback_open") done++;
@@ -1241,12 +1260,14 @@ export async function retryLateRefunds() {
   }
   return { done, failed };
 }
-// the newest chargeback on a payment: "open" (the bank is deciding), "lost" (decided for the client), or null (none, or decided for Cuvori)
+// The newest chargeback on a payment: state "open" (the bank is deciding), "lost" (decided for the client; amount: what the
+// bank took back), "inquiry" (the bank only asks: a refund settles it), or null (none, or decided for Cuvori).
 async function chargebackOn(pi) {
   const d = (((await stripe("GET", "/disputes", { payment_intent: pi, limit: 10 })).data) || [])[0];
-  if (!d || !d.status) return null;
-  if (d.status === "lost") return "lost";
-  return ["won", "warning_closed", "prevented"].includes(d.status) ? null : "open";
+  if (!d || !d.status) return { state: null };
+  if (d.status === "lost") return { state: "lost", amount: d.amount };
+  if (d.status === "warning_needs_response" || d.status === "warning_under_review") return { state: "inquiry" };
+  return ["won", "warning_closed", "prevented"].includes(d.status) ? { state: null } : { state: "open" };
 }
 async function refundOrphanNow(s, why) {
   const p = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge.balance_transaction" });
@@ -1257,25 +1278,32 @@ async function refundOrphanNow(s, why) {
   }
   const back = Math.max(ch.amount - bt.fee, 0), left = Math.max(back - nz(ch.amount_refunded), 0);   // what an earlier attempt refunded is not refunded twice
   console.error("refunding payment that cannot fund an order", s.id, why, { paid: ch.amount, card_fee: bt.fee, back });
+  let give = 0, bankTook = 0, lost = false;
   if (left > 0) {
-    // a chargeback on the payment: while the bank decides, Stripe refuses a refund, and once the bank gave the money back
-    // to the client there is nothing left to refund
-    const cb = ch.disputed === true ? await chargebackOn(s.payment_intent) : null;
-    if (cb === "lost") return "charged_back";
-    if (cb === "open") return "chargeback_open";
-    try { await moneyPost(`orphan:${s.payment_intent}`, "/refunds", { payment_intent: s.payment_intent, amount: left, metadata: { contract_id: s.client_reference_id || "", reason: why.slice(0, 200), kind: "late_payment" } }); }
-    catch (e) {
-      if (!(["charge_disputed", "refund_disputed_payment"].includes(stripeCode(e)) || /charged back|disputed/i.test(String(e && e.message)))) throw e;
-      const now = await chargebackOn(s.payment_intent);                              // charged back a moment ago
-      if (now === "lost") return "charged_back";
-      if (now === "open") return "chargeback_open";
-      throw e;
+    // A chargeback on the payment (Stripe's guide to disputes): while the bank decides, Stripe refuses a refund, so Cuvori
+    // waits; once the bank gave the money back to the client, only what it did not give back still goes to the card. An
+    // inquiry (the bank only asks about the payment) is answered by refunding right away: that settles it without a fee.
+    for (let pass = 0; pass < 2; pass++) {
+      const cb = ch.disputed === true || pass > 0 ? await chargebackOn(s.payment_intent) : { state: null };
+      if (cb.state === "open") return { r: "chargeback_open" };
+      lost = cb.state === "lost";
+      bankTook = lost ? (Number.isInteger(cb.amount) && cb.amount > 0 ? Math.min(cb.amount, ch.amount) : ch.amount) : 0;
+      give = lost ? Math.max(Math.min(left, back - bankTook), 0) : left;
+      if (give <= 0) break;
+      try {
+        await moneyPost(`orphan:${s.payment_intent}:${nz(ch.amount_refunded)}`, "/refunds", { payment_intent: s.payment_intent, amount: give, metadata: { contract_id: s.client_reference_id || "", reason: why.slice(0, 200), kind: "late_payment" } });
+        break;
+      } catch (e) {
+        const charged = ["charge_disputed", "refund_disputed_payment"].includes(stripeCode(e)) || /charged back|disputed/i.test(String(e && e.message));
+        if (charged && pass === 0) { give = 0; continue; }                         // charged back a moment ago: what the bank decided, asked again
+        throw e;
+      }
     }
   }
   const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id).catch(() => null) : null;
-  if (c && (left > 0 || nz(ch.amount_refunded) === back) && (await claimScope(`late:${s.payment_intent}`).catch(() => false)))
-    await orderEvent(c, "late_payment_refunded", { amount_cents: back, card_fee_cents: bt.fee, total_cents: ch.amount }, null);
-  return "refunded";
+  if (c && (give > 0 || (!lost && nz(ch.amount_refunded) === back)) && (await claimScope(`late:${s.payment_intent}`).catch(() => false)))
+    await orderEvent(c, "late_payment_refunded", { amount_cents: give > 0 ? give : back, card_fee_cents: bt.fee, total_cents: ch.amount }, null);
+  return lost ? { r: "charged_back", bankTook, rest: give } : { r: "refunded" };
 }
 // ---- hold first, charge after ----
 // On Stripe's page the card is only authorized (a hold, capture_method manual). The money is charged here, and only when the

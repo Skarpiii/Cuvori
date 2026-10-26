@@ -20,6 +20,12 @@
 // the reminder goes and the note says so; decided for Cuvori, the refund is made. L10 "Mark as handled" also stops the tries.
 // L11 the note never shows Cuvori's own "payments are paused: the Stripe key in Netlify…" sentence to the people on the
 // Order. L12 an Order busy at that minute is left for the next hourly run at once, without waiting.
+// And three more ends, from Stripe's guide to disputes: an inquiry (the bank only asks about the payment, before or instead
+// of a chargeback) is answered by refunding right away — Cuvori used to wait, so the inquiry could turn into a chargeback
+// and its fee; a chargeback for only part of the payment, decided for the client, still sends the rest back; and a lost
+// chargeback that the bank later turns into a win for Cuvori ("late win") brings the money back to the card.
+// L13 an inquiry, L14 a part chargeback decided for the client, L15 a late win, L16 the watch for a late win is quiet
+// (once a day) and ends after 180 days.
 // Run: node tests/attack-late-payments.mjs
 import { DB, STRIPE, hooks, req, call, mk, fund, pay, signed, reset, fns, uuid } from "./fn-harness.mjs";
 const out = [];
@@ -132,7 +138,7 @@ const triedIn = (h, s) => JSON.stringify(h.json || {}).includes(s.payment_intent
   }
   const L = res.lost, W = res.won;
   vuln(L.w !== 200 || !/chargeback/.test(L.waitingNote || "") || !/waits for the bank/.test(L.waitingNote || "") || L.h1Fails
-       || !/went back to the client through their bank/.test(L.note || "") || L.reminded || L.refunds !== 0 || L.h3Fails
+       || !/went back to the client through their bank/.test(L.note || "") || L.refunds !== 0 || L.h3Fails
        || W.reminded || W.refunds !== 1 || W.back !== W.total - W.fee || W.note != null,
     `L9 a chargeback on the late payment -> while the bank decides: webhook ${L.w}, note ${shown(L.waitingNote)}, the hourly run reports it as failed: ${L.h1Fails}; decided for the client -> note ${shown(L.note)}, reminder kept: ${L.reminded}, refunds ${L.refunds}, still tried: ${L.h3Fails}; decided for Cuvori -> refunds ${W.refunds} of ${W.back} (paid ${W.total}, fee ${W.fee}), note ${shown(W.note)}, reminder kept: ${W.reminded}`);
 }
@@ -160,6 +166,51 @@ const triedIn = (h, s) => JSON.stringify(h.json || {}).includes(s.payment_intent
   DB.money_keys.splice(DB.money_keys.findIndex(k => k.scope === `lock:${c.id}`), 1);
   await hourly();
   vuln(took > 2500 || first !== 0 || refundsOf(s.payment_intent).length !== 1, `L12 the Order busy during the hourly run -> the run took ${(took / 1000).toFixed(1)} s (must not wait), refunds ${first}; next run -> refunds ${refundsOf(s.payment_intent).length} (must be 1)`);
+}
+
+// ---------- an inquiry, a part chargeback, a late win ----------
+const reminder = (s) => { const r = DB.money_keys.find(k => k.scope === "late_refund:" + s.payment_intent); return r ? { row: r, key: JSON.parse(r.key) } : null; };
+const dayLater = (s, days = 1) => { const r = reminder(s); if (!r) return; for (const f of ["checked_at", "watch_until"]) if (r.key[f]) r.key[f] = new Date(Date.parse(r.key[f]) - days * 86400e3).toISOString(); r.row.key = JSON.stringify(r.key); };
+{ // L13 the bank only asks about the payment (an inquiry): refunded right away, once, all but the card fee
+  const res = [];
+  for (const status of ["warning_needs_response", "warning_under_review"]) {
+    const { c, s } = await late(() => REFUSED); reset();
+    disputed(s, status);
+    const h = await hourly(); await hourly();
+    const fee = chargeOf(s.payment_intent).balance_transaction.fee;
+    res.push({ status, refunds: refundsOf(s.payment_intent).length, back: backOf(s.payment_intent), want: s.amount_total - fee, note: c.money_error, reminded: !!reminder(s) });
+  }
+  vuln(res.some(r => r.refunds !== 1 || r.back !== r.want || r.note != null || r.reminded),
+    `L13 an inquiry on the late payment -> ${res.map(r => `${r.status}: refunds ${r.refunds}, back ${r.back} (must be ${r.want}), note ${shown(r.note)}`).join("; ")} (must be refunded right away, once)`);
+}
+{ // L14 a chargeback for part of the payment (€30 of it), decided for the client: the rest goes back to the card
+  const { c, s } = await late(() => REFUSED); reset();
+  disputed(s, "lost"); STRIPE.disputes[chargeOf(s.payment_intent).id].amount = 3000;
+  const h = await hourly(); await hourly();
+  const fee = chargeOf(s.payment_intent).balance_transaction.fee, rest = s.amount_total - fee - 3000;
+  vuln(refundsOf(s.payment_intent).length !== 1 || backOf(s.payment_intent) !== rest || !/30\.00 .*through their bank/.test(c.money_error || "") || !/(\d+\.\d\d) .*back to the card/.test(c.money_error || ""),
+    `L14 a part chargeback (€30) decided for the client -> refunds ${refundsOf(s.payment_intent).length} of ${backOf(s.payment_intent)} (must be one of ${rest}: the rest, all but the card fee), note ${shown(c.money_error)}`);
+}
+{ // L15 a lost chargeback that the bank turns into a win for Cuvori later: the money goes back to the card, once
+  const { c, s } = await late(() => REFUSED); reset();
+  disputed(s, "lost");
+  await hourly(); const watching = reminder(s);
+  STRIPE.disputes[chargeOf(s.payment_intent).id].status = "won";            // the late win
+  await hourly(); const sameDay = refundsOf(s.payment_intent).length;     // checked once a day
+  dayLater(s); await hourly(); await hourly(); dayLater(s); await hourly();
+  const fee = chargeOf(s.payment_intent).balance_transaction.fee;
+  vuln(!watching || watching.key.state !== "watch" || sameDay !== 0 || refundsOf(s.payment_intent).length !== 1 || backOf(s.payment_intent) !== s.amount_total - fee || reminder(s) || String(c.money_error || "").includes(`late payment ${s.payment_intent} `),
+    `L15 a late win -> watched: ${watching && watching.key.state}; refunds the same day ${sameDay}, after the next daily look ${refundsOf(s.payment_intent).length} of ${backOf(s.payment_intent)} (must be one of ${s.amount_total - fee}); reminder left: ${!!reminder(s)}, note ${shown(c.money_error)}`);
+}
+{ // L16 the watch for a late win is quiet: Stripe is asked once a day, nothing fails, and it ends after 180 days
+  const { c, s } = await late(() => REFUSED); reset();
+  disputed(s, "lost"); await hourly();
+  let asked = 0; hooks.stripe = async (p, m, q) => { if (p.includes(s.payment_intent) || (p === "/disputes" && q && q.get("payment_intent") === s.payment_intent)) asked++; return null; };
+  const runs = []; for (let i = 0; i < 3; i++) runs.push(await hourly());
+  const askedSameDay = asked; dayLater(s); await hourly(); const askedNextDay = asked - askedSameDay;
+  dayLater(s, 181); await hourly(); reset();
+  vuln(askedSameDay !== 0 || askedNextDay < 1 || runs.some(h => JSON.stringify(h.json || {}).includes(s.payment_intent)) || reminder(s) || refundsOf(s.payment_intent).length !== 0,
+    `L16 watching a lost chargeback -> Stripe asked ${askedSameDay} times in three runs the same day, ${askedNextDay} the next day; failures in the runs: ${runs.some(h => JSON.stringify(h.json || {}).includes(s.payment_intent))}; after 180 days the watch is ${reminder(s) ? "still on" : "over"}; refunds ${refundsOf(s.payment_intent).length}`);
 }
 
 console.error = realError;
