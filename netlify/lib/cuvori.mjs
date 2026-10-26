@@ -1297,6 +1297,31 @@ async function chargebackOn(pi) {
   if (d.status === "warning_needs_response" || d.status === "warning_under_review") return { state: "inquiry", refundable };
   return ["won", "warning_closed", "prevented"].includes(d.status) ? { state: null, refundable } : { state: "open", refundable };
 }
+// The bank asks about a late payment Cuvori already sent back except the card fee (the client may not recognise the smaller
+// refund). Your decision: during an inquiry Cuvori refunds in full, so the card fee goes back too — Stripe says only a full
+// refund ends an inquiry without a chargeback and its fee. Only for a payment Cuvori itself refunded as a late payment (its
+// refund says so), never for another one; never twice (the refund's key is the amount refunded so far), and not when
+// Stripe says the payment cannot be refunded. A payment whose refund has not gone through yet is the hourly run's: it
+// refunds in full too (refundOrphanNow).
+async function lateInquiry(o) {
+  const pi = o.payment_intent;
+  if (!isPi(pi)) return "ignored";
+  const ours = (((await stripe("GET", "/refunds", { payment_intent: pi, limit: 100 })).data) || [])
+    .find(r => r && r.metadata && r.metadata.kind === "late_payment" && r.status !== "failed" && r.status !== "canceled");
+  if (!ours) return "ignored";
+  if (o.is_charge_refundable === false) { console.error("inquiry on a late payment: Stripe allows no refund on it, so its card fee could not go back", pi, o.id); return "not_refundable"; }
+  const p = await stripe("GET", `/payment_intents/${pi}`, { "expand[]": "latest_charge" });
+  const ch = p && p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
+  if (!ch || !Number.isInteger(ch.amount)) { const e = new Error(`inquiry on late payment ${pi}: its charge could not be read`); e.outcomeUnknown = true; throw e; }   // the webhook fails, Stripe sends it again
+  const rest = ch.amount - nz(ch.amount_refunded);
+  if (rest <= 0) return "already";
+  const id = ours.metadata.contract_id;
+  await moneyPost(`orphan:${pi}:${nz(ch.amount_refunded)}`, "/refunds", { payment_intent: pi, amount: rest, metadata: { contract_id: id || "", reason: "the client's bank asked about the late payment", kind: "late_payment" } });
+  console.error("inquiry on a late payment: its card fee went back too, so the refund is full", pi, { refunded: rest });
+  const c = isUuid(id) ? await db.contract(id).catch(() => null) : null;
+  if (c && (await claimScope(`late_full:${pi}`).catch(() => false))) await orderEvent(c, "late_payment_refunded", { amount_cents: rest, card_fee_cents: 0, total_cents: ch.amount, full: true }, null);
+  return "refunded";
+}
 async function refundOrphanNow(s, why) {
   const p = await stripe("GET", `/payment_intents/${s.payment_intent}`, { "expand[]": "latest_charge.balance_transaction" });
   const ch = p && p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
@@ -1311,9 +1336,9 @@ async function refundOrphanNow(s, why) {
     // A chargeback on the payment (Stripe's guide to disputes): while the bank decides, Stripe refuses a refund, so Cuvori
     // waits; once the bank gave the money back to the client, only what it did not give back, and what did not go back to
     // the card already, still goes to the card. An inquiry (the bank only asks about the payment) is answered by refunding
-    // right away. (Stripe: only a full refund settles an inquiry without a chargeback fee; this refund keeps the card fee,
-    // so the bank can still turn the inquiry into a chargeback.) Stripe's own yes/no on the chargeback is asked too: when
-    // it says the payment cannot be refunded, Cuvori does not ask for a refund.
+    // right away and in full, the card fee too: Stripe says only a full refund ends an inquiry without a chargeback and its
+    // fee (your decision: Cuvori pays the card fee then, rather than risk the chargeback fee). Stripe's own yes/no on the
+    // chargeback is asked too: when it says the payment cannot be refunded, Cuvori does not ask for a refund.
     for (let pass = 0; pass < 2; pass++) {
       const cb = ch.disputed === true || pass > 0 ? await chargebackOn(s.payment_intent) : { state: null };
       if (cb.state === "open") return { r: "chargeback_open" };
@@ -1321,7 +1346,7 @@ async function refundOrphanNow(s, why) {
       lost = cb.state === "lost";
       bankTook = lost ? (Number.isInteger(cb.amount) && cb.amount > 0 ? Math.min(cb.amount, ch.amount) : ch.amount) : 0;
       // what is still owed: all but the card fee, less what already went back to the card (`left`) and the bank's part
-      give = lost ? Math.max(left - bankTook, 0) : left;
+      give = lost ? Math.max(left - bankTook, 0) : cb.state === "inquiry" ? Math.max(ch.amount - nz(ch.amount_refunded), 0) : left;   // an inquiry: all of it
       if (give <= 0) break;
       if (lost && cb.refundable === false) { stuck = give; give = 0; break; }      // Stripe allows no refund on it any more
       try {
@@ -1338,7 +1363,7 @@ async function refundOrphanNow(s, why) {
   if (stuck > 0) console.error("late payment: Stripe allows no refund of the rest after the chargeback; the client is still owed it", s.payment_intent, { still_owed: stuck });
   const c = isUuid(s.client_reference_id) ? await db.contract(s.client_reference_id).catch(() => null) : null;
   if (c && (give > 0 || (!lost && nz(ch.amount_refunded) === back)) && (await claimScope(`late:${s.payment_intent}`).catch(() => false)))
-    await orderEvent(c, "late_payment_refunded", { amount_cents: give > 0 ? give : back, card_fee_cents: bt.fee, total_cents: ch.amount }, null);
+    await orderEvent(c, "late_payment_refunded", { amount_cents: give > 0 ? give : back, card_fee_cents: bt.fee, total_cents: ch.amount, ...(give > 0 && nz(ch.amount_refunded) + give >= ch.amount ? { full: true } : {}) }, null);   // full: all of it went back, the card fee too
   return lost ? { r: "charged_back", bankTook, rest: give, stuck } : { r: "refunded" };
 }
 // ---- hold first, charge after ----
@@ -1610,6 +1635,8 @@ const retryable = (e) => !!(e && (e.network || e.outcomeUnknown || e.shouldRetry
 export async function onDisputeCreated(o) {
   const initial = await contractByPi(o.payment_intent);
   if (!initial) {
+    // the bank only asks about a late payment Cuvori sent back except the card fee: the card fee goes back too (lateInquiry)
+    if (o && (o.status === "warning_needs_response" || o.status === "warning_under_review")) { const r = await lateInquiry(o); if (r !== "ignored") return r; }
     // a chargeback on a payment with no Order on record (an Order removed with an account before schema v35 kept them, or
     // a payment made outside Cuvori): nothing here can answer it or pull money back, so the log says where to do it
     console.error("chargeback on a payment with no Order on record: answer it in Stripe's dashboard, under Disputes", "dispute", o && o.id, "payment", o && o.payment_intent, "amount", o && o.amount);

@@ -33,8 +33,16 @@
 // allows no refund on the payment (its chargeback record says so, or it refuses), Cuvori asked again every hour forever.
 // L17 the same payment again after a part chargeback, L18 refunded by hand first, then a part chargeback, L19 "Mark as
 // handled" while Cuvori waits for the bank, L20 Stripe allows no refund on the payment.
+// Your decision: during a bank inquiry Cuvori refunds in full, the card fee too (Stripe: only a full refund ends an
+// inquiry without a chargeback and its fee). L13 checks it for a payment not refunded yet; L21 for one Cuvori had already
+// sent back except the card fee when the bank's inquiry came in (it was left as it was, so the inquiry could still become
+// a chargeback).
 // Run: node tests/attack-late-payments.mjs
 import { DB, STRIPE, hooks, req, call, mk, fund, pay, signed, reset, fns, uuid } from "./fn-harness.mjs";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
 const logs = []; const realError = console.error; console.error = (...a) => logs.push(a.map(String).join(" "));
@@ -178,17 +186,18 @@ const triedIn = (h, s) => JSON.stringify(h.json || {}).includes(s.payment_intent
 // ---------- an inquiry, a part chargeback, a late win ----------
 const reminder = (s) => { const r = DB.money_keys.find(k => k.scope === "late_refund:" + s.payment_intent); return r ? { row: r, key: JSON.parse(r.key) } : null; };
 const dayLater = (s, days = 1) => { const r = reminder(s); if (!r) return; for (const f of ["checked_at", "watch_until"]) if (r.key[f]) r.key[f] = new Date(Date.parse(r.key[f]) - days * 86400e3).toISOString(); r.row.key = JSON.stringify(r.key); };
-{ // L13 the bank only asks about the payment (an inquiry): refunded right away, once, all but the card fee
+{ // L13 the bank only asks about the payment (an inquiry): refunded right away, once, in full — the card fee too (your
+  // decision: only a full refund ends an inquiry without a chargeback and its fee), and the history says all of it went back
   const res = [];
   for (const status of ["warning_needs_response", "warning_under_review"]) {
     const { c, s } = await late(() => REFUSED); reset();
     disputed(s, status);
     const h = await hourly(); await hourly();
-    const fee = chargeOf(s.payment_intent).balance_transaction.fee;
-    res.push({ status, refunds: refundsOf(s.payment_intent).length, back: backOf(s.payment_intent), want: s.amount_total - fee, note: c.money_error, reminded: !!reminder(s) });
+    const ev = DB.order_events.filter(e => e.order_id === c.id && e.event === "late_payment_refunded");
+    res.push({ status, refunds: refundsOf(s.payment_intent).length, back: backOf(s.payment_intent), want: s.amount_total, note: c.money_error, reminded: !!reminder(s), lines: ev.length, full: ev.length === 1 && ev[0].data && ev[0].data.full === true });
   }
-  vuln(res.some(r => r.refunds !== 1 || r.back !== r.want || r.note != null || r.reminded),
-    `L13 an inquiry on the late payment -> ${res.map(r => `${r.status}: refunds ${r.refunds}, back ${r.back} (must be ${r.want}), note ${shown(r.note)}`).join("; ")} (must be refunded right away, once)`);
+  vuln(res.some(r => r.refunds !== 1 || r.back !== r.want || r.note != null || r.reminded || r.lines !== 1 || !r.full),
+    `L13 an inquiry on the late payment -> ${res.map(r => `${r.status}: refunds ${r.refunds}, back ${r.back} (must be ${r.want}: all of it), note ${shown(r.note)}, history lines ${r.lines}, saying all of it went back: ${r.full}`).join("; ")} (must be refunded right away, once, in full)`);
 }
 { // L14 a chargeback for part of the payment (€30 of it), decided for the client: the rest goes back to the card
   const { c, s } = await late(() => REFUSED); reset();
@@ -287,6 +296,30 @@ const eur = (cents) => (cents / 100).toFixed(2);
   vuln(res.some(r => r.failed || r.refunds !== 0 || (r.inquiry ? r.tries !== 0 || !/waits/.test(r.note || "") || r.state !== "refund"
          : r.tries !== (r.how === "it refuses the refund" ? r.firstTries : 0) || r.firstTries > 2 || !new RegExp(`still owed ${eur(r.owed).replace(".", "\\.")}`).test(r.note || "") || r.state !== "watch" || r.after)),
     `L20 Stripe allows no refund on the payment -> ${res.map(r => `${r.how}: refunds tried ${r.tries}${r.inquiry ? "" : ` (${r.firstTries} the first time)`}, failures ${r.failed}, note ${shown(r.note)}${r.inquiry ? "" : `, then "Mark as handled" ends the watch: ${!r.after}`}`).join("; ")}`);
+}
+
+{ // L21 the bank asks about a late payment Cuvori already sent back except the card fee: the card fee goes back too, once
+  const inquiry = (s, status, extra = {}) => { const ch = chargeOf(s.payment_intent);
+    return call(fx.webhook, req("POST", "x", signed({ type: "charge.dispute.created", data: { object: { id: "dp_inq_" + ch.id + status, object: "dispute", charge: ch.id, payment_intent: s.payment_intent, amount: ch.amount, currency: "eur", status, reason: "general", ...extra } } }))); };
+  const res = [];
+  { const { c, s } = await late(); reset(); const first = backOf(s.payment_intent);   // refunded at once, all but the card fee
+    const w1 = await inquiry(s, "warning_needs_response"); const w2 = await inquiry(s, "warning_needs_response");
+    const ev = DB.order_events.filter(e => e.order_id === c.id && e.event === "late_payment_refunded");
+    res.push({ how: "an inquiry, sent twice", w: [w1.status, w2.status], first, back: backOf(s.payment_intent), want: s.amount_total, refunds: refundsOf(s.payment_intent).length, wantRefunds: 2, full: ev.some(e => e.data && e.data.full === true) }); }
+  { const { s } = await late(); reset();
+    const w = await inquiry(s, "needs_response");                                  // a chargeback, not an inquiry: nothing can be refunded while it is open
+    res.push({ how: "a chargeback (not an inquiry)", w: [w.status], back: backOf(s.payment_intent), want: s.amount_total - chargeOf(s.payment_intent).balance_transaction.fee, refunds: refundsOf(s.payment_intent).length, wantRefunds: 1, full: true }); }
+  { const { s } = await late(); reset();
+    const w = await inquiry(s, "warning_needs_response", { is_charge_refundable: false });   // Stripe says it cannot be refunded
+    res.push({ how: "an inquiry Stripe says cannot be refunded", w: [w.status], back: backOf(s.payment_intent), want: s.amount_total - chargeOf(s.payment_intent).balance_transaction.fee, refunds: refundsOf(s.payment_intent).length, wantRefunds: 1, full: true }); }
+  { const s = foreign("Inq1", true, uuid()); const ch = chargeOf(s.payment_intent);   // a payment that is not Cuvori's, refunded by hand in part
+    STRIPE.refunds.push({ id: "re_otherhand", amount: 1000, metadata: {}, payment_intent: s.payment_intent, charge: ch.id, status: "succeeded" }); ch.amount_refunded = 1000;
+    const w = await inquiry(s, "warning_needs_response");
+    res.push({ how: "an inquiry on a payment that is not a Cuvori late payment", w: [w.status], back: backOf(s.payment_intent), want: 1000, refunds: refundsOf(s.payment_intent).length, wantRefunds: 1, full: true }); }
+  const page = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const texts = (page.match(/o_ev_late_payment_refunded_full:"[^"]*\{total\}[^"]*"/g) || []).length, picks = /e\.event==="late_payment_refunded"&&d\.full\?"_full"/.test(page);
+  vuln(res.some(r => r.w.some(x => x !== 200) || r.back !== r.want || r.refunds !== r.wantRefunds || !r.full) || texts !== 7 || !picks,
+    `L21 the bank asks about a late payment sent back except the card fee -> ${res.map(r => `${r.how}: webhook ${r.w.join("/")}, back to the card ${eur(r.back)} in ${r.refunds} refund(s) (must be ${eur(r.want)} in ${r.wantRefunds})${r.how.startsWith("an inquiry, sent") ? `, history says all of it went back: ${r.full}` : ""}`).join("; ")}; the page's "all of it went back" line in ${texts} of 7 languages, used: ${picks}`);
 }
 
 console.error = realError;
