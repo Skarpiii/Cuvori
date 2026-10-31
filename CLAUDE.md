@@ -35,13 +35,13 @@ The owner reviews the code by pasting lines into the chat. This applies every ti
 - **Check every line properly, and everything it touches:** the functions it calls, the database, the page, the tests and every other copy of the same rule. Never answer from an earlier check of the same lines, and never stop at the first thing found.
 - **Prove it where you can** with a test or a live check, and say plainly when something was only read, not tested. If an earlier answer turns out to be wrong, say so.
 - **"check it", or lines pasted with no words, means report only.** Change nothing. Only "fix it" changes code.
-- **On "fix it":** write a test, show it failing on the code that is on GitHub now, make the fix, run every test suite, then upload through the GitHub upload page (the owner clicks Commit changes) and confirm each file arrived exactly as tested.
+- **On "fix it":** write a test, show it failing on the code that is on GitHub now, make the fix, run every test suite, then upload through the GitHub upload page (the owner clicks Commit changes; while an update waits on its own branch, such as `pricing-v2`, its files go to that branch, not `main`; an urgent fix to the live site goes to `main`, and the same change to the waiting branch too) and confirm each file arrived exactly as tested.
 - **Every report starts with a "Checked this time" list:** each place the pasted lines are used, by file and line, and next to each one "tested" or "read", all done in this answer. A place that is not on the list was not checked, so the owner can see a skip before trusting the answer. Never leave the list out, never shorten it to "all callers", and never fill it from an earlier check.
 - **Then report in plain words:** what is right, then each problem with what it means for a client, a freelancer or the owner, and one clear recommendation.
 
 ## Product rules that override everything else
 
-- **0% commission.** Cuvori never takes a percentage of what a professional earns.
+- **Prices (final, owner's decision; `PRODUCT_SPEC.md` section 3).** Clients pay only the agreed price: free job posts, free matching help, no client fee, no subscription, no hidden fees. Freelancers pay 5% commission on projects paid through Cuvori (top-ups included); Cuvori pays the card costs. Projects paid directly between client and freelancer pay none, as Cuvori never holds that money; whether direct payments stay under the new prices is not decided yet (SETUP.md Part 20). Protected payments are paid out at once when the client approves, or 14 days after a valid delivery unless disputed; during a dispute nothing is paid out automatically; when Cuvori divides the money in a dispute, the 5% comes out of the freelancer's share, never out of the client's refund. These take effect only with the price switch (schema v56); until then today's prices (no commission, 7 days) apply, and Orders agreed before the switch keep them for good. Three rules start as soon as v56 runs (SETUP.md Part 20): nothing is paid out for a part of an Order while it is in dispute (or no longer being worked on) or a chargeback is open, though Cuvori's own decision on a dispute still goes through; a payment line's Order, kind, amounts, status and Stripe reference can never be changed (Stripe's fee and the card-fee refund are still added, as today); and an Order agreed after v56 can never be set back to a proposal. Never add fees, surcharges or subscriptions, and never disguise card costs, without asking Egidijus.
 - **Price first.** When browsing professionals, the card shows price before anything else: price → pricing model → specializations → name → location → work preview. Never revert to a work-first card.
 - **One account.** There are no separate client and editor accounts. One account can hire, post jobs, message, and (if invited) offer services.
 - **Invites are for professional profiles only.** Normal accounts register freely. Creating a professional/editor profile requires an invitation. Never require an invite just to use Cuvori as a client.
@@ -56,13 +56,13 @@ The owner reviews the code by pasting lines into the chat. This applies every ti
 
 ## The prototype
 
-`cuvori-index.html` is the clickable design reference (light theme, price-first cards, messaging windows, report → review flow, custom video player with comment markers). Port its UI and interactions into the real app rather than redesigning from scratch. It contains a complete 7-language translation table (`const T = {...}`) — reuse those strings.
+`cuvori-index.html`, the clickable prototype the design came from (light theme, price-first cards, messaging windows, report → review flow, custom video player with comment markers), grew into the real site, `index.html`; an old copy is only inside `cuvori-repo-files.zip` (do not unzip it into the repository: it also holds old copies of README.md, CLAUDE.md and PRODUCT_SPEC.md with the old prices). Build on the design that is there rather than redesigning from scratch. The 7-language texts are in `index.html` (`const T = {...}` and the other `T_…` tables merged into it): reuse those strings.
 
-The prototype has **no backend**. Its invite check, accounts, jobs, contracts and notifications are demo-only. Do not mistake them for working systems.
+That old copy has **no backend**: its invite check, accounts, jobs, contracts and notifications are demo-only. Do not mistake them for the real site's working systems.
 
 ## Build order
 
-Follow the order in `README.md`. Do not start the Frame.io-style review system until accounts, invites/admin and messaging exist on the real backend.
+`README.md` has the original build order (the site was then built as one page, `index.html`, not as planned there). What still holds: do not start the Frame.io-style review system until accounts, invites/admin and messaging exist on the real backend.
 
 ## Security checklist (before any public launch)
 

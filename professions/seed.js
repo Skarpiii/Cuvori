@@ -38,7 +38,7 @@ const professions = [
     labels:L('Sound designer',{de:'Sounddesigner',ru:'Саунд-дизайнер',lt:'Garso dizaineris',es:'Diseñador de sonido',pl:'Sound designer',uk:'Саунд-дизайнер'}),
     synonyms:['sound design','sfx','foley','game audio','garsas','звук','ton','audio','podcast','muzika','music'] },
   { slug:'audio-editor',   group:'audio',        sort:220, active:true, invite_only:true, units:['hour','project'],           portfolio:'link',
-    labels:L('Audio editor',{de:'Audio-Editor',ru:'Аудиомонтажёр',lt:'Garso montuotojas',es:'Editor de audio',pl:'Montażysta dźwięku',uk:'Аудіомонтажер'}),
+    labels:L('Audio editor',{de:'Audio-Editor',ru:'Аудиомонтажёр',lt:'Garso editorius',es:'Editor de audio',pl:'Montażysta dźwięku',uk:'Аудіомонтажер'}),
     synonyms:['podcast editor','audio editing','mixing','mastering','podkastas','подкаст','tonschnitt','audiobook'] },
   { slug:'voice-over',     group:'audio',        sort:230, active:true, invite_only:true, units:['project','hour'],           portfolio:'link',
     labels:L('Voice-over artist',{de:'Sprecher',ru:'Диктор',lt:'Įgarsintojas',es:'Locutor',pl:'Lektor',uk:'Диктор'}),

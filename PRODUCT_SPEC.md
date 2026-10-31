@@ -11,8 +11,8 @@ Owner: not a programmer. Makes product decisions; AI handles implementation. Pre
 A marketplace for **video editors, videographers and photographers**.
 Audience: content creators, small brands/businesses, and creative professionals looking for clients. Creators can also be professionals.
 
-Core message: **Cuvori does not take your money.**
-Headline: **Find Your Editor, Videographer, Photographer — Commission-Free.**
+Core message today: **Cuvori does not take your money.** Headline today: **Find your freelancer — Commission-Free.**
+Under the new prices (section 3) the homepage drops both claims: the headline reads "Find your freelancer." and the pricing block says, under "For clients": "Free job posts. No platform fees."; under "For freelancers": "5% commission. We cover the card processing fees."; and below both: "Free to join and browse. No subscriptions. No hidden platform fees." The homepage block, the headline, the line under it, step 4, the footer and the proposal note switch by themselves when the price switch is turned on. Every other "no commission" text (How it works, its questions and its "0%" badge, Contracts, Join, Create account, Post a job, the sign-up pop-up, the note on every profile's price card, the price hint of the new-Order form, the "Payout details" note, the Order screen's payment box and notes with the card-fee line and "Cuvori fee: €0", the late-payment line in the Order history, and the contract clauses) gets a new-price version before the switch, shown from the switch on (on the Order screen and in the contract by each Order's own price plan: a proposal made under the new prices already shows them, and an Order agreed before keeps today's). The site rules instead get a new version, published before the switch: both sides must have accepted it before they can agree an Order at the new prices. The page description that Google shows, and the old claims built into the page (the headline among them), change right after the switch, never before (SETUP.md, Part 20, steps 3 and 6 of "Turning the new prices on").
 
 Keep copy simple. Don't rewrite it into corporate or AI-sounding language.
 
@@ -33,7 +33,15 @@ Current card design (prototype): black price badge at the top of a white card ("
 
 ## 3. Business model
 
-**0% commission.** Cuvori never takes a percentage of earnings. Possible later revenue: referrals, advertising, partnerships. Payment processing is not needed at launch; if added later it goes through a third-party provider and Cuvori still takes nothing.
+**The prices (owner's final decisions, October 2026).** They take effect when the owner turns the price switch on in Supabase (`schema_v56.sql`, SETUP.md Part 20). Until then today's prices stay: no commission, and the client pays the card fee and Stripe's payout fee on top.
+
+- **Clients pay only the agreed project price.** Posting jobs is free. Personal help with searching and matching freelancers is free. No client fee, no subscription, no hidden platform fees. Client fees may be looked at again later, after client feedback — not now.
+- **Freelancers pay 5% commission on projects paid through Cuvori** (protected payments): 5% of every amount paid out to them, rounded half up to the cent on the running total. A re-payment after a won chargeback only pays back what was pulled back and keeps nothing again. A top-up pays the same 5%, nothing more. **Cuvori pays the card processing costs.**
+- A project paid through Cuvori costs at least €2 (today €1; €2 comes from the earlier plan, and the owner has not decided on it yet: it must be decided before the switch). Projects paid directly between client and freelancer, outside Cuvori, pay no commission: Cuvori never holds that money. Whether direct payments stay under the new prices is not decided yet (SETUP.md Part 20).
+- **Protected payments, 14 days:** the client pays before work starts; the freelancer delivers; the 14 days start with a valid delivery (a link to the work). The client approves → paid out at once. No dispute within 14 days → paid out automatically. A dispute opened before the payout stops it: Cuvori looks at the agreement, the messages, the delivered work and both sides' evidence, and decides to pay out, refund or divide, under its dispute policy. When it divides, the 5% comes out of the freelancer's share, never out of the client's refund (€100 divided 60/40: the freelancer receives €57, Cuvori keeps €3, the client gets €40 back). Nothing is paid out automatically while a dispute is open.
+- Free to join and browse. No subscriptions.
+- Orders agreed before the switch keep what was agreed (today's prices and 7 days). Financial records are never changed afterwards.
+- Free projects (a later feature) stay separate from the payment system.
 
 ## 4. Account model
 
@@ -156,7 +164,7 @@ Client side and Editor side, shown side by side with Clients / Editors controls.
 
 ## 25. Contracts
 
-Before work starts: scope, price, pricing method (hourly / project), timeframe, deliverables, revisions. Cuvori provides a simple template/workflow. Still 0% commission.
+Before work starts: scope, price, pricing method (hourly / project), timeframe, deliverables, revisions. Cuvori provides a simple template/workflow. Prices as in section 3.
 
 ## 26. Settings / account
 
@@ -164,7 +172,7 @@ Settings: change password, messaging settings, language, help & support — coll
 
 ## 27. Languages
 
-English, German, Russian, Lithuanian, Spanish, Polish, Ukrainian. The prototype contains the full translation table (225+ strings each). Test localization carefully.
+English, German, Russian, Lithuanian, Spanish, Polish, Ukrainian. `index.html` contains the full translation tables. Test localization carefully.
 
 **Lithuanian:** use *editorius* (or *videografas*), never *montuotojas*. Preserve ė, ų, š, ž etc.
 
@@ -191,7 +199,7 @@ Seed ~10–20 good professionals first, then clients, grow both gradually toward
 
 ## 32. Differentiation
 
-0% commission, clear pricing, good search, strong portfolios, direct communication, jobs, easy workflow, progress reports, video review, less hassle, simple contracts, later reputation. Not "another Fiverr".
+Clear prices (under the new prices of section 3: clients pay no fees, and freelancers a small, clear 5% on projects paid through Cuvori, card costs covered; today no commission at all), good search, strong portfolios, direct communication, jobs, easy workflow, progress reports, video review, less hassle, simple contracts, later reputation. Not "another Fiverr".
 
 ## 33. Later (not before launch)
 
@@ -199,7 +207,7 @@ Forum/community. AI-assisted editing alongside human professionals. Native mobil
 
 ## 34. Technical plan
 
-GitHub (private) → Vercel (web) → Supabase (database, auth, storage, realtime). Own the code, keep it portable. Build order is in `README.md`. The video-review system is built on the real backend, not in a temporary builder.
+GitHub (a public repository: everything in it can be read by anyone) → GitHub Pages for the page (cuvori.io) and Netlify for the payment functions → Supabase (database, auth, storage, realtime). Own the code, keep it portable. The first plan (Vercel, Next.js and the build order in `README.md`) was not followed: the site is one page, `index.html`. The video-review system is built on the real backend, not in a temporary builder.
 
 ## 35. How AI should work here
 

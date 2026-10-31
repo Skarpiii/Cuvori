@@ -49,7 +49,9 @@ const SETUP = `
 const pick = (r, label) => { const l = r.out.split("\n").find(x => x.startsWith(label + ": ")); return l ? l.slice(label.length + 2) : (r.ok ? "(nothing)" : "error: " + (r.err.split("\n").find(x => /^(psql:.*)?ERROR/.test(x)) || r.err.split("\n")[0] || "").replace(/^.*ERROR:\s*/, "")); };
 const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
 { const r = tx("select 'setup: ok';"); if (pick(r, "setup") !== "ok") { console.log("the test's set-up failed: " + r.err); process.exit(1); } }
-const STAGE = (status, mode = "direct") => `update public.contracts set status = '${status}', payment_mode = '${mode}'${status === "completed" ? ", completed_at = now(), closed_at = now()" : ""}${["cancelled", "declined"].includes(status) ? ", closed_at = now()" : ""} where id = ${O};`;
+// (an agreed Order can no longer be set back to a proposal, schema v56: the "not agreed yet" case is staged with the
+// database's checks paused for that one line)
+const STAGE = (status, mode = "direct") => `${status === "proposed" ? "set local session_replication_role = replica; " : ""}update public.contracts set status = '${status}', payment_mode = '${mode}'${status === "completed" ? ", completed_at = now(), closed_at = now()" : ""}${["cancelled", "declined"].includes(status) ? ", closed_at = now()" : ""} where id = ${O};${status === "proposed" ? " set local session_replication_role = origin;" : ""}`;
 const READ = (who) => `${as(who)} select 'sees: ' || coalesce((public.payout_info(${U("892")})->'methods'->0->>'details'), 'nothing'); ${owner}`;
 
 { // B1 a finished Order paid outside Cuvori

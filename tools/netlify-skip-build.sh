@@ -18,7 +18,7 @@ changed=$(git diff --name-only --no-renames "$base" "$head" 2>/dev/null) || { ec
 if [ -z "$changed" ]; then echo "Nothing to compare: building."; exit 1; fi
 while IFS= read -r f; do
   case "$f" in
-    tests/*|supabase/*|shots/*|*.md|realtest.js|galtest.js|authtest.js|jobstest.js|fntest.mjs|mock-supabase.js) ;;
+    tests/*|supabase/*|shots/*|*.md|realtest.js|galtest.js|authtest.js|jobstest.js|fntest.mjs|pricing-page.js|mock-supabase.js) ;;
     *) echo "Changed since the last build: $f — building."; exit 1 ;;
   esac
 done <<< "$changed"
