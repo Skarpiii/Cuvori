@@ -90,7 +90,8 @@ const home = async (p) => p.evaluate(() => ({
     // a price change redraws only the data-i18n texts and the homepage block (applyPriceTexts): every "__p2" text must be
     // one of those, or the proposal note (built each time the new-Order form opens), or it would stay old until a reload
     for (const k of [...new Set([...src.matchAll(/([A-Za-z0-9_]+)__p2:"/g)].map(m => m[1]))])
-      if (k !== 'es_proposeNote' && !src.includes(`data-i18n="${k}"`)) miss.push(`${k}__p2 is not redrawn when the prices change (not a data-i18n text)`);
+      // (and the note on a profile's price card, and the sign-up pop-up's line, drawn each time they open)
+      if (!['es_proposeNote', 'noCommissionNote', 'jp_free', 'o_priceHint'].includes(k) && !src.includes(`data-i18n="${k}"`)) miss.push(`${k}__p2 is not redrawn when the prices change (not a data-i18n text)`);
     ok(!miss.length && !off.length, `the new-price texts: the 14 corrected phrases are in place, and every text has the English one's placeholders and is translated${miss.length ? ' — missing: ' + miss.join('; ') : ''}${off.length ? ' — ' + off.join('; ') : ''}`);
   }
   // the notes say what is true (SETUP.md, PRODUCT_SPEC.md, README.md, the top of schema v56)
@@ -221,30 +222,34 @@ const home = async (p) => p.evaluate(() => ({
         const has = (where, w) => where.includes(w);
         const COVER = {
           heroTitle: 'p2', heroSub: 'p2', step4: 'p2', footer: 'p2', es_proposeNote: 'p2',
-          clientStep4Desc: [step(3), 'How it works page'], editorStep4Desc: [step(3), 'How it works page'], p_val1Title: [step(3), 'How it works page'],
-          p_val1Desc: [step(3), 'How it works page'], p_faq1Q: [step(3), 'its questions'], p_faq1A: [step(3), 'its questions'],
-          noCommissionTitle: [step(3), 'the Contracts page'], noCommissionDesc: [step(3), 'the Contracts page'], p_join1: [step(3), 'the Join page'],
-          p_acc1: [step(3), 'Create account'], p_freeToPost: [step(3), 'Post a job'], jp_free: [step(3), '"Create a free account" pop-up'],
-          noCommissionNote: [step(3), "every profile's price card"], o_priceHint: [step(3), 'price hint of the new-Order form'],
+          // rewritten in the readiness review of 1 November: a new-price version in all 7 languages ("__p2"), the protection
+          // texts only while protected payments are on ("__p2e")
+          clientStep4Desc: 'p2', editorStep4Desc: 'p2', p_val1Title: 'p2', p_val1Desc: 'p2', p_faq1Q: 'p2', p_faq1A: 'p2',
+          noCommissionTitle: 'p2', noCommissionDesc: 'p2', p_join1: 'p2', p_acc1: 'p2', p_freeToPost: 'p2', jp_free: 'p2',
+          noCommissionNote: 'p2', o_priceHint: 'p2e',
           o_processing: [step(3), 'card-fee lines on the Order screen'], o_connectHint: [step(3), 'card-fee lines on the Order screen'],
           o_cuvoriZero: [step(3), 'card-fee lines on the Order screen'], o_quoteFailed: [step(3), 'card-fee lines on the Order screen'],
           o_ev_late_payment_refunded: [step(3), 'history line for a late payment'],
           k_pay_escrow: [step(3), '`k_pay_escrow`'], k_entire: [step(3), '`k_entire`'], k_dispute: [step(3), '`k_dispute`'], r_s1: [step(3), 'the site rules'],
           k_pay_direct: [decisions, '`k_pay_direct`'],     // true of direct payments: it goes with that decision
-          pay_desc: [step(3), '"Payout details" note'],  // above the Stripe payout box: rewritten whatever the decision
+          pay_desc: 'p2',  // above the Stripe payout box: rewritten whatever the decision (it now says it is about direct payments)
           o_ev_fee_refunded: 'plan 1', o_ev_fee_exact: 'plan 1',                                     // only an Order whose client paid a card fee has them
           paymentNotice: 'unused', c_noFee: 'unused', es_payDesc: 'unused',
+          // written for the new prices: shown only on an Order agreed at them (plan 2), never on an older one (tests/plan2-page.js)
+          o2_commission: 'plan 2', o2_payOnly: 'plan 2', o2_fromPayout: 'plan 2', o2_heldNote: 'plan 2',
         };
         const defs = {}; for (const m of page.matchAll(/([A-Za-z_]\w*):"((?:[^"\\]|\\.)*)"/g)) (defs[m[1]] = defs[m[1]] || []).push(m[2]);
-        const found = Object.keys(defs).filter(k => k.length > 2 && defs[k].length % 7 === 0 && !/__p2$|^hp_/.test(k) && defs[k].some(t => claim.test(t)));   // a text key: one text per language, 7 (or 14 when in two tables)
+        const found = Object.keys(defs).filter(k => k.length > 2 && defs[k].length % 7 === 0 && !/__p2e?$|^hp_/.test(k) && defs[k].some(t => claim.test(t)));   // a text key: one text per language, 7 (or 14 when in two tables)
         const out = [];
-        for (const k of Object.keys(defs).filter(k => k.length > 2 && defs[k].length % 7 !== 0 && defs[k].some(t => claim.test(t) && /[a-z] [a-z]/i.test(t)) && !/__p2$|^hp_/.test(k)))
+        for (const k of Object.keys(defs).filter(k => k.length > 2 && defs[k].length % 7 !== 0 && defs[k].some(t => claim.test(t) && /[a-z] [a-z]/i.test(t)) && !/__p2e?$|^hp_/.test(k)))
           out.push(`page text ${k} makes a price claim but is not in all 7 languages (${defs[k].length} copies)`);
         for (const k of found) {
           const c = COVER[k], en = (defs[k][0] || '').slice(0, 70);
           if (!c) out.push(`page text ${k} ("${en}…") makes a price claim and no switch step names it`);
           else if (c === 'p2' && (defs[k + '__p2'] || []).length < 7) out.push(`page text ${k} has no new-price version in all 7 languages`);
+          else if (c === 'p2e' && (defs[k + '__p2e'] || []).length < 7) out.push(`page text ${k} has no protected-payment version in all 7 languages`);
           else if (c === 'unused' && page.split(k).length - 1 !== defs[k].length) out.push(`page text ${k} is marked unused but the page uses it`);
+          else if (c === 'plan 2' && (!/^o2_/.test(k) || defs[k].length !== 7)) out.push(`page text ${k} is marked as a plan 2 Order's text but is not an "o2_" text in the 7 languages`);
           else if (Array.isArray(c) && !has(c[0], c[1])) out.push(`page text ${k} ("${en}…"): SETUP no longer names "${c[1]}"`);
         }
         for (const k of Object.keys(COVER)) if (!found.includes(k)) out.push(`page text ${k} is listed here but no longer makes a price claim: take it off the list`);
@@ -381,7 +386,7 @@ const home = async (p) => p.evaluate(() => ({
       !/card cost not covered/.test(step(1)) || !/keeps each chargeback's amount and result/.test(step(1)) || !/pays what was pulled back again as a re-payment/.test(step(1)) ? 'SETUP step 1 misses the admin panel\'s card-cost note, each chargeback\'s own record, or re-paying what was pulled back (no second 5%)' : '',
       !/If step 1 of "Turning the new prices on" is live but step 2 of "Turning the new prices on" is not/.test(mistaken) || !/7 days in its payment notes and 14 in its contract text/.test(mistaken) || !/Every Order that carries the new prices/.test(mistaken) ? 'SETUP\'s mistaken switch-on misses step 1 live without step 2, the old page\'s 7 and 14 days, or labels the query wrongly' : '',
       !/close on a tap/.test(runStep(5)) ? 'SETUP step 5 of "Running v56" leaves out that messages now close on a tap (visible with the switch off)' : '',
-      !/only the Order's latest chargeback is checked/.test(part20) || !/Don't pull money back from a freelancer by hand in the Stripe dashboard/.test(part20) || !/A refund that fails at Stripe later can't be recorded yet/.test(part20) || !/stay listed/.test(part20) ? 'SETUP does not say what the ledger check can\'t see or record' : '',
+      !/only the Order's latest chargeback is checked/.test(part20) || !/Don't pull money back from a freelancer by hand in the Stripe dashboard/.test(part20) || !/A refund that fails at Stripe later is recorded by its own `refund_failed` line/.test(part20) || !/stay listed/.test(part20) ? 'SETUP does not say what the ledger check can\'t see or record' : '',
       /this file is the one that gives up, not the other side/.test(v56.replace(/\n\s*--\s*/g, ' ')) ? 'v56 says it always gives way in a deadlock (not guaranteed)' : '',
       ...[...new Set([...v56.matchAll(/'item', '([a-z_]+)'/g)].map(m => m[1]))].filter(k => !part20.includes('`' + k + '`') && !part20.includes('"' + k + '"')).map(k => `SETUP Part 20 does not explain the ledger check's item to decide ${k}`),
       // the fifth full check of 30 October
@@ -431,7 +436,7 @@ const home = async (p) => p.evaluate(() => ({
       /what Stripe charged Cuvori is for the admin only/.test(v56) ? 'schema v56 says Stripe\'s fee is for the admin only (both people can read their payment lines)' : '',
       // the ninth full check of 31 October
       !/refund total \(`refunded_cents`\) takes only what Cuvori still held/.test(step(1)) ? 'SETUP step 1 asks for the full chargeback line without saying the Order\'s refund total takes only what was held (a full one is refused)' : '',
-      !/needs a small database step for it too/.test(step(1)) ? 'SETUP step 1 asks the payment code to record a failed refund that v56 has no kind of line for' : '',
+      !/v56 now has a `refund_failed` kind of line for it/.test(step(1)) ? 'SETUP step 1 does not say a failed refund now has its own kind of line (refund_failed)' : '',
       !/of every kind, from Stripe's record/.test(step(1)) ? 'SETUP step 1 never asks the hourly run to add every kind of missing line (line_missing says it does)' : '',
       !/month you publish it in/.test(part(8)) ? 'SETUP Part 8 does not say how to name a new rules version (a future month would stop people agreeing Orders)' : '',
       /including its note/.test(part20) ? 'SETUP says visitors can read your note on the switch (they no longer can)' : '',
@@ -1531,6 +1536,55 @@ const home = async (p) => p.evaluate(() => ({
       await press(p); await p.waitForTimeout(1200); const r = await sent(p);
       ok(r.n - n0 === 1 && !/prices changed/.test(r.said) && !errs.length, `no v56, the payment check answers late with 10 review days -> ${r.n - n0} sent; the page says: ${r.said.slice(-60) || 'nothing'} (must send, no "prices changed")`);
       await ctx.close();
+    }
+    // 56. the readiness review of 1 November: every price and protection claim says what is true. Under the new prices the
+    //     "no commission" texts give the 5%, in all 7 languages; the protection texts (the homepage's "Protected payments"
+    //     panel, how to pay, what happens when something goes wrong) show only while protected payments are on, and never
+    //     claim a legally regulated escrow; today's prices keep today's texts
+    {
+      const KEYS = ['clientStep4Desc', 'editorStep4Desc', 'p_val1Title', 'p_val1Desc', 'p_faq1Q', 'p_faq1A', 'noCommissionTitle', 'noCommissionDesc', 'p_join1', 'p_acc1', 'p_freeToPost', 'p_faq2A', 'p_faq4A', 'pay_desc'];
+      const OLDCLAIM = /commission-free|no commission|no marketplace commission|takes no commission|keep 100|0% commission|integrated payments are planned|never takes a cut|no cuvori commission/i;
+      const ESCROWWORD = { en: /escrow/i, de: /treuhand/i, ru: /эскроу/i, lt: /escrow|deponavim/i, es: /escrow|garant/i, pl: /escrow/i, uk: /ескроу/i };
+      const want = (lang, key, v2, prot) => (v2 && prot && textOf('T_PRICES', lang, key + '__p2e')) || (v2 && textOf('T_PRICES', lang, key + '__p2')) || null;
+      const look = (p) => p.evaluate((keys) => ({ texts: Object.fromEntries(keys.map(k => [k, (document.querySelector(`[data-i18n="${k}"]`) || {}).textContent || null])),
+        all: [...document.querySelectorAll('[data-i18n]')].map(e => e.textContent).join(' \n '),
+        prot: (() => { const x = document.querySelector('#protectBlock'); return { shown: !!x && !x.hidden && !document.querySelector('#pricingBlock').hidden, text: x ? x.innerText : '' }; })() }), KEYS);
+      for (const lang of LANGS) {
+        const bad = [];
+        for (const [name, prices, prot] of [['today', P1, true], ['new, protected payments off', P2, false], ['new, protected payments on', P2, true]]) {
+          const { ctx, p, errs } = await open(b, prices, lang);
+          if (prot) { await p.evaluate(async () => { window.__mockEscrow = true; if (window.__reloadEscrow) await window.__reloadEscrow().catch(() => {}); }); await p.waitForTimeout(300); }
+          const r = await look(p), v2 = prices === P2;
+          for (const k of KEYS) {
+            const w = want(lang, k, v2, prot);
+            if (w && r.texts[k] !== w) bad.push(`${name}: ${k} reads "${String(r.texts[k]).slice(0, 50)}"`);
+            if (r.texts[k] == null) bad.push(`${name}: ${k} is not on the page`);
+            else if (!v2 && [textOf('T_PRICES', lang, k + '__p2'), textOf('T_PRICES', lang, k + '__p2e')].includes(r.texts[k])) bad.push(`${name}: ${k} shows a new-price text`);
+          }
+          if (v2 && lang === 'en' && OLDCLAIM.test(r.all)) bad.push(`${name}: an old claim is still on the page: "${(r.all.match(OLDCLAIM) || [])[0]}"`);
+          if (r.prot.shown !== (v2 && prot)) bad.push(`${name}: the protection panel is ${r.prot.shown ? 'shown' : 'hidden'}`);
+          if (r.prot.shown && !/14/.test(r.prot.text)) bad.push(`${name}: the protection panel does not say the 14 days`);
+          if (r.prot.shown && ESCROWWORD[lang].test(r.prot.text)) bad.push(`${name}: the protection panel uses the word escrow`);
+          if (errs.length) bad.push(`${name}: page errors ${errs.join('; ')}`);
+          await ctx.close();
+        }
+        // the one place that names escrow says Cuvori is not one, in every language
+        const faq4 = textOf('T_PRICES', lang, 'p_faq4A__p2e') || '';
+        const notOne = { en: /not a bank or an escrow service/, de: /keine Bank und kein Treuhanddienst/, ru: /не банк и не эскроу-сервис/, lt: /nėra bankas/, es: /no es un banco ni un servicio/, pl: /nie jest bankiem ani usługą escrow/, uk: /не банк і не ескроу-сервіс/ };
+        if (!notOne[lang].test(faq4)) bad.push('the dispute answer does not say Cuvori is not an escrow service');
+        ok(!bad.length, `${lang}: price and protection claims — today's texts at today's prices, the 5% under the new prices, protection texts only with protected payments on${bad.length ? ' — ' + bad.slice(0, 4).join('; ') : ''}`);
+      }
+      // switched while the page is open: protected payments turned off -> the protection texts go at once
+      {
+        const { ctx, p, errs } = await open(b, P2, 'en');
+        await p.evaluate(async () => { window.__mockEscrow = true; await window.__reloadEscrow().catch(() => {}); }); await p.waitForTimeout(300);
+        const on = await look(p);
+        await p.evaluate(async () => { window.__mockEscrow = false; await window.__reloadEscrow().catch(() => {}); }); await p.waitForTimeout(300);
+        const off = await look(p);
+        ok(on.prot.shown && !off.prot.shown && on.texts.p_faq2A === textOf('T_PRICES', 'en', 'p_faq2A__p2e') && off.texts.p_faq2A === textOf('T_PRICES', 'en', 'p_faq2A__p2') && !errs.length,
+          `protected payments turned off while the page is open -> the panel ${off.prot.shown ? 'STAYS' : 'goes'}, "How do I pay" goes back to direct payment (${off.texts.p_faq2A === textOf('T_PRICES', 'en', 'p_faq2A__p2')})`);
+        await ctx.close();
+      }
     }
   } catch (e) { log.push('CRASH ' + e.message); }
   await b.close();
