@@ -1,9 +1,20 @@
-// GET /.netlify/functions/stripe-status → { escrow: true|false, stripeKeyOk: true|false, databaseKeyOk: true|false, autoReleaseDays, settingsNotes }
+// GET /.netlify/functions/stripe-status → { escrow: true|false, stripeKeyOk: true|false, databaseKeyOk: true|false, autoReleaseDays }
+// (+ settingsNotes for a signed-in admin)
 // The processing cost is not here on purpose: the page asks the database (order_quote) for the exact amount.
 // stripeKeyOk: whether the Stripe key in Netlify is a secret key at all (never the key itself), so the admin panel can say
 // "ON, but paused" when it is not. databaseKeyOk: the same for the database key (SUPABASE_SECRET_KEY or the older
-// SUPABASE_SERVICE_ROLE_KEY): whether it can be used, never the key.
+// SUPABASE_SERVICE_ROLE_KEY): whether it can be used, never the key. Both stay in the answer anyone gets: without a working
+// database key nobody can be told apart as an admin, and that is exactly when the admin panel must say so.
 // settingsNotes: a web-address setting in Netlify that had to be read loosely or replaced (SITE_URL, ALLOWED_ORIGINS,
-// SUPABASE_URL), for the admin panel. Only the setting's name and the address Cuvori uses, never what was typed.
-import { escrowEnabled, STRIPE_MODE, SERVICE_KEY_OK, AUTO_RELEASE_DAYS, SETTINGS_NOTES, json, safe } from "../lib/cuvori.mjs";
-export default safe(async () => json(200, { escrow: escrowEnabled(), stripeKeyOk: !!STRIPE_MODE, databaseKeyOk: SERVICE_KEY_OK, autoReleaseDays: AUTO_RELEASE_DAYS, settingsNotes: SETTINGS_NOTES }));
+// SUPABASE_URL), for the admin panel. Only the setting's name and the address Cuvori uses, never what was typed. Only an
+// admin (the request carries their sign-in) gets them: anyone can call this, and how Cuvori's settings are set up is
+// nobody else's business. A sign-in that can't be checked right now never stops the answer: the notes are then left out.
+import { escrowEnabled, STRIPE_MODE, SERVICE_KEY_OK, AUTO_RELEASE_DAYS, SETTINGS_NOTES, json, safe, userFromRequest } from "../lib/cuvori.mjs";
+export default safe(async (req) => {
+  const out = { escrow: escrowEnabled(), stripeKeyOk: !!STRIPE_MODE, databaseKeyOk: SERVICE_KEY_OK, autoReleaseDays: AUTO_RELEASE_DAYS };
+  if (req && /^Bearer\s+\S+$/i.test(req.headers.get("authorization") || "")) {
+    const me = await userFromRequest(req).catch(() => null);
+    if (me && me.is_admin === true && me.banned !== true) out.settingsNotes = SETTINGS_NOTES;
+  }
+  return json(200, out);
+});

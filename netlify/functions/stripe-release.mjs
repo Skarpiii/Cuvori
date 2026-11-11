@@ -46,7 +46,11 @@ export default safe(async (req) => {
     const now = new Date().toISOString();
     // Only while the price and what was paid in are still the ones checked above: an increase accepted or a payment
     // recorded a moment ago would otherwise be left out of the release.
-    const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(funded,delivered)&${moneyUnchanged(c)}`, { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_by: me.id, resolved_at: now, auto_release_at: null });
+    // (since schema v56 the database refuses to start paying out an Order that went into dispute or got a chargeback at this
+    // very moment: there is nothing to release then)
+    const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(funded,delivered)&${moneyUnchanged(c)}`, { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_by: me.id, resolved_at: now, auto_release_at: null })
+      .catch(e => { if (/release_paused/.test(String(e && e.message))) return "paused"; throw e; });
+    if (rows === "paused") return refuse(409, "Nothing to release right now", "nothing_to_release");
     row = rows && rows[0] || null;
     if (!row) return refuse(409, "The order changed a moment ago. Reload the page and try again.", "order_changed");
   }
