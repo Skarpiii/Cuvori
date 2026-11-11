@@ -341,15 +341,17 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
   const r = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: c.id, decision: "split", editor_percent: 50 } }));
   reset();
   vuln(c.released_cents !== 5000 || ledger(c, "release").length !== 1 || c.status !== "resolving", `D1a split, refund refused (${r.status}) -> status=${c.status}, released_cents=${c.released_cents} (must already be 5000: the transfer was made), release rows=${ledger(c, "release").length}`);
-  for (const x of DB.contracts) if (x !== c && ["delivered", "releasing", "resolving"].includes(x.status)) x.status = "completed";
-  c.resolved_at = past(1);
-  const j = await call(fx.autoRelease, req("POST", "x"));
+  // an hour later (the clock moves, not the decision's claim time: its record names that time, and the hourly run carries
+  // out only a decision on record)
+  const j = await hourlyLater(c);
   const mo = moneyOut(c);
   vuln(c.status !== "completed" || mo.transferred !== 5000 || mo.refunded !== 5000 || c.released_cents !== 5000 || c.refunded_cents !== 5000 || ledger(c, "release").length !== 1 || ledger(c, "refund").length !== 1,
     `D1b hourly retry -> status=${c.status}, freelancer ${mo.transferred}, client ${mo.refunded}, counters ${c.released_cents}/${c.refunded_cents}, ledger release×${ledger(c, "release").length} refund×${ledger(c, "refund").length} (each exactly once)`);
   reset();
 }
-// ---- D2: the same, but a chargeback lands while the refund is stuck; Cuvori wins; the admin decides again — the freelancer gets the whole amount once
+// ---- D2: the same, but a chargeback lands while the refund is stuck; Cuvori wins. The bank's chargeback is kept apart from
+// the Order's own dispute: the admin's 50/50 decision stays and is finished by the hourly run once the bank has decided (it
+// is not replaced: half of it has already moved) — each side gets its half exactly once
 {
   const c = mk(); const f = await fund(fx, c); c.status = "disputed"; c.dispute_by = users.cl.id; c.disputed_at = past();
   hooks.stripe = async (path, method) => { if (method === "POST" && path === "/refunds") return [400, { error: { message: "You have insufficient funds in your Stripe account", code: "balance_insufficient" } }]; };
@@ -361,9 +363,10 @@ const res = (status, data) => new Response(JSON.stringify(data), { status, heade
   STRIPE.disputes[ch.id].status = "won";
   const ww = await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.closed", ch, { status: "won" })));
   const r2 = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: c.id, decision: "release" } }));
+  await hourlyLater(c); await hourlyLater(c);                            // (an hour later: the clock moves, as in D1b)
   const mo = moneyOut(c);
-  vuln(r2.status !== 200 || mo.transferred !== 10000 || c.status !== "completed" || c.released_cents !== 10000 || mo.refunded !== 0,
-    `D2b won (${ww.status}), admin releases everything (${r2.status} ${r2.json && r2.json.error || ""}) -> freelancer has ${mo.transferred} (must be 10000), refunded ${mo.refunded}, status=${c.status}, released_cents=${c.released_cents}, money_error=${c.money_error || ""}`);
+  vuln(r2.status !== 409 || mo.transferred !== 5000 || mo.refunded !== 5000 || !["completed", "refunded"].includes(c.status) || c.released_cents !== 5000 || c.refunded_cents !== 5000,
+    `D2b won (${ww.status}); the admin's 'release' in place of the 50/50 (${r2.status}); the hourly run -> freelancer has ${mo.transferred}, refunded ${mo.refunded}, status=${c.status}, counters ${c.released_cents}/${c.refunded_cents}, money_error=${c.money_error || ""} (must be refused: 409; then 5000, 5000, closed, 5000/5000)`);
   reset();
 }
 

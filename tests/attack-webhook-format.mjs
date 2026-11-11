@@ -43,7 +43,7 @@ for (const [name, ev] of [
 }
 
 // ---------- W4–W5: an event Cuvori handles, arriving without the object it is about ----------
-const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "account.updated", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed"];
+const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "account.updated", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed", "charge.refund.updated", "refund.updated", "refund.failed"];
 for (const type of HANDLED) {
   for (const [what, data] of [["no data", undefined], ["data without object", {}], ["object null", { object: null }], ["object a list", { object: [] }], ["object without id", { object: { object: "x" } }]]) {
     const before = snap();
@@ -81,7 +81,7 @@ for (const type of ["payment_intent.created", "customer.created", "invoice.paid"
   for (const p of steps) {
     const name = p.replace(/\s+/g, " ").replace(/\*\*/g, "").slice(0, 60);
     const missing = ["**Developers**", "**Webhooks**", "**+ Add destination**", "**Your account**", "**Snapshot**", "**Webhook endpoint**", "**Endpoint URL**", "**Create destination**", "**Signing secret**", "**Connected accounts**", "STRIPE_CONNECT_WEBHOOK_SECRET", "main--cuvori.netlify.app/.netlify/functions/stripe-webhook",
-      "`checkout.session.completed`", "`checkout.session.async_payment_succeeded`", "`charge.refunded`", "`charge.dispute.created`", "`charge.dispute.closed`", "`account.updated`"].filter(w => !p.includes(w));
+      "`checkout.session.completed`", "`checkout.session.async_payment_succeeded`", "`charge.refunded`", "`charge.dispute.created`", "`charge.dispute.closed`", "`charge.refund.updated`", "`account.updated`"].filter(w => !p.includes(w));
     vuln(missing.length > 0 || !/not \*\*Thin\*\*/.test(p), `W9 "${name}…" names Stripe's buttons, Snapshot (not Thin), the address, the five events and the connected-accounts one -> missing: ${JSON.stringify(missing)}${/not \*\*Thin\*\*/.test(p) ? "" : ' and "not Thin"'}`);
   }
 }

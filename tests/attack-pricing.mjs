@@ -18,7 +18,9 @@
 //     an Order under the new prices; it keeps working on every other Order.
 //   * People read the price breakdown and the money summary of their own Orders only; the reports are for the admin.
 // P1 the migration itself, P2 the price plans and the switch, P3 stamping, P4 acceptance, P5 the €2 minimum, P6 the
-// ledger, P7 the old payment code, P8 reading, P9 who may call what, P10 undo, P11 the 14 days and disputes.
+// ledger, P7 the old payment code, P8 reading, P9 who may call what, P10 undo, P11 the 14 days and disputes, (P12-P14
+// SETUP's lines, the other rules, at the same moment) and P15 the rules of the payment audit of 31 October (every Order),
+// P16 the check of 1 November, P17 a refund that fails at Stripe after its line was written (its own line, refund_failed).
 // Every check after P1 is rolled back.
 // Run: node tests/attack-pricing.mjs   (needs the local Postgres of tests/db; it is started here)
 import fs from "node:fs";
@@ -123,6 +125,19 @@ const fpBefore = { accept: pick(run(FP("order_accept")), "order_accept"), terms:
 // every function of the database by name and arguments, before v56 (undo must leave exactly these)
 const FNS = "select 'fns: ' || md5(string_agg(oid::regprocedure::text, ',' order by oid::regprocedure::text)) from pg_proc where pronamespace = 'public'::regnamespace;";
 const fnsBefore = pick(run(FNS), "fns");
+// ... and everything else undo must put back exactly (P15j): each function's text, rights and settings, every trigger,
+// index and row rule, and who may read or write each table and column
+const SNAP = {
+  functions: "select string_agg(p.oid::regprocedure::text || ':' || md5(replace(p.prosrc, chr(13), '')) || ':' || coalesce(p.proacl::text, '-') || ':' || p.prosecdef || ':' || coalesce(array_to_string(p.proconfig, ','), '-'), ',' order by p.oid::regprocedure::text) from pg_proc p where p.pronamespace = 'public'::regnamespace",
+  triggers: "select string_agg(pg_get_triggerdef(t.oid) || ':' || t.tgenabled::text, ',' order by t.tgrelid::regclass::text, t.tgname) from pg_trigger t join pg_class c on c.oid = t.tgrelid where c.relnamespace = 'public'::regnamespace and not t.tgisinternal",
+  indexes: "select string_agg(pg_get_indexdef(i.indexrelid), ',' order by pg_get_indexdef(i.indexrelid)) from pg_index i join pg_class c on c.oid = i.indrelid where c.relnamespace = 'public'::regnamespace",
+  tables: "select string_agg(c.relname || ':' || coalesce(c.relacl::text, '-'), ',' order by c.relname) from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'v', 'm', 'S', 'p')",
+  columns: "select string_agg(a.attrelid::regclass::text || '.' || a.attname || ':' || a.attacl::text, ',' order by a.attrelid::regclass::text, a.attname) from pg_attribute a join pg_class c on c.oid = a.attrelid where c.relnamespace = 'public'::regnamespace and cardinality(a.attacl) > 0",
+  policies: "select string_agg(p.polrelid::regclass::text || '.' || p.polname || ':' || coalesce(pg_get_expr(p.polqual, p.polrelid), '-') || ':' || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '-'), ',' order by p.polrelid::regclass::text, p.polname) from pg_policy p",
+};
+const SNAP_SQL = Object.entries(SNAP).map(([k, q]) => `select 'snap_${k}: ' || md5(coalesce((${q}), ''));`).join("\n");
+const snapOf = (r) => Object.fromEntries(Object.keys(SNAP).map(k => [k, pick(r, "snap_" + k)]));
+const snapBefore = snapOf(run(SNAP_SQL));
 const there = fs.existsSync(V56);
 // one transaction, as Supabase's SQL editor sends the file: all of it or nothing
 const first = there ? run(`begin;\n\\i ${V56}\ncommit;`) : { ok: false, out: "", err: "ERROR: supabase/schema_v56.sql does not exist" };
@@ -136,7 +151,7 @@ const has56 = first.ok && /v56 applied/.test(first.out);
 }
 { // P1e v56 locks every existing table it changes at once, before its first change (no deadlock with a payment arriving)
   const src = fs.existsSync(V56) ? fs.readFileSync(V56, "utf8") : "";
-  const own = new Set(["pricing_plans", "pricing_switch", "pricing_switch_log"]);
+  const own = new Set(["pricing_plans", "pricing_switch", "pricing_switch_log", "admin_audit"]);   // (made by v56 itself)
   const changed = [...new Set([...src.matchAll(/alter table public\.([a-z_]+)|on public\.([a-z_]+) for each row|create (?:unique )?index if not exists [a-z0-9_]+ on public\.([a-z_]+)/g)].map(m => m[1] || m[2] || m[3]).filter(t => !own.has(t)))];
   const lockAt = src.search(/lock table [^;]*public\.contracts[^;]*in access exclusive mode/), firstChange = src.indexOf("-- ---------- 1.");
   const lock = lockAt >= 0 ? src.slice(lockAt, src.indexOf(";", lockAt)) : "";
@@ -194,7 +209,13 @@ const REL = (amount, commission, payout, key, purpose = "release", note = "") =>
 const COUNTERS = (label = "counters") => `select '${label}: ' || commission_cents from public.contracts where id = ${O};`;
 // what the admin's ledger check lists for the Orders (as you in the SQL editor)
 const PROBLEMS = (label = "check") => `${owner} select '${label}: ' || (public.admin_pricing_check()->'problems')::text;`;
-const kinds = (s) => [...String(s).matchAll(/"problem": "([a-z_]+)"/g)].map(m => m[1]).sort().join(",") || (/^\[\]$/.test(s) ? "none" : s);
+// The three problems of the payment audit of 31 October (every Order paid through Cuvori, at any prices) are checked in
+// P15g and P15h. The checks before P15 write ledger lines without raising their Order's totals (they test other rules),
+// so those Orders are rightly listed as counter_behind_ledger there: these checks leave the three out.
+const AUDIT_KINDS = ["counter_behind_ledger", "milestone_payout_off", "payment_line_twice"];
+const kinds = (s) => { const k = [...String(s).matchAll(/"problem": "([a-z_]+)"/g)].map(m => m[1]);
+  return k.filter(x => !AUDIT_KINDS.includes(x)).sort().join(",") || (k.length || /^\[\]$/.test(s) ? "none" : s); };
+const allKinds = (s) => [...String(s).matchAll(/"problem": "([a-z_]+)"/g)].map(m => m[1]).sort().join(",") || (/^\[\]$/.test(s) ? "none" : s);
 const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
 { const r = tx(`${CREATE(10000)} select 'setup: ok';`); if (pick(r, "created") !== "true" || pick(r, "setup") !== "ok") { console.log("the test's set-up failed: " + (r.err || r.out)); process.exit(1); } }
 
@@ -467,7 +488,7 @@ const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
                    insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key) values (${O}, 'fund', 2000, 'stripe', 'pi_again', 'succeeded', 'fund:pi_again'); ${CHECK}`);
   const cbAgain = tx(`${V2ORDER()} ${FUND()} ${svc()} insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key, note) values (${O}, 'chargeback', 3000, 'stripe', 'dp_3', 'succeeded', 'chargeback:dp_3', 'chargeback_lost');
                    insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key) values (${O}, 'fund', 3000, 'stripe', 'pi_again', 'succeeded', 'fund:pi_again'); ${CHECK}`);
-  vuln(!more.ok || !/paid_more_than_agreed/.test(pick(more, "check")) || !extra.ok || !/paid_more_than_agreed/.test(pick(extra, "check")) || !back.ok || pick(back, "check") !== "[]" || pick(cbAgain, "check") !== "[]",
+  vuln(!more.ok || !/paid_more_than_agreed/.test(pick(more, "check")) || !extra.ok || !/paid_more_than_agreed/.test(pick(extra, "check")) || !back.ok || kinds(pick(back, "check")) !== "none" || kinds(pick(cbAgain, "check")) !== "none",
     `P6p a €103.25 payment on a €100 Order -> ${more.ok ? "recorded, check " + pick(more, "check").slice(0, 70) : "REFUSED " + errOf(more)}; €5 more with no price increase -> ${extra.ok ? "recorded, check " + pick(extra, "check").slice(0, 50) : "REFUSED " + errOf(extra)}; €20 refunded and paid in again -> ${back.ok ? "check " + pick(back, "check") : errOf(back)}; €30 taken by a bank, then paid in again -> check ${pick(cbAgain, "check")} (must be recorded and listed, recorded and listed, nothing listed, nothing listed)`);
 }
 { // P6q refunds, pull-backs and chargebacks name their Stripe object and a refund is written once. A refund or a
@@ -481,7 +502,7 @@ const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
   const split = tx(`${V2ORDER()} ${FUND()} ${svc()} ${REL(4000, 200, 3800, "release:tr_1")} ${line("refund", 6000, "re_6", "refund:re_6")} ${CHECK}`);
   const revNoRef = tx(`${V2ORDER()} ${FUND()} ${svc()} ${REL(10000, 500, 9500, "release:tr_1")} ${line("reversal", 9500, null, "reversal:x", "chargeback dp_1")}`);
   const cbMore = tx(`${V2ORDER()} ${FUND()} ${svc()} ${line("refund", 4000, "re_4", "refund:re_4")} ${line("chargeback", 10000, "dp_7", "chargeback:dp_7", "chargeback_lost")} ${CHECK}`);
-  vuln(!/provider_ref_missing/.test(errOf(noRef)) || !/duplicate key/.test(errOf(twice)) || !afterAll.ok || !/more_out_than_in/.test(pick(afterAll, "check")) || pick(split, "check") !== "[]"
+  vuln(!/provider_ref_missing/.test(errOf(noRef)) || !/duplicate key/.test(errOf(twice)) || !afterAll.ok || !/more_out_than_in/.test(pick(afterAll, "check")) || kinds(pick(split, "check")) !== "none"
        || !/provider_ref_missing/.test(errOf(revNoRef)) || !cbMore.ok || !/more_out_than_in/.test(pick(cbMore, "check")),
     `P6q a refund with no Stripe id -> ${errOf(noRef)}; the same refund under another key -> ${errOf(twice)}; a €100 dashboard refund after €100 was paid out -> ${afterAll.ok ? "recorded, check " + pick(afterAll, "check").slice(0, 60) : "REFUSED " + errOf(afterAll)}; a split €40/€60 -> check ${pick(split, "check")}; a pull-back with no Stripe id -> ${errOf(revNoRef)}; a €100 chargeback after €40 was refunded -> ${cbMore.ok ? "recorded, check " + pick(cbMore, "check").slice(0, 60) : "REFUSED " + errOf(cbMore)}`);
 }
@@ -685,7 +706,7 @@ const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
 
 // ---------- P7 the old payment code ----------
 { // P7a without the new prices' header the payment functions cannot move a plan 2 Order's money or write its ledger
-  const status = tx(`${V2ORDER()} ${FUND()} update public.contracts set status = 'delivered', delivery_url = '${LINK}' where id = ${O}; ${svc(false)} update public.contracts set status = 'releasing', split_editor_cents = 10000, resolution = 'release' where id = ${O};`);
+  const status = tx(`${V2ORDER()} ${FUND()} update public.contracts set status = 'delivered', delivery_url = '${LINK}' where id = ${O}; ${svc(false)} update public.contracts set status = 'releasing', split_editor_cents = 10000, resolution = 'release', resolved_by = client where id = ${O};`);
   const funded = tx(`${V2ORDER()} ${svc(false)} update public.contracts set status = 'funded', funded_cents = 10000 where id = ${O};`);
   const line = tx(`${V2ORDER()} ${FUND()} ${svc(false)} insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note) values (${O}, 'release', 10000, 'stripe', 'tr_old', 'succeeded', 'auto_release');`);
   const ms = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount_cents":6000}]`;
@@ -824,7 +845,7 @@ const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
     update public.contracts set chargeback_id = 'dp_1', chargeback_status = 'lost' where id = ${O}; ${owner}
     select 'report: ' || (public.admin_pricing_report(current_date - 1, current_date + 1)->'totals')::text;
     select 'decide: ' || coalesce((public.admin_pricing_check()->'to_decide')::text, 'none'); select 'problems: ' || (public.admin_pricing_check()->'problems')::text;`);
-  vuln(!/"pulled_back_cents": 9500/.test(pick(r, "report")) || !/"charged_back_cents": 10000/.test(pick(r, "report")) || !/commission_on_lost_chargeback/.test(pick(r, "decide")) || pick(r, "problems") !== "[]",
+  vuln(!/"pulled_back_cents": 9500/.test(pick(r, "report")) || !/"charged_back_cents": 10000/.test(pick(r, "report")) || !/commission_on_lost_chargeback/.test(pick(r, "decide")) || kinds(pick(r, "problems")) !== "none",
     `P8f a chargeback lost after the payout -> report ${pick(r, "report").slice(0, 160)}; to decide: ${pick(r, "decide").slice(0, 120)}; problems: ${pick(r, "problems")} (the report must show the €95 pulled back and the €100 the bank took, the check must list the €5 commission to decide and no problem)`);
 }
 { // P8g an Order paid directly (outside Cuvori) under the new prices: Cuvori pays no card costs on it, and its summaries
@@ -1300,6 +1321,376 @@ const tx = (body) => run(`begin;\n${SETUP}\n${body}\nrollback;\n`);
     `P13j the money summary (for you) of a plan 2 Order -> ${pick(p2, "s")}; of an Order under a plan where the client pays the card costs -> ${pick(p3, "s")} (must be platform, client)`);
 }
 
+// ---------- P15 the payment audit of 31 October: more rules that start as soon as v56 runs, on every Order ----------
+// a price increase proposed by the freelancer and accepted by the client; a top-up paid in (by today's code on an Order at
+// today's prices, by the new code on a plan 2 Order)
+const AMEND = (cents, ms = null) => `${as("862")} select 'amend: ' || (public.order_amend(${O}, '{"note":"more","price_delta_cents":${cents}${ms ? `,"milestones":${ms}` : ""}}') is not null); ${owner}`;
+const DECIDE = `${as("861")} select 'decide: ' || public.order_amendment_decide((select id from public.order_amendments where order_id = ${O} and status = 'proposed'), true); ${owner}`;
+const TOPUP = (cents, newCode = false) => `${svc(newCode)} update public.contracts set funded_cents = funded_cents + ${cents} where id = ${O}; ${owner}`;
+const PAID1 = `${CREATE(10000)} ${ACCEPT()} ${FUND1}`;
+const MSN = (n) => `(select id from public.order_milestones where order_id = ${O} and position = ${n})`;
+const MSACTN = (n, who, action, link = null, label = action) => `${as(who)} select '${label}: ' || public.order_milestone_action(${MSN(n)}, '${action}', 'part ${n}', ${link ? `'${link}'` : "null"}); ${owner}`;
+const PARTS = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount_cents":6000}]`;
+{ // P15a the work is delivered only once every price increase both sides accepted is paid in: on every Order paid
+  // through Cuvori, at today's prices too. An Order paid directly, an increase under €0.50 (it can never be charged) and an
+  // Order from before the money counters (funded_cents 0, read as paid at its price) deliver as before
+  const unpaid = tx(`${PAID1} ${AMEND(2000)} ${DECIDE} ${ACT("862", "deliver", "x", LINK)}`);
+  const paid = tx(`${PAID1} ${AMEND(2000)} ${DECIDE} ${TOPUP(2000)} ${ACT("862", "deliver", "x", LINK)} ${STAMP()}`);
+  const v2 = tx(`${V2ORDER()} ${FUND()} ${AMEND(2000)} ${DECIDE} ${ACT("862", "deliver", "x", LINK)}`);
+  const v2paid = tx(`${V2ORDER()} ${FUND()} ${AMEND(2000)} ${DECIDE} ${TOPUP(2000, true)} ${ACT("862", "deliver", "x", LINK)} ${STAMP()}`);
+  const direct = tx(`${CREATE(10000, "direct")} ${ACCEPT()} ${ACT("861", "mark_paid")} ${ACT("862", "confirm_paid")} ${AMEND(2000)} ${DECIDE} ${ACT("862", "deliver")}`);
+  const tiny = tx(`${PAID1} update public.contracts set amount_cents = 10049 where id = ${O}; ${ACT("862", "deliver", "x", LINK)}`);
+  const legacy = tx(`${PAID1} update public.contracts set funded_cents = 0 where id = ${O}; ${ACT("862", "deliver", "x", LINK)}`);
+  vuln(pick(unpaid, "decide") !== "ok" || !/increase_not_paid/.test(errOf(unpaid)) || pick(paid, "deliver") !== "ok" || pick(paid, "stamp") !== "1/0/7/delivered"
+       || !/increase_not_paid/.test(errOf(v2)) || pick(v2paid, "deliver") !== "ok" || pick(direct, "deliver") !== "ok" || pick(tiny, "deliver") !== "ok" || pick(legacy, "deliver") !== "ok",
+    `P15a a €20 increase accepted on a paid €100 Order (${pick(unpaid, "decide")}), then the freelancer delivers -> ${unpaid.ok ? "DELIVERED: " + pick(unpaid, "deliver") : errOf(unpaid)}; once the €20 is paid -> ${pick(paid, "deliver")} (${pick(paid, "stamp")}); the same at the new prices -> ${v2.ok ? "DELIVERED: " + pick(v2, "deliver") : errOf(v2)}, paid -> ${pick(v2paid, "deliver")}; paid directly -> ${pick(direct, "deliver")}; 49 cents owed -> ${pick(tiny, "deliver")}; an Order from before the money counters -> ${pick(legacy, "deliver")} (must be increase_not_paid twice; then ok; ok, ok, ok)`);
+}
+{ // P15b an Order already delivered whose price goes up is back to being worked on: its automatic payout stops (it would
+  // pay out the old price and close the Order), and the freelancer delivers again once the increase is paid, with full days
+  const state = `select 'state: ' || status || '/' || coalesce(auto_release_at::text, 'none') from public.contracts where id = ${O};`;
+  const r = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK, "first")} ${AMEND(2000)} ${DECIDE} ${state} ${TOPUP(2000)} ${ACT("862", "deliver", "x", LINK, "again")} ${WINDOW()} ${STAMP()}`);
+  const v2 = tx(`${V2ORDER()} ${FUND()} ${ACT("862", "deliver", "x", LINK, "first")} ${AMEND(2000)} ${DECIDE} ${state} ${TOPUP(2000, true)} ${ACT("862", "deliver", "x", LINK, "again")} ${WINDOW()}`);
+  // a change that is not a price increase leaves a delivered Order delivered
+  const deadline = `${as("862")} select 'amend: ' || (public.order_amend(${O}, '{"note":"one more day","new_deadline":"2099-01-01"}') is not null); ${owner} ${DECIDE}`;
+  const note = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK, "first")} ${deadline} ${state}`);
+  // an Order delivered with an increase already unpaid before v56 (the payment code pays out what it holds when its days
+  // are over) is left as it is when something else changes: only a price increase sends an Order back
+  const older = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK, "first")} alter table public.contracts disable trigger contracts_money_first;
+    update public.contracts set amount_cents = 12000 where id = ${O}; alter table public.contracts enable trigger contracts_money_first; ${deadline} ${state}`);
+  vuln(pick(r, "first") !== "ok" || pick(r, "state") !== "funded/none" || pick(r, "again") !== "ok" || pick(r, "days") !== "7" || pick(r, "stamp") !== "1/0/7/delivered"
+       || pick(v2, "state") !== "funded/none" || pick(v2, "again") !== "ok" || pick(v2, "days") !== "14" || pick(note, "decide") !== "ok" || !/^delivered\/2/.test(pick(note, "state"))
+       || pick(older, "decide") !== "ok" || !/^delivered\/2/.test(pick(older, "state")),
+    `P15b delivered, then a €20 increase accepted -> ${pick(r, "state").slice(0, 40)}; the €20 paid, delivered again -> ${pick(r, "again")}, ${pick(r, "days")} days (${pick(r, "stamp")}); at the new prices -> ${pick(v2, "state").slice(0, 40)}, again ${pick(v2, "again")}, ${pick(v2, "days")} days; a new deadline only -> ${pick(note, "state").slice(0, 20)}; the same on an Order delivered with an increase unpaid from before -> ${pick(older, "state").slice(0, 20)} (must be funded/none, ok, 7; funded/none, ok, 14; still delivered with its clock twice)`);
+}
+{ // P15c while a price increase both sides accepted is not paid in, a part is handed in only while the money held covers
+  // it, beside the parts handed in and not paid out yet: the freelancer never hands in more work than the client paid for
+  // (a part that came with the increase could otherwise be paid out of the money held for the other parts, and the last
+  // part then never). The parts that are paid for can still be handed in; once the increase is paid in, every part can.
+  const add = `[{"title":"Part 3","amount_cents":2000}]`;
+  const base = `${CREATE(10000, "escrow", PARTS)} ${ACCEPT()} ${FUND1} ${AMEND(2000, add)} ${DECIDE}`;
+  // €100 paid in for parts of €40 + €60 + €20
+  const one = tx(`${base} ${MSACTN(1, "862", "submit", LINK)}`);
+  const over = tx(`${base} ${MSACTN(3, "862", "submit", LINK, "three")} ${MSACTN(2, "862", "submit", LINK, "two")} ${MSACTN(1, "862", "submit", LINK, "one")}`);
+  const paid = tx(`${base} ${TOPUP(2000)} ${MSACTN(3, "862", "submit", LINK, "three")} ${MSACTN(2, "862", "submit", LINK, "two")} ${MSACTN(1, "862", "submit", LINK, "one")}`);
+  // part 2 paid out already (€40 still held): part 3 fits, part 1 then no longer
+  const payout2 = `${svc(false)} update public.order_milestones set status = 'released', released_at = now(), transfer_ref = 'tr_p2' where id = ${MSN(2)};
+    update public.contracts set released_cents = 6000 where id = ${O}; ${owner}`;
+  const after = tx(`${base} ${MSACTN(2, "862", "submit", LINK, "two")} ${payout2} ${MSACTN(3, "862", "submit", LINK, "three")} ${MSACTN(1, "862", "submit", LINK, "one")}`);
+  const v2base = `${V2ORDER(10000, PARTS)} ${FUND()} ${AMEND(2000, add)} ${DECIDE}`;
+  const v2 = tx(`${v2base} ${MSACTN(2, "862", "submit", LINK, "two")} ${MSACTN(3, "862", "submit", LINK, "three")} ${MSACTN(1, "862", "submit", LINK, "one")}`);
+  const v2paid = tx(`${v2base} ${TOPUP(2000, true)} ${MSACTN(2, "862", "submit", LINK, "two")} ${MSACTN(3, "862", "submit", LINK, "three")} ${MSACTN(1, "862", "submit", LINK, "one")}`);
+  const before = tx(`${CREATE(10000, "escrow", PARTS)} ${ACCEPT()} ${FUND1} ${MSACTN(1, "862", "submit", LINK)}`);
+  const three = (r) => ["three", "two", "one"].map(l => pick(r, l).startsWith("error") ? (/increase_not_paid/.test(pick(r, l)) ? "increase_not_paid" : pick(r, l).slice(0, 30)) : pick(r, l)).join("/");
+  vuln(pick(one, "decide") !== "ok" || pick(one, "submit") !== "ok" || pick(over, "three") !== "ok" || pick(over, "two") !== "ok" || !/increase_not_paid/.test(errOf(over))
+       || ["three", "two", "one"].some(l => pick(paid, l) !== "ok") || pick(after, "two") !== "ok" || pick(after, "three") !== "ok" || !/increase_not_paid/.test(errOf(after))
+       || pick(v2, "two") !== "ok" || pick(v2, "three") !== "ok" || !/increase_not_paid/.test(errOf(v2)) || ["three", "two", "one"].some(l => pick(v2paid, l) !== "ok") || pick(before, "submit") !== "ok",
+    `P15c €100 paid in, a €20 part 3 added by an accepted increase (${pick(one, "decide")}): part 1 (€40) handed in -> ${pick(one, "submit")}; parts 3, 2, then 1 -> ${three(over)}; once the €20 is paid -> ${three(paid)}; part 2 paid out, then parts 3 and 1 -> ${pick(after, "three")}/${/increase_not_paid/.test(errOf(after)) ? "increase_not_paid" : after.ok ? "HANDED IN: " + pick(after, "one") : errOf(after).slice(0, 40)}; at the new prices -> ${three(v2)}, paid -> ${three(v2paid)}; with no increase -> ${pick(before, "submit")} (must be ok; ok/ok/increase_not_paid; ok three times; ok/increase_not_paid; ok/ok/increase_not_paid, ok three times; ok)`);
+}
+{ // P15d the payment code starts paying out a whole Order only while it is being worked on (paid in or delivered) and no
+  // chargeback is open: not during a dispute, not after a refund, not by today's code, not by the new code. Cuvori's
+  // decision on a dispute goes through as before (the payment code moves the Order to "resolving" for it), and so does a
+  // payout begun before (an Order already "releasing")
+  // (the client's approval, as stripe-release writes it: it names the client; an automatic payout is P15q)
+  const claim = (newCode) => `${svc(newCode)} update public.contracts set status = 'releasing', resolution = 'release', split_editor_cents = 10000, refund_cents = 0, resolved_by = client, resolved_at = now(), auto_release_at = null where id = ${O}; ${owner} ${STAMP()}`;
+  const cb = `update public.contracts set chargeback_id = 'dp_1', chargeback_status = 'open' where id = ${O};`;
+  const refused = [
+    ["disputed, today's code", tx(`${PAID1} ${ACT("861", "dispute", "not as agreed")} ${claim(false)}`)],
+    ["delivered with a chargeback open, today's code", tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} ${cb} ${claim(false)}`)],
+    ["refunded, today's code", tx(`${PAID1} update public.contracts set status = 'refunded', refunded_cents = 10000 where id = ${O}; ${claim(false)}`)],
+    ["disputed, the new code", tx(`${V2ORDER()} ${FUND()} ${ACT("861", "dispute", "not as agreed")} ${claim(true)}`)],
+    ["paid in with a chargeback open, the new code", tx(`${V2ORDER()} ${FUND()} ${cb} ${claim(true)}`)],
+  ].filter(([, r]) => !/release_paused/.test(errOf(r))).map(([what, r]) => `${what}: ${r.ok ? "PAID OUT (" + pick(r, "stamp") + ")" : errOf(r).slice(0, 50)}`);
+  const delivered = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} ${claim(false)}`), v2funded = tx(`${V2ORDER()} ${FUND()} ${claim(true)}`);
+  // Cuvori's decision on a dispute, as stripe-resolve and settle write it; and a payout begun before, finished (settle)
+  const decision = tx(`${PAID1} ${ACT("861", "dispute", "not as agreed")} ${svc(false)} update public.contracts set status = 'resolving', resolution = 'release', split_editor_cents = 10000, refund_cents = 0, resolved_at = now(), auto_release_at = null where id = ${O};
+    update public.contracts set stripe_transfer_id = 'tr_d', released_cents = 10000 where id = ${O}; update public.contracts set status = 'completed', completed_at = now(), closed_at = now() where id = ${O}; ${owner} ${STAMP()}`);
+  const begun = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} ${claim(false)} ${svc(false)} update public.contracts set stripe_transfer_id = 'tr_b', released_cents = 10000 where id = ${O};
+    update public.contracts set status = 'completed', completed_at = now(), closed_at = now() where id = ${O}; ${owner} select 'end: ' || status from public.contracts where id = ${O};`);
+  // a stuck release taken over by Cuvori's decision (stripe-resolve: from "releasing" to "resolving")
+  const takeOver = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} ${claim(false)} ${svc(false)} update public.contracts set status = 'resolving', resolution = 'refund', split_editor_cents = 0, refund_cents = 10000 where id = ${O}; ${owner} ${STAMP("over")}`);
+  vuln(refused.length || pick(delivered, "stamp") !== "1/0/7/releasing" || pick(v2funded, "stamp") !== "2/500/14/releasing" || pick(decision, "stamp") !== "1/0/7/completed"
+       || pick(begun, "end") !== "completed" || pick(takeOver, "over") !== "1/0/7/resolving",
+    `P15d the payment code starting to pay out a whole Order -> ${refused.length ? "NOT REFUSED: " + refused.join("; ") : "refused while disputed, refunded or with a chargeback open"}; delivered -> ${pick(delivered, "stamp")}; paid in at the new prices -> ${pick(v2funded, "stamp")}; Cuvori's decision on a dispute -> ${decision.ok ? pick(decision, "stamp") : errOf(decision)}; a payout begun before, finished -> ${begun.ok ? pick(begun, "end") : errOf(begun)}; a stuck release taken over by a decision -> ${takeOver.ok ? pick(takeOver, "over") : errOf(takeOver)} (must be release_paused each time; then releasing, releasing, completed, completed, resolving)`);
+}
+{ // P15q an automatic payout (the hourly run: nobody approving, nobody named) starts only once the review period is over, at
+  // either prices, also when the hourly run's list is out of date (the Order was sent back and delivered again since); the
+  // client's approval may come at any time; a payout begun before is finished
+  const auto = (newCode, label = "stamp") => `${svc(newCode)} update public.contracts set status = 'releasing', resolution = 'release', split_editor_cents = 10000, refund_cents = 0, resolved_at = now(), auto_release_at = null where id = ${O}; ${owner} ${STAMP(label)}`;
+  const early1 = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} ${auto(false)}`);
+  const early2 = tx(`${V2ORDER()} ${FUND()} ${ACT("862", "deliver", "x", LINK)} ${auto(true)}`);
+  const funded = tx(`${PAID1} ${auto(false)}`);
+  const over1 = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} update public.contracts set auto_release_at = now() - interval '1 minute' where id = ${O}; ${auto(false)}`);
+  const over2 = tx(`${V2ORDER()} ${FUND()} ${ACT("862", "deliver", "x", LINK)} update public.contracts set auto_release_at = now() - interval '1 minute' where id = ${O}; ${auto(true)}`);
+  const begun = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} update public.contracts set auto_release_at = now() - interval '1 minute' where id = ${O}; ${auto(false)}
+    ${svc(false)} update public.contracts set stripe_transfer_id = 'tr_a', released_cents = 10000 where id = ${O}; update public.contracts set status = 'completed', completed_at = now(), closed_at = now() where id = ${O}; ${owner} select 'end: ' || status from public.contracts where id = ${O};`);
+  const approve = tx(`${PAID1} ${ACT("862", "deliver", "x", LINK)} ${svc(false)} update public.contracts set status = 'releasing', resolution = 'release', split_editor_cents = 10000, refund_cents = 0, resolved_by = client, resolved_at = now(), auto_release_at = null where id = ${O}; ${owner} ${STAMP()}`);
+  vuln(!/release_too_early/.test(errOf(early1)) || !/release_too_early/.test(errOf(early2)) || !/release_too_early/.test(errOf(funded))
+       || pick(over1, "stamp") !== "1/0/7/releasing" || pick(over2, "stamp") !== "2/500/14/releasing" || pick(begun, "end") !== "completed" || pick(approve, "stamp") !== "1/0/7/releasing",
+    `P15q an automatic payout started with 7 / 14 days of review left -> ${early1.ok ? "STARTED (" + pick(early1, "stamp") + ")" : errOf(early1).slice(0, 40)} / ${early2.ok ? "STARTED (" + pick(early2, "stamp") + ")" : errOf(early2).slice(0, 40)}; on an Order not delivered -> ${funded.ok ? "STARTED" : errOf(funded).slice(0, 40)}; once the period is over -> ${pick(over1, "stamp")} / ${pick(over2, "stamp")}; begun and finished -> ${pick(begun, "end")}; the client's approval with days left -> ${pick(approve, "stamp")} (must be release_too_early three times; 1/0/7/releasing, 2/500/14/releasing; completed; 1/0/7/releasing)`);
+}
+{ // P15e an Order paid directly whose price was raised after the payment was confirmed, then approved: its total and its
+  // payout line say the same, what the freelancer confirmed as paid in (v38 wrote the new price on the line, the old one
+  // on the total)
+  const books = `select 'books: ' || concat_ws('/', c.released_cents, (select sum(amount_cents) from public.order_payments where order_id = c.id and kind = 'release'),
+      (select sum(amount_cents) from public.order_payments where order_id = c.id and kind = 'fund'), c.amount_cents, c.status) from public.contracts c where id = ${O};`;
+  const paidDirect = `${CREATE(10000, "direct")} ${ACCEPT()} ${ACT("861", "mark_paid")} ${ACT("862", "confirm_paid")}`;
+  const raised = tx(`${paidDirect} ${AMEND(2000)} ${DECIDE} ${ACT("861", "complete")} ${books}`), plain = tx(`${paidDirect} ${ACT("861", "complete")} ${books}`);
+  vuln(pick(raised, "complete") !== "ok" || pick(raised, "books") !== "10000/10000/10000/12000/completed" || pick(plain, "books") !== "10000/10000/10000/10000/completed",
+    `P15e paid directly (€100 confirmed), €20 more agreed, approved -> paid out on the total / on the line / paid in / price: ${pick(raised, "books")}; with no increase -> ${pick(plain, "books")} (must be 10000/10000/10000/12000 and 10000 four times)`);
+}
+{ // P15g the ledger check on every Order paid through Cuvori, at any prices: an Order that counts less money than its lines
+  // show (a payout line written but the Order's total not raised: the next payout pays the same money again; the same for
+  // a refund or a payment), and a part paid out twice or by another amount. A consistent Order is not listed, nor an Order
+  // from before the money counters (funded_cents 0, read as paid in at its price, as the payment code reads it)
+  const MINE = (label = "check") => `${owner} select '${label}: ' || coalesce((select jsonb_agg(x) from jsonb_array_elements(public.admin_pricing_check()->'problems') x where x->>'order' = (${O})::text), '[]'::jsonb)::text;`;
+  const line1 = (kind, cents, ref, extra = "") => `insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note${extra ? ", milestone_id" : ""}) values (${O}, '${kind}', ${cents}, 'stripe', '${ref}', 'succeeded', 'approve'${extra ? ", " + extra : ""});`;
+  const paid1 = `${PAID1} ${svc(false)} ${line1("fund", 10000, "pi_old")} ${owner}`;
+  const cases = [
+    ["today's prices, a payout line, the total not raised", tx(`${paid1} ${svc(false)} ${line1("release", 4000, "tr_a")} ${owner} ${MINE()}`), "counter_behind_ledger"],
+    ["today's prices, a refund line, the total not raised", tx(`${paid1} ${svc(false)} ${line1("refund", 4000, "re_a")} ${owner} ${MINE()}`), "counter_behind_ledger"],
+    ["today's prices, a top-up line, the total not raised", tx(`${paid1} ${svc(false)} ${line1("fund", 2000, "pi_top")} ${owner} ${MINE()}`), "counter_behind_ledger"],
+    ["the new prices, a payout line, the total not raised", tx(`${V2ORDER()} ${FUND()} ${svc()} ${REL(4000, 200, 3800, "release:tr_a")} ${MINE()}`), "counter_behind_ledger"],
+    ["today's prices, a part paid out twice", tx(`${CREATE(10000, "escrow", PARTS)} ${ACCEPT()} ${FUND1} ${svc(false)} ${line1("fund", 10000, "pi_old")} ${line1("release", 4000, "tr_a", MSN(1))} ${line1("release", 4000, "tr_b", MSN(1))}
+        update public.contracts set released_cents = 8000 where id = ${O}; ${MINE()}`), "milestone_payout_off"],
+    ["today's prices, a part paid out with another amount", tx(`${CREATE(10000, "escrow", PARTS)} ${ACCEPT()} ${FUND1} ${svc(false)} ${line1("fund", 10000, "pi_old")} ${line1("release", 3000, "tr_a", MSN(1))}
+        update public.contracts set released_cents = 3000 where id = ${O}; ${MINE()}`), "milestone_payout_off"],
+    ["the new prices, a part paid out twice", tx(`${V2ORDER(10000, PARTS)} ${FUND()} ${svc()} ${[1, 2].map(i => `insert into public.order_payments (order_id, milestone_id, kind, amount_cents, provider, provider_ref, status, entry_key, commission_cents, payout_cents, payout_purpose) values (${O}, ${MSN(1)}, 'release', 4000, 'stripe', 'tr_m${i}', 'succeeded', 'release:tr_m${i}', ${i === 1 ? 200 : 200}, 3800, 'release');`).join(" ")}
+        update public.contracts set released_cents = 8000 where id = ${O}; ${MINE()}`), "milestone_payout_off"],
+  ];
+  const wrong = cases.filter(([, r, want]) => !r.ok || allKinds(pick(r, "check")) !== want).map(([what, r, want]) => `${what}: ${r.ok ? allKinds(pick(r, "check")) : errOf(r)} (must be ${want})`);
+  // consistent Orders are not listed: at today's prices paid out in full; a part paid out once, with its re-payment after a won chargeback
+  const fine = tx(`${paid1} ${svc(false)} ${line1("release", 10000, "tr_a")} update public.contracts set released_cents = 10000, status = 'completed' where id = ${O}; ${MINE()}`);
+  const fineParts = tx(`${CREATE(10000, "escrow", PARTS)} ${ACCEPT()} ${FUND1} ${svc(false)} ${line1("fund", 10000, "pi_old")} ${line1("release", 4000, "tr_a", MSN(1))}
+      insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note) values (${O}, 'reversal', 4000, 'stripe', 'tr_a', 'succeeded', 'chargeback dp_1');
+      insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note) values (${O}, 'release', 4000, 'stripe', 'tr_r', 'succeeded', 'chargeback_won');
+      update public.contracts set released_cents = 4000 where id = ${O}; ${MINE()}`);
+  const seed = pick(run(`select 'seed: ' || coalesce((select string_agg(x->>'problem', ',') from jsonb_array_elements(public.admin_pricing_check()->'problems') x where x->>'order' in (${O3}, ${O5}, ${O6})), 'none');`), "seed");
+  vuln(wrong.length || !fine.ok || allKinds(pick(fine, "check")) !== "none" || !fineParts.ok || allKinds(pick(fineParts, "check")) !== "none" || seed !== "none",
+    `P15g the ledger check on Orders paid through Cuvori, at any prices -> ${wrong.length ? "NOT AS EXPECTED: " + wrong.join("; ") : `each listed (${cases.length})`}; an Order paid out in full -> ${fine.ok ? allKinds(pick(fine, "check")) : errOf(fine)}; a part paid out, pulled back and paid again -> ${fineParts.ok ? allKinds(pick(fineParts, "check")) : errOf(fineParts)}; the Orders from before v56 -> ${seed} (must be none three times)`);
+}
+{ // P15r a part paid out from money held apart at Stripe (funds segregation, prepared, not on): one payout line per payment
+  // it came from, each naming that payment (charge_ref), and at most one from Cuvori's balance, together exactly the part,
+  // is the part's one payout and is not listed; two lines naming the same payment, two lines naming none, or parts that
+  // don't add up to the part still are
+  const MINE = (label = "check") => `${owner} select '${label}: ' || coalesce((select jsonb_agg(x) from jsonb_array_elements(public.admin_pricing_check()->'problems') x where x->>'order' = (${O})::text), '[]'::jsonb)::text;`;
+  const part = (i, cents, k, ch) => `insert into public.order_payments (order_id, milestone_id, kind, amount_cents, provider, provider_ref, status, entry_key, commission_cents, payout_cents, payout_purpose, charge_ref) values (${O}, ${MSN(1)}, 'release', ${cents}, 'stripe', 'tr_p${i}', 'succeeded', 'release:tr_p${i}', ${k}, ${cents - k}, 'release', ${ch ? `'${ch}'` : "null"});`;
+  const order = (parts) => tx(`${V2ORDER(10000, PARTS)} ${FUND()} ${svc()} ${parts.map(([c, k, ch], i) => part(i, c, k, ch)).join(" ")}
+      update public.contracts set released_cents = ${parts.reduce((a, [c]) => a + c, 0)} where id = ${O}; ${MINE()}`);
+  const cases = [
+    ["two payments held apart, 2500 + 1500", order([[2500, 125, "ch_held_a"], [1500, 75, "ch_held_b"]]), "none"],
+    ["two payments held apart and the rest from the balance", order([[2000, 100, "ch_held_a"], [1000, 50, "ch_held_b"], [1000, 50, null]]), "none"],
+    ["two lines naming the same payment", order([[2000, 100, "ch_held_a"], [2000, 100, "ch_held_a"]]), "milestone_payout_off"],
+    ["two lines naming no payment", order([[2000, 100, null], [2000, 100, null]]), "milestone_payout_off"],
+    ["parts that add up to less than the part", order([[2000, 100, "ch_held_a"], [1500, 75, "ch_held_b"]]), "milestone_payout_off"],
+  ];
+  const wrong = cases.filter(([, r, want]) => !r.ok || allKinds(pick(r, "check")) !== want).map(([what, r, want]) => `${what}: ${r.ok ? allKinds(pick(r, "check")) : errOf(r)} (must be ${want})`);
+  vuln(wrong.length, `P15r a part paid out in parts from money held apart -> ${wrong.length ? "NOT AS EXPECTED: " + wrong.join("; ") : `as expected (${cases.length}: split by payment not listed, the same payment twice, no payment twice and a short total listed)`}`);
+}
+{ // P15h one payment line per Stripe payment, at today's prices too (the payment code never writes one twice); v56 still
+  // runs on a database where a payment was written twice before it: that copy stays as it is, the ledger check lists it,
+  // and no further copy can be written
+  const UNDO = path.join(root, "supabase/undo_v56.sql");
+  const line = (order, ref, note = "x") => `insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note) values (${order}, 'fund', 1000, 'stripe', '${ref}', 'succeeded', '${note}');`;
+  const twice = tx(`${PAID1} ${svc(false)} ${line(O, "pi_old")} ${line(O, "pi_old", "again")}`);
+  const otherOrder = tx(`${PAID1} ${svc(false)} ${line(O, "pi_test3")}`);
+  const two = tx(`${PAID1} ${svc(false)} ${line(O, "pi_old")} ${line(O, "pi_top")} ${owner} select 'n: ' || count(*) from public.order_payments where order_id = ${O};`);
+  const try3 = `create temp table p15h (k text, v text) on commit drop;
+    do $$ begin begin ${line(O3, "pi_test3", "third")} insert into p15h values ('third', 'written'); exception when unique_violation then insert into p15h values ('third', 'refused'); end; end $$;
+    select k || ': ' || v from p15h;`;
+  const rerun = fs.existsSync(UNDO) ? run(`begin;\n\\i ${UNDO}\n${line(O3, "pi_test3", "old payment, again")}\n\\i ${V56}\n${try3}
+    select 'lines: ' || count(*) from public.order_payments where provider_ref = 'pi_test3';
+    select 'listed: ' || coalesce((select string_agg((x->>'problem') || ' ' || (x->>'payment') || ' ' || (x->>'lines'), ',') from jsonb_array_elements(public.admin_pricing_check()->'problems') x where x->>'order' = ${O3}::text and x->>'problem' = 'payment_line_twice'), 'none');
+    rollback;`) : { ok: false, out: "", err: "ERROR: no undo file" };
+  const applied = (rerun.out.split("\n").find(l => /v56 (NOT )?applied/.test(l)) || "");
+  vuln(!/duplicate key/.test(errOf(twice)) || !/duplicate key/.test(errOf(otherOrder)) || pick(two, "n") !== "2" || !/v56 applied/.test(applied) || !/written twice before v56[^.]*: 1\./.test(applied)
+       || pick(rerun, "third") !== "refused" || pick(rerun, "lines") !== "2" || pick(rerun, "listed") !== "payment_line_twice pi_test3 2",
+    `P15h a Stripe payment written a second time on an Order at today's prices -> ${twice.ok ? "WRITTEN" : errOf(twice).slice(0, 60)}; on another Order -> ${otherOrder.ok ? "WRITTEN" : errOf(otherOrder).slice(0, 60)}; two payments -> ${pick(two, "n")} lines; v56 on a database with a payment written twice -> ${applied ? applied.slice(-110) : errOf(rerun)}; a third copy -> ${pick(rerun, "third")}; lines ${pick(rerun, "lines")}; the ledger check -> ${pick(rerun, "listed")} (must be refused twice, 2; applied, naming 1; refused, 2, payment_line_twice pi_test3 2)`);
+}
+{ // P15i the two sides of an Order read their payment lines' amounts (the card fee and Stripe's fee too), never a line's
+  // Stripe ids, entry key or note: in the table and in the Order screen's data. The admin reads them all. The page reads
+  // the Order itself with select('*'): that still works for both sides
+  const base = `${PAID1} ${svc(false)} insert into public.order_payments (order_id, kind, amount_cents, fee_cents, provider, provider_ref, charge_ref, status, note, provider_fee_cents, fee_refund_cents, fee_refund_ref)
+    values (${O}, 'fund', 10000, 325, 'stripe', 'pi_old', 'ch_old', 'succeeded', 'fund', 180, 145, 're_fee'); ${owner}`;
+  const hidden = ["provider_ref", "charge_ref", "fee_refund_ref", "entry_key", "note"];
+  const read = (who, col) => tx(`${base} ${as(who)} select 'v: ' || coalesce(string_agg(coalesce(${col}::text, 'null'), ','), 'no line') from public.order_payments where order_id = ${O}; ${owner}`);
+  const leaked = ["861", "862"].flatMap(who => hidden.map(col => [`${who === "861" ? "client" : "freelancer"} ${col}`, read(who, col)])).filter(([, r]) => r.ok).map(([what, r]) => `${what}: ${pick(r, "v")}`);
+  const amounts = tx(`${base} ${as("861")} select 'v: ' || string_agg(concat_ws('/', kind, amount_cents, fee_cents, provider_fee_cents, fee_refund_cents, status, provider), ',') from public.order_payments where order_id = ${O}; ${owner}`);
+  const star = tx(`${base} ${as("862")} select 'n: ' || count(*) from (select * from public.contracts where id = ${O}) x; ${owner}`);
+  const bundle = (who) => pick(tx(`${base} ${as(who)} select 'b: ' || coalesce((public.order_bundle(${O})->'payments')::text, 'none'); ${owner}`), "b");
+  const client = bundle("861"), admin = bundle("401"), stranger = bundle("863");
+  const inBundle = hidden.filter(k => client.includes(`"${k}"`));
+  vuln(leaked.length || pick(amounts, "v") !== "fund/10000/325/180/145/succeeded/stripe" || pick(star, "n") !== "1" || inBundle.length || !/"amount_cents": 10000/.test(client)
+       || !/"provider_ref": "pi_old"/.test(admin) || !/"note": "fund"/.test(admin) || stranger !== "none",
+    `P15i a payment line's Stripe ids, entry key and note read by the Order's two sides -> ${leaked.length ? "READ: " + leaked.join("; ") : "refused"}; its amounts -> ${pick(amounts, "v")}; the Order row whole (select *) -> ${pick(star, "n")} row; in the Order screen's data -> ${inBundle.length ? "STILL THERE: " + inBundle.join(", ") : "left out"}, amounts there: ${/"amount_cents": 10000/.test(client)}; the admin's -> ${/"provider_ref": "pi_old"/.test(admin) ? "all there" : admin.slice(0, 60)}; a stranger -> ${stranger.slice(0, 20)} (must be refused; fund/10000/325/180/145/succeeded/stripe; 1; left out, true; all there; none)`);
+}
+{ // P15j undo puts back everything v56 changed, exactly: every function's text, rights and settings, every trigger, index
+  // and row rule, and who may read or write each table and column, as before v56 (the rules of P15 included)
+  const UNDO = path.join(root, "supabase/undo_v56.sql");
+  const r = fs.existsSync(UNDO) ? run(`begin;\n\\i ${UNDO}\n${SNAP_SQL}\nrollback;`) : { ok: false, out: "", err: "ERROR: no undo file" };
+  const after = snapOf(r), differ = Object.keys(SNAP).filter(k => after[k] !== snapBefore[k] || !/^[0-9a-f]{32}$/.test(snapBefore[k]));
+  vuln(!/v56 undone/.test(r.out) || differ.length,
+    `P15j undo -> ${/v56 undone/.test(r.out) ? "undone" : errOf(r) || "NOT undone"}; as before v56: ${Object.keys(SNAP).map(k => `${k} ${differ.includes(k) ? "DIFFER" : "same"}`).join(", ")} (must be undone, all the same)`);
+}
+{ // P15k a second chargeback noted on an Order (the payment code's "chargeback dp_… also open on payment pi_…") keeps every
+  // payout and refund stopped until the payment code takes it over. "Mark as handled" leaves that part of the note (the
+  // rest goes; it alone -> "automatic"), and the Order still has money on the way, so test and live mode can't be
+  // switched meanwhile. An ordinary note is removed as before and does not count.
+  const cb = "chargeback dp_2 also open on payment pi_top: Cuvori handles it once chargeback dp_1 is done; until then nothing on this Order is paid out or refunded";
+  const other = "a refund was made in the Stripe dashboard";
+  const noted = (note) => `${PAID1} update public.contracts set status = 'completed', chargeback_id = 'dp_1', chargeback_status = 'won', money_error = '${note}' where id = ${O};`;
+  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.contracts where id = ${O})); ${owner}
+    select 'left: ' || coalesce(money_error, 'none') from public.contracts where id = ${O};`;
+  const count = (label) => `select '${label}: ' || public.orders_with_money_on_the_way();`;
+  const alone = tx(`${noted(cb)} ${clear}`), mixed = tx(`${noted(other + " · Also: " + cb)} ${clear}`), plain = tx(`${noted(other)} ${clear}`);
+  const ways = tx(`${count("before")} ${noted(cb)} ${count("with")}`), waysPlain = tx(`${count("before")} ${noted(other)} ${count("with")}`);
+  const left = (r) => pick(r, "left") === cb ? "the chargeback's part" : pick(r, "left").slice(0, 40);
+  // (since the check of 7 November the answer says when part of the note stays: "partly")
+  vuln(pick(alone, "clear") !== "automatic" || pick(alone, "left") !== cb || pick(mixed, "clear") !== "partly" || pick(mixed, "left") !== cb
+       || pick(plain, "clear") !== "ok" || pick(plain, "left") !== "none"
+       || Number(pick(ways, "with")) !== Number(pick(ways, "before")) + 1 || pick(waysPlain, "with") !== pick(waysPlain, "before"),
+    `P15k "Mark as handled" on a second chargeback's note alone -> ${pick(alone, "clear")}, left: ${left(alone)}; with another note before it -> ${pick(mixed, "clear")}, left: ${left(mixed)}; an ordinary note -> ${pick(plain, "clear")}, left: ${left(plain)}; Orders with money on the way ${pick(ways, "before")} -> ${pick(ways, "with")} with the chargeback's note, ${pick(waysPlain, "before")} -> ${pick(waysPlain, "with")} with an ordinary one (must be automatic, the chargeback's part; partly, the chargeback's part; ok, none; one more; the same)`);
+}
+// ---------- P16 the check of 1 November ----------
+{ // P16a an Order paid through Cuvori that holds money but records nothing paid in (from before the money counters): its
+  // price can't change. Read as paid at its price, an accepted increase counted as paid and was paid out of other clients'
+  // money. An Order with its counter changes price as before.
+  const legacy = (delta) => tx(`${PAID1} update public.contracts set funded_cents = 0 where id = ${O}; ${AMEND(delta)} ${DECIDE} select 'price: ' || amount_cents from public.contracts where id = ${O};`);
+  const up = legacy(990000), down = legacy(-2000), normal = tx(`${PAID1} ${AMEND(2000)} ${DECIDE} select 'price: ' || amount_cents from public.contracts where id = ${O};`);
+  const said = (r) => r.ok ? `ACCEPTED, price ${pick(r, "price")}` : errOf(r).slice(0, 40);
+  // (a lower price on a paid Order is refused already, since v23: bad_price)
+  vuln(!/order_needs_check/.test(errOf(up)) || !/order_needs_check|bad_price/.test(errOf(down)) || pick(normal, "decide") !== "ok" || pick(normal, "price") !== "12000",
+    `P16a a paid €100 Order that records nothing paid in: +€9,900 accepted -> ${said(up)}; -€20 accepted -> ${said(down)}; the same Order with its counter, +€20 -> ${pick(normal, "decide")}, price ${pick(normal, "price")} (must be order_needs_check; refused; ok, 12000)`);
+}
+{ // P16b "Mark as handled" leaves the note of the bank's inquiry (it holds back the automatic payout while the bank asks; the
+  // payment code removes it when the inquiry ends); the rest of the note goes
+  const inquiry = "the client''s bank asked about payment pi_old (100.00 EUR, inquiry dp_9): answer it in Stripe''s dashboard under Disputes";
+  const shown = inquiry.replace(/''/g, "'");
+  const noted = (note) => `${PAID1} update public.contracts set status = 'delivered', money_error = '${note}' where id = ${O};`;
+  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.contracts where id = ${O})); ${owner}
+    select 'left: ' || coalesce(money_error, 'none') from public.contracts where id = ${O};`;
+  const alone = tx(`${noted(inquiry)} ${clear}`), mixed = tx(`${noted("a refund was made in the Stripe dashboard · Also: " + inquiry)} ${clear}`);
+  const left = (r) => pick(r, "left") === shown ? "the inquiry's note" : pick(r, "left").slice(0, 40);
+  vuln(pick(alone, "clear") !== "automatic" || pick(alone, "left") !== shown || pick(mixed, "clear") !== "partly" || pick(mixed, "left") !== shown,
+    `P16b "Mark as handled" on the bank's inquiry note alone -> ${pick(alone, "clear")}, left: ${left(alone)}; with another note before it -> ${pick(mixed, "clear")}, left: ${left(mixed)} (must be automatic, the inquiry's note; partly, the inquiry's note)`);
+}
+{ // P16b2 "Mark as handled" leaves the note of Cuvori's decision not on record (the hourly run leaves such a decision alone;
+  // the admin decides the Order again, and the payment code removes the note once the decision is on record); the rest goes
+  const dn = "decision not on record: Cuvori''s ''refund'' decision could not be saved in the Order''s history, so nothing of it has moved and it is not carried out. Decide this Order again in the admin panel";
+  const shown = dn.replace(/''/g, "'");
+  const noted = (note) => `${PAID1} update public.contracts set status = 'resolving', resolution = 'refund', money_error = '${note}' where id = ${O};`;
+  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.contracts where id = ${O})); ${owner}
+    select 'left: ' || coalesce(money_error, 'none') from public.contracts where id = ${O};`;
+  const alone = tx(`${noted(dn)} ${clear}`), mixed = tx(`${noted("a refund was made in the Stripe dashboard · Also: " + dn)} ${clear}`);
+  const left = (r) => pick(r, "left") === shown ? "the decision's note" : pick(r, "left").slice(0, 40);
+  vuln(pick(alone, "clear") !== "automatic" || pick(alone, "left") !== shown || pick(mixed, "clear") !== "partly" || pick(mixed, "left") !== shown,
+    `P16b2 "Mark as handled" on the "decision not on record" note alone -> ${pick(alone, "clear")}, left: ${left(alone)}; with another note before it -> ${pick(mixed, "clear")}, left: ${left(mixed)} (must be automatic, the decision's note; partly, the decision's note)`);
+}
+{ // P16c an Order paid directly, confirmed as paid before the money counters (funded_cents 0), approved by the client: it
+  // completes, paid out = paid in = its price (v56's own change to 'complete' had made the money rule refuse it)
+  const after = `select 'after: ' || concat_ws('/', status, released_cents, funded_cents) from public.contracts where id = ${O};`;
+  const legacy = tx(`${CREATE(10000, "direct")} ${ACCEPT()} ${ACT("861", "mark_paid")} ${ACT("862", "confirm_paid")} update public.contracts set funded_cents = 0 where id = ${O}; ${ACT("861", "complete")} ${after}`);
+  const today = tx(`${CREATE(10000, "direct")} ${ACCEPT()} ${ACT("861", "mark_paid")} ${ACT("862", "confirm_paid")} ${ACT("861", "complete")} ${after}`);
+  vuln(pick(legacy, "complete") !== "ok" || pick(legacy, "after") !== "completed/10000/10000" || pick(today, "after") !== "completed/10000/10000",
+    `P16c a direct Order confirmed before the counters, approved -> ${legacy.ok ? pick(legacy, "complete") + ", " + pick(legacy, "after") : errOf(legacy).slice(0, 70)}; one confirmed today -> ${pick(today, "after")} (must be ok, completed/10000/10000 both)`);
+}
+{ // P16d a second chargeback noted on an Order keeps its people from deleting their accounts, like an open one
+  const cb = "chargeback dp_2 also open on payment pi_top: Cuvori handles it once chargeback dp_1 is done; until then nothing on this Order is paid out or refunded";
+  const held = (note) => tx(`${PAID1} update public.contracts set status = 'completed', chargeback_id = 'dp_1', chargeback_status = 'won', money_error = '${note}' where id = ${O};
+    select 'held: ' || public.has_money_held(${U("861")});`);
+  const withCb = held(cb), plain = held("a refund was made in the Stripe dashboard");
+  vuln(pick(withCb, "held") !== "true" || pick(plain, "held") !== "false",
+    `P16d the client of a finished Order with a second chargeback noted -> money held: ${pick(withCb, "held")}; with an ordinary note -> ${pick(plain, "held")} (must be true; false)`);
+}
+// ---------- P17 a refund that fails at Stripe after its line was written ----------
+// Its money comes back to Cuvori (Stripe's refund.failed, or charge.refund.updated with status failed). The refund's own
+// line stays as it was written; the payment code for the new prices writes a line of its own for the money that came
+// back (kind refund_failed, naming the failed refund re_… or pyr_…, entry key "refund_failed:<refund id>", note
+// "refund_failed") and lowers the Order's refunded total by it.
+const RE = (cents, ref, order = O) => `insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key) values (${order}, 'refund', ${cents}, 'stripe', '${ref}', 'succeeded', 'refund:${ref}');`;
+const RF = (cents, ref, { key = `refund_failed:${ref}`, status = "succeeded", order = O, at = null } = {}) => `insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key, note${at ? ", created_at" : ""})
+  values (${order}, 'refund_failed', ${cents}, 'stripe', ${ref === null ? "null" : `'${ref}'`}, '${status}', ${key === null ? "null" : `'${key}'`}, 'refund_failed'${at ? `, '${at}'` : ""});`;
+const BACK = (cents) => `update public.contracts set refunded_cents = ${cents} where id = ${O};`;
+// a €40 refund, then it fails: the new payment code (with its header) writes both lines and the Order's refunded total
+const FAILS = (cents = 4000, ref = "re_1") => `${svc()} ${RE(cents, ref)} ${BACK(cents)} ${RF(cents, ref)} ${BACK(0)} ${owner}`;
+const MINE17 = (label = "check") => `${owner} select '${label}: ' || coalesce((select jsonb_agg(x) from jsonb_array_elements(public.admin_pricing_check()->'problems') x where x->>'order' = (${O})::text), '[]'::jsonb)::text;`;
+{ // P17a the ledger has a kind of line for it, under every plan: on a plan 2 Order, on an Order at today's prices, on an
+  // Order from before v56; and still no client fee kind
+  const lines = `select 'lines: ' || string_agg(kind || '/' || amount_cents || '/' || coalesce(pricing_version::text, '-'), ',' order by created_at, kind) from public.order_payments where order_id = ${O} and kind like 'refund%';`;
+  const v2 = tx(`${V2ORDER()} ${FUND()} ${FAILS()} ${lines}`), v1 = tx(`${PAID1} ${FAILS()} ${lines}`);
+  const old = tx(`${svc()} ${RF(1000, "re_o3", { order: O3 })} ${owner} select 'old: ' || count(*) from public.order_payments where order_id = ${O3} and kind = 'refund_failed';`);
+  const def = pick(run("select 'k: ' || pg_get_constraintdef(oid) from pg_constraint where conname = 'order_payments_kind_check';"), "k");
+  vuln(pick(v2, "lines") !== "refund/4000/2,refund_failed/4000/2" || pick(v1, "lines") !== "refund/4000/1,refund_failed/4000/1" || pick(old, "old") !== "1" || !/'refund_failed'/.test(def) || /client_fee/.test(def),
+    `P17a a €40 refund that failed, its line written by the new payment code -> on a plan 2 Order: ${v2.ok ? pick(v2, "lines") : errOf(v2).slice(0, 90)}; at today's prices: ${v1.ok ? pick(v1, "lines") : errOf(v1).slice(0, 60)}; on an Order from before v56: ${old.ok ? pick(old, "old") + " line" : errOf(old).slice(0, 60)}; the ledger's kinds: ${def.slice(0, 160)} (must be refund/4000/2,refund_failed/4000/2; refund/4000/1,refund_failed/4000/1; 1 line; refund_failed among them, no client fee)`);
+}
+{ // P17b on a plan 2 Order it is written as every other line is: succeeded, with its entry key, naming exactly one Stripe
+  // refund of its own (re_ or pyr_), once; and never changed afterwards
+  const base = `${V2ORDER()} ${FUND()} ${svc()} ${RE(4000, "re_1")}`;
+  const cases = [
+    ["naming the charge", tx(`${base} ${RF(4000, "ch_1")}`), /provider_ref_wrong_kind/],
+    ["naming the payment", tx(`${base} ${RF(4000, "pi_861")}`), /provider_ref_wrong_kind/],
+    ["naming a payout", tx(`${base} ${RF(4000, "tr_1")}`), /provider_ref_wrong_kind/],
+    ["naming two refunds", tx(`${base} ${RF(4000, "re_1,re_2", { key: "refund_failed:re_1_re_2" })}`), /provider_ref_one_id/],
+    ["naming none", tx(`${base} ${RF(4000, null, { key: "refund_failed:none" })}`), /provider_ref_missing/],
+    ["without an entry key", tx(`${base} ${RF(4000, "re_1", { key: null })}`), /entry_key_missing/],
+    ["not succeeded", tx(`${base} ${RF(4000, "re_1", { status: "pending" })}`), /ledger_line_must_be_succeeded/],
+    ["the same failed refund under another key", tx(`${base} ${RF(4000, "re_1")} ${RF(4000, "re_1", { key: "refund_failed:re_1b" })}`), /order_payments_v2_object_uq/],
+    ["another failed refund under the same key", tx(`${base} ${RE(1000, "re_2")} ${RF(4000, "re_1")} ${RF(1000, "re_2", { key: "refund_failed:re_1" })}`), /order_payments_entry_key_uq/],
+    ["changed afterwards", tx(`${base} ${RF(4000, "re_1")} update public.order_payments set amount_cents = 3000 where order_id = ${O} and kind = 'refund_failed';`), /ledger_line_frozen/],
+  ];
+  const wrong = cases.filter(([, r, re]) => !re.test(errOf(r))).map(([what, r]) => `${what}: ${r.ok ? "RECORDED" : errOf(r).slice(0, 70)}`);
+  const pyr = tx(`${V2ORDER()} ${FUND()} ${svc()} ${RE(4000, "pyr_1")} ${RF(4000, "pyr_1")} ${owner} select 'n: ' || count(*) from public.order_payments where order_id = ${O} and kind = 'refund_failed';`);
+  vuln(wrong.length || pick(pyr, "n") !== "1",
+    `P17b a failed refund's line on a plan 2 Order -> ${wrong.length ? "NOT REFUSED AS EXPECTED: " + wrong.join("; ") : `refused each time (${cases.length})`}; naming a refund pyr_ -> ${pyr.ok ? pick(pyr, "n") + " line" : errOf(pyr).slice(0, 70)} (each must be refused for its own reason; 1 line)`);
+}
+{ // P17c the ledger check counts a failed refund as money back at Cuvori (refunds minus failed refunds): written right, the
+  // Order is not listed; the Order's count not lowered, or the line not written, is listed; and money that came back is
+  // money Cuvori holds again (above the agreed price, or on a finished Order)
+  const payAll = `${svc()} ${REL(10000, 500, 9500, "release:tr_1")} update public.contracts set released_cents = 10000, status = 'completed' where id = ${O}; ${owner}`;
+  const right = tx(`${V2ORDER()} ${FUND()} ${FAILS()} ${payAll} ${MINE17()}`);
+  const notLowered = tx(`${V2ORDER()} ${FUND()} ${svc()} ${RE(4000, "re_1")} ${BACK(4000)} ${RF(4000, "re_1")} ${owner} ${MINE17()}`);
+  const noLine = tx(`${V2ORDER()} ${FUND()} ${svc()} ${RE(4000, "re_1")} ${BACK(4000)} ${BACK(0)} ${owner} ${MINE17()}`);
+  // €40 refunded and paid in again by the client, then the refund fails: Cuvori holds €140 for a €100 Order
+  const paidAgain = tx(`${V2ORDER()} ${FUND()} ${svc()} ${RE(4000, "re_1")} ${BACK(4000)} insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key) values (${O}, 'fund', 4000, 'stripe', 'pi_again', 'succeeded', 'fund:pi_again');
+    update public.contracts set funded_cents = 14000 where id = ${O}; ${RF(4000, "re_1")} ${BACK(0)} ${owner} ${MINE17()}`);
+  // an Order refunded in full, whose refund then failed: it is finished, and Cuvori holds its €100 again
+  const refunded = tx(`${V2ORDER()} ${FUND()} ${svc()} ${RE(10000, "re_1")} update public.contracts set refunded_cents = 10000, status = 'refunded' where id = ${O}; ${RF(10000, "re_1")} ${BACK(0)} ${owner} ${MINE17()}`);
+  const seen = (r) => r.ok ? allKinds(pick(r, "check")) : "ERROR " + errOf(r).slice(0, 70);
+  vuln(seen(right) !== "none" || seen(notLowered) !== "line_missing" || seen(noLine) !== "counter_behind_ledger" || seen(paidAgain) !== "paid_more_than_agreed" || seen(refunded) !== "money_left_at_cuvori",
+    `P17c €100 paid in, €40 refunded, the refund failed, then €100 paid out -> listed: ${seen(right)}; the failed refund's line written but the Order still counting it refunded -> ${seen(notLowered)}; the Order's count lowered but no line -> ${seen(noLine)}; €40 paid in again before the refund failed -> ${seen(paidAgain)}; a refunded Order whose refund failed -> ${seen(refunded)} (must be none; line_missing; counter_behind_ledger; paid_more_than_agreed; money_left_at_cuvori)`);
+}
+{ // P17d the money summary and the commission report count it the same way: refunds minus failed refunds, with the failed
+  // ones given on their own; in the report each in the month it happened (German dates)
+  const r = tx(`${V2ORDER()} ${FUND()} ${FAILS()} ${svc()} ${RE(1000, "re_2")} ${BACK(1000)} ${owner}
+    select 's: ' || public.order_money_summary(${O})::text; select 'r: ' || (public.admin_pricing_report(current_date - 1, current_date + 1)->'totals')::text;`);
+  const s = (() => { try { return JSON.parse(pick(r, "s")); } catch { return {}; } })(), t = (() => { try { return JSON.parse(pick(r, "r")); } catch { return {}; } })();
+  const months = tx(`${V2ORDER()} ${FUND()} ${svc()} insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, entry_key, created_at) values (${O}, 'refund', 4000, 'stripe', 're_m', 'succeeded', 'refund:re_m', '2026-10-20 10:00:00+00');
+    ${RF(4000, "re_m", { at: "2026-11-03 10:00:00+00" })} ${owner}
+    select 'oct: ' || concat_ws('/', public.admin_pricing_report('2026-10-01', '2026-10-31')->'totals'->>'refunded_cents', public.admin_pricing_report('2026-10-01', '2026-10-31')->'totals'->>'refund_failed_cents');
+    select 'nov: ' || concat_ws('/', public.admin_pricing_report('2026-11-01', '2026-11-30')->'totals'->>'refunded_cents', public.admin_pricing_report('2026-11-01', '2026-11-30')->'totals'->>'refund_failed_cents');`);
+  vuln(s.refunded_cents !== 1000 || s.refund_failed_cents !== 4000 || s.held_cents !== 9000 || t.refunded_cents !== 1000 || t.refund_failed_cents !== 4000 || t.paid_in_cents !== 10000
+       || pick(months, "oct") !== "4000/0" || pick(months, "nov") !== "-4000/4000",
+    `P17d €40 refunded and failed, then €10 refunded -> the summary: refunded ${s.refunded_cents}, failed ${s.refund_failed_cents}, held ${s.held_cents}; the report: refunded ${t.refunded_cents}, failed ${t.refund_failed_cents}, paid in ${t.paid_in_cents}; a refund in October that failed in November -> October ${pick(months, "oct")}, November ${pick(months, "nov")} (must be 1000, 4000, 9000; 1000, 4000, 10000; 4000/0 and -4000/4000)`);
+}
+{ // P17e at today's prices too, the ledger check compares an Order's counts with its lines net of failed refunds: the new
+  // payment code lowers the Order's refunded total and writes the line, and the Order is not listed; without the line it is
+  const paid1 = `${PAID1} ${svc(false)} insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note) values (${O}, 'fund', 10000, 'stripe', 'pi_old', 'succeeded', 'approve'); ${owner}`;
+  const right = tx(`${paid1} ${FAILS()} ${MINE17()}`);
+  const noLine = tx(`${paid1} ${svc()} ${RE(4000, "re_1")} ${BACK(4000)} ${BACK(0)} ${owner} ${MINE17()}`);
+  const seen = (r) => r.ok ? allKinds(pick(r, "check")) : "ERROR " + errOf(r).slice(0, 70);
+  vuln(seen(right) !== "none" || seen(noLine) !== "counter_behind_ledger",
+    `P17e an Order at today's prices, €40 refunded and failed -> listed: ${seen(right)}; the Order's count lowered without the line -> ${seen(noLine)} (must be none; counter_behind_ledger)`);
+}
+{ // P17f undo refuses, and changes nothing, while a failed refund's line is in the ledger (ledger lines are never removed,
+  // and the ledger's kinds from before v56 have no such kind); also one written by hand at today's prices, with no entry key
+  const UNDO = path.join(root, "supabase/undo_v56.sql");
+  const usrc = fs.existsSync(UNDO) ? fs.readFileSync(UNDO, "utf8") : "";
+  const r = usrc ? run(`begin;\n${svc(false)} insert into public.order_payments (order_id, kind, amount_cents, provider, provider_ref, status, note) values (${O3}, 'refund_failed', 1000, 'stripe', 're_o3', 'succeeded', 'refund_failed'); ${owner}\n\\i ${UNDO}\nrollback;`) : { ok: true, out: "", err: "" };
+  // refused in undo's first block, before its first change (the SQL editor runs the file as one transaction; so does this)
+  const guard = usrc.search(/kind = 'refund_failed'/), firstChange = usrc.search(/^drop trigger/m), firstBlockEnd = usrc.indexOf("end $$;");
+  vuln(r.ok || !/failed refund/.test(errOf(r)) || !/Nothing was changed/.test(errOf(r)) || /v56 undone/.test(r.out) || guard < 0 || guard > firstBlockEnd || firstBlockEnd > firstChange,
+    `P17f undo with a failed refund's line in the ledger (one written by hand at today's prices, with no entry key) -> ${r.ok ? (/v56 undone/.test(r.out) ? "UNDONE" : "ran") : errOf(r).slice(0, 150)}; refused before its first change: ${guard >= 0 && guard < firstBlockEnd && firstBlockEnd < firstChange} (must refuse naming the failed refund, "Nothing was changed", in its first block)`);
+}
+
 // ---------- P14 at the same moment: proposals, your switch and your plan changes, in sessions of their own ----------
 // (in a copy of the test database, so the switch can really move and Orders can really be written; dropped afterwards)
 const PSQL_RACE = PSQL.map(x => x === "cuvori" ? "cuvori_race" : x), PSQL_ADMIN = PSQL.map(x => x === "cuvori" ? "postgres" : x);
@@ -1364,6 +1755,24 @@ const makeR = (shown) => `${as("861")} select 'made: ' || (public.order_create_a
   const now = pick(runR(`select 'v: ' || version from public.pricing_switch;`), "v"); switchR(1);
   vuln(!raceReady || !/sw: (ok|already)/.test(on.out) || !again.ok || /switched off/.test(said) || !/New Orders get plan 2/.test(said) || now !== "2",
     `P14e v56 run again with the new prices on (${(on.out.match(/sw: \w+/) || [errOf(on).slice(0, 40)])[0]}) -> ${again.ok ? said.slice(0, 90) || "no last line" : errOf(again).slice(0, 60)}; the switch then: plan ${now} (must not say "switched off", must say plan 2; plan 2)`);
+}
+{ // P15f a part handed in at the same moment as a dispute is opened: one waits for the other, and both go through. A part's
+  // buttons lock the Order first and then the part, as a dispute does (it locks the Order, then stops its parts' clocks);
+  // the other way round each held what the other needed, until Postgres stopped one of them ("deadlock detected")
+  switchR(1);
+  const made = runR(`${owner} update public.contracts set status = 'cancelled', closed_at = now() where conversation_id = ${CV} and status in ('proposed', 'accepted');
+    begin; ${CREATE(10000, "escrow", PARTS)} ${ACCEPT()} ${FUND1} commit; select 'made: ' || status || '/' || has_milestones from public.contracts where id = ${O};`);
+  // the dispute's own steps, held open a moment after it has locked the Order (order_action: the Order, then its parts)
+  const dispute = backR(`begin;\n${owner} select 'held: ' || status from public.contracts where id = ${O} for update;\nselect pg_sleep(1.5);
+    update public.contracts set status = 'disputed', disputed_at = now(), auto_release_at = null where id = ${O};
+    update public.order_milestones set auto_release_at = null where order_id = ${O};\nselect 'dispute: done';\ncommit;`, "cuvori-f1");
+  const busy = waitUntil(() => holds("contracts", "cuvori-f1", "RowShareLock"));
+  const part = backR(`begin;\n${as("862")} select 'part: ' || public.order_milestone_action(${MS1}, 'submit', 'part 1', '${LINK}');\ncommit;`, "cuvori-f2");
+  const queued = waitUntil(() => /^n: [1-9]/m.test(run("select 'n: ' || count(*) from pg_stat_activity where application_name = 'cuvori-f2' and wait_event_type = 'Lock';").out));
+  const [d, p] = await Promise.all([dispute.out, part.out]);
+  const ends = pick(runR(`select 'end: ' || c.status || '/' || (select string_agg(m.status, ',' order by m.position) from public.order_milestones m where m.order_id = c.id) from public.contracts c where c.id = ${O};`), "end");
+  vuln(!raceReady || pick(made, "made") !== "funded/true" || !busy || !queued || /deadlock detected/.test(d + p) || !/dispute: done/.test(d) || !/part: not_allowed/.test(p) || ends !== "disputed/pending,pending",
+    `P15f ${busy && queued ? "" : "(the two never met: this check proved nothing) "}a dispute holding the Order (${pick(made, "made")}), a part handed in meanwhile -> ${/deadlock detected/.test(d + p) ? "DEADLOCK: " + ((d + p).match(/ERROR:.*deadlock.*/) || [""])[0].slice(0, 60) : `the dispute ${/dispute: done/.test(d) ? "done" : "NOT DONE"}, then the part: ${(p.match(/part: \w+/) || [p.slice(0, 60) || "no answer"])[0]}`}; the Order then ${ends} (must wait, no deadlock; the dispute done, the part not_allowed, disputed/pending,pending)`);
 }
 endSessions("cuvori-");
 for (let i = 0; i < 20 && spawnSync("psql", [...PSQL_ADMIN], { input: "drop database if exists cuvori_race;\n", encoding: "utf8", env }).status !== 0; i++) spawnSync("sleep", ["0.2"]);

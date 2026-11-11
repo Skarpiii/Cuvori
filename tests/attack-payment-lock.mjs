@@ -96,7 +96,8 @@ const refused = (r) => !r.ok && /payment_in_progress/.test(r.err);
   await new Promise(r => setTimeout(r, 500));
   const step = spawn("psql", [...PSQL, "-c", `insert into public.money_keys (scope, key) values ('lock:${id}', 'claim:step') returning 'lock taken'; select 'price seen ' || amount_cents from public.contracts where id = '${id}';`]);
   let stepOut = ""; step.stdout.on("data", d => stepOut += d);
-  const stepped = await new Promise(r => step.on("exit", (code) => r({ code, at: Date.now() - t0 })));
+  // "close", not "exit": the step's output can still be on its way when the process has exited (the check then read nothing)
+  const stepped = await new Promise(r => step.on("close", (code) => r({ code, at: Date.now() - t0 })));
   const changedAt = await changed;
   const seen = (stepOut.match(/price seen (\d+)/) || [])[1];
   vuln(stepped.code !== 0 || stepped.at < changedAt - 50 || seen !== "11000", `L9 the payment step takes the lock while a price increase is being saved -> it ${stepped.code === 0 ? "took the lock" : "failed"} after ${(stepped.at / 1000).toFixed(1)} s, the change was saved after ${(changedAt / 1000).toFixed(1)} s; price the payment step then sees: ${seen} (must wait for the change and see €110, so the card hold is released with nothing charged)`);

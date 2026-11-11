@@ -52,7 +52,7 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const c = mk(); await fund(fx, c); c.amount_cents = 12000; const f2 = await fund(fx, c); c.status = "delivered";
   const ch = chargeOf(f2.session.payment_intent); STRIPE.disputes[ch.id] = { status: "needs_response" };
   const r = await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.created", ch, { amount: 2055 })));
-  vuln(c.status !== "disputed", `B4 chargeback on the top-up charge -> webhook ${r.status}, status=${c.status} (must be disputed), chargeback=${c.chargeback_status}`);
+  vuln(c.chargeback_status !== "open" || c.status !== "delivered", `B4 chargeback on the top-up charge -> webhook ${r.status}, status=${c.status}, chargeback=${c.chargeback_status} (must be seen: open; the Order keeps its own status, delivered: a bank chargeback is not the two sides' dispute)`);
   const r2 = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
   vuln(r2.status === 200 || moneyOut(c).transferred > 0, `B4b client approve while a chargeback is open -> HTTP ${r2.status}, transferred=${moneyOut(c).transferred}`);
   reset();
@@ -112,8 +112,9 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   vuln(moneyOut(c).transferred > 0, `B7b the hourly job while a chargeback is open -> transferred=${moneyOut(c).transferred}`);
   STRIPE.disputes[ch.id].status = "won";
   await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.closed", ch, { status: "won" })));
-  const a2 = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: c.id, decision: "release" } }));
-  vuln(a2.status !== 200 || moneyOut(c).transferred !== 10000 || c.status !== "completed", `B7c bank sided with Cuvori -> admin releases: ${a2.status}, transferred=${moneyOut(c).transferred}, status=${c.status}`);
+  // the bank sided with Cuvori: the Order goes on where it was (delivered, in review), so the client's approval pays out
+  const a2 = await call(fx.release, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  vuln(a2.status !== 200 || moneyOut(c).transferred !== 10000 || c.status !== "completed", `B7c bank sided with Cuvori -> the client approves: ${a2.status}, transferred=${moneyOut(c).transferred}, status=${c.status} (must be 200, 10000, completed)`);
   reset();
 }
 {
@@ -531,10 +532,12 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const dIntent = STRIPE.intents[STRIPE.sessions[d.stripe_checkout_id].payment_intent];
   vuln(d2.status !== 409 || !d2.json || d2.json.code !== "not_payable" || d.status !== "funded" || d.funded_cents !== 10000 || ledger(d, "fund").length !== 1 || dIntent.status !== "succeeded" || pagesOf(d).length !== dn,
     `B31d Fund again after paying, before the confirmation -> ${d2.status} ${JSON.stringify(d2.json)}; Order ${d.status} with ${d.funded_cents}, the card hold ${dIntent.status}, new pages ${pagesOf(d).length - dn} (must be "not waiting for a payment", the payment confirmed, no new page)`);
-  // e) paid in one tab, a newer page made in another tab before the confirmation; back from the paid page
+  // e) paid in one tab in the very moment a newer page is made in another tab, before the confirmation; back from the paid
+  // page (a page paid before Fund is pressed again is recorded at that click, and no newer page is made: attack-fixes-nov1 L3)
   const e = mk({ amount_cents: 10000 });
-  await click(e, "en"); const paidId = e.stripe_checkout_id; pay(paidId);
-  await click(e, "lt"); const replaced = e.stripe_checkout_id !== paidId;  // the other tab: a new page now on the Order
+  await click(e, "en"); const paidId = e.stripe_checkout_id;
+  hooks.stripe = async (path, method) => { if (method === "POST" && path === "/checkout/sessions") { hooks.stripe = null; pay(paidId); } return null; };
+  await click(e, "lt"); hooks.stripe = null; const replaced = e.stripe_checkout_id !== paidId;  // the other tab: a new page now on the Order
   const e1 = await confirm(e, paidId);
   const eIntent = STRIPE.intents[STRIPE.sessions[paidId].payment_intent];
   vuln(!replaced || e1.status !== 200 || e.status !== "funded" || e.funded_cents !== 10000 || ledger(e, "fund").length !== 1 || eIntent.status !== "succeeded",
