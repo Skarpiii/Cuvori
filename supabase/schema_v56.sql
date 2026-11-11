@@ -40,6 +40,8 @@
 --      No ledger line of any plan, also from before v56, can be moved to another Order or have its kind, amounts,
 --      card fee, status or Stripe reference changed afterwards; the payment code never did that (it only adds Stripe's
 --      real fee and the card-fee refund).
+--      A refund that fails at Stripe after its line was written gets a line of its own, at any prices (refund_failed,
+--      naming the failed refund re_ or pyr_, for the money that came back): the checks count refunds minus failed refunds.
 --   6. The 14 days and disputes. Under plan 2 the 14 days start with a valid delivery: a delivery (or a part handed in)
 --      needs a link to the work. On every Order paid through Cuvori, nothing is paid out of the held payment for a part
 --      while the Order is in dispute (or no longer being worked on) or the bank has a chargeback open; Cuvori's decision
@@ -57,6 +59,25 @@
 --   8. Reading: the price breakdown and the money summary of an Order (both sides, the admin and you), the commission
 --      report over the dates you give, in German dates (totals, and by freelancer, with what was pulled back after
 --      chargebacks), and a ledger check that lists problems and what is left for you to decide (the admin and you).
+--   9. More rules that start as soon as v56 runs, from the payment audit of 31 October (section 10). On every Order paid
+--      through Cuvori: the work is delivered only once every price increase both sides accepted is paid in, and a part
+--      is handed in only while the money paid in covers it ("increase_not_paid"); an Order already delivered whose
+--      price goes up is back to being worked on, its automatic payout stopped, and the freelancer delivers again once
+--      the increase is paid. The payment code can't
+--      start paying out a whole Order that is in dispute (or no longer being worked on) or has a chargeback open
+--      ("release_paused"); Cuvori's decision on a dispute goes through as before. Each Stripe payment has one payment
+--      line, also at today's prices (a payment written twice before v56 stays as it is, and the ledger check lists it).
+--      The ledger check also looks at every Order paid through Cuvori, at any prices: an Order that counts less money
+--      than its lines show, a part paid out twice, a payment written twice. The two sides of an Order no longer read a
+--      payment line's Stripe ids, entry key or note (its amounts, Stripe's fee included, they still read). On every
+--      Order: a part's buttons wait for the Order first, as the Order's own buttons do, so two clicks at the same moment
+--      can't block each other; and an Order paid directly records as paid out what was confirmed as paid in. An
+--      automatic payout of a whole Order starts only once its review period is over ("release_too_early").
+--  10. The admin log (section 11): every change an admin makes through the site is written by the database itself (who,
+--      when, what, before and after), and Cuvori's dispute decisions by the payment code before money moves. Nobody
+--      can change or delete a line; admins can read it. And what Cuvori reviews to decide a dispute or answer a
+--      chargeback (the agreed text, the work handed in, the history and the two sides' chat), for an admin who is not on
+--      the Order, only while there is something to decide; every look is in the admin log.
 -- Safe to run more than once.
 
 -- ---------- 0. this file needs v55, and replaces the earlier draft of v56 ----------
@@ -331,12 +352,43 @@ begin
       and (payout_purpose is null or (kind = 'release' and payout_purpose in ('release', 'release_late', 'repay'))));
   end if;
 end $$;
+-- A refund that fails at Stripe after its line was written (Stripe's refund.failed, or charge.refund.updated with status
+-- failed): its money comes back to Cuvori. The refund's line is never changed, so a line of its own records the money
+-- that came back: kind refund_failed, naming the failed refund (re_… or pyr_…), entry key 'refund_failed:<refund id>',
+-- note 'refund_failed'; the payment code lowers the Order's refunded total by it. Every check and report counts refunds
+-- minus failed refunds. A kind of the ledger's own list (v21's, with this one added), so at any prices; undo_v56.sql
+-- puts v21's list back.
+do $$
+begin
+  if coalesce((select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.order_payments'::regclass and conname = 'order_payments_kind_check'), '') not like '%''refund_failed''%' then
+    alter table public.order_payments drop constraint if exists order_payments_kind_check;
+    alter table public.order_payments add constraint order_payments_kind_check check (kind in ('fund','release','refund','reversal','chargeback','refund_failed'));
+  end if;
+end $$;
 create unique index if not exists order_payments_entry_key_uq on public.order_payments (entry_key) where entry_key is not null;
 create unique index if not exists order_payments_v2_object_uq on public.order_payments (kind, provider_ref)
-  where pricing_version >= 2 and provider_ref is not null and kind in ('fund', 'release', 'refund', 'chargeback', 'reversal');
+  where pricing_version >= 2 and provider_ref is not null and kind in ('fund', 'release', 'refund', 'chargeback', 'reversal', 'refund_failed');
 -- one card-fee refund is written on one payment line only
 create unique index if not exists order_payments_v2_fee_refund_uq on public.order_payments (fee_refund_ref)
   where pricing_version >= 2 and fee_refund_ref is not null;
+-- Every Order, at any prices (the payment audit of 31 October): one payment line per Stripe payment. The payment code
+-- never writes one twice (it looks a line up before it writes it again), so this refuses only a second copy. A payment
+-- that was written twice before v56 does not stop v56: its later copies stay out of the rule and its first copy is in
+-- it, so no further copy can ever be written, and the ledger check lists it (payment_line_twice). Later copies are
+-- named by their id, so no line written after v56 can be out of the rule.
+do $$
+declare later uuid[];
+begin
+  if to_regclass('public.order_payments_fund_ref_uq') is null then
+    select coalesce(array_agg(id order by id), '{}') into later
+      from (select id, row_number() over (partition by provider_ref order by created_at, id) as n
+              from public.order_payments where kind = 'fund' and provider = 'stripe' and provider_ref is not null) x
+     where n > 1;
+    execute 'create unique index order_payments_fund_ref_uq on public.order_payments (provider_ref)'
+         || ' where kind = ''fund'' and provider = ''stripe'' and provider_ref is not null'
+         || case when cardinality(later) > 0 then format(' and id <> all (%L::uuid[])', later::text) else '' end;
+  end if;
+end $$;
 
 create or replace function public.order_payments_pricing()
 returns trigger language plpgsql set search_path = public as $$
@@ -376,13 +428,13 @@ begin
   end if;
   -- and the Stripe object of the line's own kind: a payout naming its payment, or a pull-back naming its transfer, would
   -- pass once and be refused at the second payout from that payment (or pull-back from that transfer), after Stripe had
-  -- moved the money; refused every time instead, testing finds it
+  -- moved the money; refused every time instead, testing finds it. A failed refund names the refund that failed.
   -- (a kind the ledger doesn't have is refused by the table's own list of kinds)
-  if new.kind in ('fund', 'release', 'refund', 'reversal', 'chargeback')
+  if new.kind in ('fund', 'release', 'refund', 'reversal', 'chargeback', 'refund_failed')
      and not (new.kind = 'fund' and new.provider_ref ~ '^pi_' or new.kind = 'release' and new.provider_ref ~ '^tr_'
-              or new.kind = 'refund' and new.provider_ref ~ '^(re|pyr)_' or new.kind = 'reversal' and new.provider_ref ~ '^trr_'
+              or new.kind in ('refund', 'refund_failed') and new.provider_ref ~ '^(re|pyr)_' or new.kind = 'reversal' and new.provider_ref ~ '^trr_'
               or new.kind = 'chargeback' and new.provider_ref ~ '^(dp|du)_') then
-    raise exception 'provider_ref_wrong_kind' using hint = 'a payment line names its payment (pi_), a payout its transfer (tr_), a refund its refund (re_, pyr_), a pull-back its reversal (trr_), a chargeback its dispute (dp_, du_)';
+    raise exception 'provider_ref_wrong_kind' using hint = 'a payment line names its payment (pi_), a payout its transfer (tr_), a refund and a failed refund the refund (re_, pyr_), a pull-back its reversal (trr_), a chargeback its dispute (dp_, du_)';
   end if;
   if new.kind = 'fund' then
     -- the agreed price (or the agreed top-up), and under the new prices no card costs for the client. A payment that
@@ -489,6 +541,20 @@ begin
   if c.payment_mode = 'escrow' and old.status in ('pending', 'submitted') and new.status in ('approved', 'released')
      and (c.status not in ('funded', 'delivered') or c.chargeback_status = 'open') then
     raise exception 'release_paused' using hint = 'nothing is paid out while the Order is in dispute, no longer open, or has a chargeback open';
+  end if;
+  -- Every Order paid through Cuvori (the payment audit of 31 October): while a price increase both sides accepted is
+  -- not paid in, a part is handed in only if the money still held covers it, beside the parts already handed in and not
+  -- paid out yet. The freelancer never hands in more work than the client has paid for: the parts that are paid for can
+  -- still be handed in, the rest once the increase is paid. (An Order from before the money counters, funded_cents 0,
+  -- reads as paid at its price, as the payment code reads it; an increase under €0.50 can never be charged and does not
+  -- stop it.)
+  if c.payment_mode = 'escrow' and old.status = 'pending' and new.status = 'submitted'
+     and coalesce(c.amount_cents, 0) - coalesce(nullif(c.funded_cents, 0), c.amount_cents, 0) >= 50
+     and coalesce(new.amount_cents, 0) + coalesce((select sum(o.amount_cents) from public.order_milestones o
+                                                    where o.order_id = c.id and o.id <> new.id
+                                                      and (o.status = 'submitted' or (o.status = 'approved' and o.transfer_ref is null))), 0)
+         > coalesce(nullif(c.funded_cents, 0), c.amount_cents, 0) - coalesce(c.released_cents, 0) - coalesce(c.refunded_cents, 0) then
+    raise exception 'increase_not_paid' using hint = 'the money paid in covers the parts handed in so far; the rest once the price increase is paid in';
   end if;
   -- under the new prices the review days of a part start with a valid delivery: a link to it
   if c.pricing_version >= 2 and c.payment_mode = 'escrow' and old.status = 'pending' and new.status = 'submitted'
@@ -689,7 +755,9 @@ returns jsonb language sql stable security definer set search_path = public as $
       coalesce(sum(commission_cents) filter (where kind = 'release'), 0) as commission,
       coalesce(sum(coalesce(payout_cents, amount_cents)) filter (where kind = 'release'), 0) as payouts,
       coalesce(sum(amount_cents) filter (where kind = 'release' and coalesce(payout_purpose, case when note like 'chargeback_won%' then 'repay' end) = 'repay'), 0) as repaid,
-      coalesce(sum(amount_cents) filter (where kind = 'refund'), 0) as refunded,
+      -- refunds minus the refunds that failed at Stripe (their money came back to Cuvori)
+      coalesce(sum(amount_cents) filter (where kind = 'refund'), 0) - coalesce(sum(amount_cents) filter (where kind = 'refund_failed'), 0) as refunded,
+      coalesce(sum(amount_cents) filter (where kind = 'refund_failed'), 0) as refund_failed,
       coalesce(sum(amount_cents) filter (where kind = 'reversal'), 0) as reversed,
       coalesce(sum(amount_cents) filter (where kind = 'chargeback'), 0) as charged_back,
       coalesce(sum(provider_fee_cents) filter (where kind = 'fund'), 0) as card_costs
@@ -698,7 +766,7 @@ returns jsonb language sql stable security definer set search_path = public as $
            'commission_bps', coalesce(c.commission_bps, 0),
            'funded_cents', s.funded,
            'released_cents', s.released, 'commission_cents', s.commission, 'payouts_cents', s.payouts, 'repaid_cents', s.repaid,
-           'refunded_cents', s.refunded, 'reversed_cents', s.reversed, 'charged_back_cents', s.charged_back,
+           'refunded_cents', s.refunded, 'refund_failed_cents', s.refund_failed, 'reversed_cents', s.reversed, 'charged_back_cents', s.charged_back,
            'freelancer_earnings_cents', s.payouts - s.reversed,
            'held_cents', greatest(coalesce(c.funded_cents, 0) - coalesce(c.released_cents, 0) - coalesce(c.refunded_cents, 0), 0))
          || case when public.pricing_staff() then jsonb_build_object('processing_costs_cents', s.card_costs,
@@ -707,7 +775,8 @@ returns jsonb language sql stable security definer set search_path = public as $
     from c, s;
 $$;
 
--- the admin's report under the new prices (plan 2 Orders only): money paid in and refunded, the commission, the payouts
+-- the admin's report under the new prices (plan 2 Orders only): money paid in and refunded (refunds minus the refunds that
+-- failed at Stripe), the commission, the payouts
 -- and what was pulled back from freelancers after chargebacks, what the banks took, and the card costs Cuvori paid; in
 -- all and by freelancer. The dates are German dates (a payout at 00:30 on 1 November belongs to November), taken from each
 -- line's created_at: a line written afterwards from Stripe's record carries Stripe's own time, so it counts in the month
@@ -724,7 +793,10 @@ begin
   select jsonb_build_object('from', p_from, 'to', p_to, 'dates', 'Europe/Berlin',
            'totals', jsonb_build_object(
              'paid_in_cents', coalesce(sum(amount_cents) filter (where kind = 'fund'), 0),
-             'refunded_cents', coalesce(sum(amount_cents) filter (where kind = 'refund'), 0),
+             -- refunds minus the refunds that failed at Stripe, each in the month it happened (in the month a refund failed
+             -- its money back shows as a minus there), and the failed ones on their own
+             'refunded_cents', coalesce(sum(amount_cents) filter (where kind = 'refund'), 0) - coalesce(sum(amount_cents) filter (where kind = 'refund_failed'), 0),
+             'refund_failed_cents', coalesce(sum(amount_cents) filter (where kind = 'refund_failed'), 0),
              'commission_cents', coalesce(sum(commission_cents) filter (where kind = 'release'), 0),
              'payouts_cents', coalesce(sum(payout_cents) filter (where kind = 'release'), 0),
              'pulled_back_cents', coalesce(sum(amount_cents) filter (where kind = 'reversal'), 0),
@@ -743,7 +815,8 @@ begin
 end $$;
 
 -- The admin's ledger check over plan 2 Orders. Every money line is recorded as it happened at Stripe (a refused line
--- would hide money that has moved); this check is where anything that does not add up shows.
+-- would hide money that has moved); this check is where anything that does not add up shows. Everywhere in it, what was
+-- refunded is the refunds minus the refunds that failed at Stripe (refund_failed: that money came back to Cuvori).
 --   problems (should be empty; ask for help with each Order listed):
 --     commission_off           the commission kept is not exactly the commission on everything paid out (a re-payment
 --                              that kept something again counts here too)
@@ -769,6 +842,15 @@ end $$;
 --     line_missing             the Order counts more money paid in, paid out or refunded than its ledger lines show: a
 --                              line was not written (the payment code's hourly run is to add it from Stripe's record; today's
 --                              code does that only for some kinds of lines; if it stays, by hand)
+--   and on every Order paid through Cuvori, at any prices (the payment audit of 31 October):
+--     counter_behind_ledger    the Order counts less money paid in, paid out or refunded than its ledger lines show: a
+--                              line was written but the Order's total not raised, so the next payout or refund would move
+--                              the same money again (also after a refund made in the Stripe dashboard once the freelancer
+--                              was paid: the Order then counts only what it still held, and the money went out twice)
+--     milestone_payout_off     a part has more than one normal payout line (paid out twice), or its payout lines add up to
+--                              another amount than the part's
+--     payment_line_twice       one Stripe payment has more than one payment line (written before v56: since v56 the
+--                              database takes one only)
 --   to_decide (your decision, see SETUP.md Part 20):
 --     commission_on_pulled_back_payout  a payout was pulled back after a chargeback that was not lost, and not paid back
 --                                    as a re-payment: the 5% kept on it is still booked, whether that money then went
@@ -788,7 +870,8 @@ begin
                     coalesce(sum(p.commission_cents) filter (where p.kind = 'release'), 0) as kept,
                     coalesce(sum(p.amount_cents) filter (where p.kind = 'fund'), 0) as paid_in,
                     coalesce(sum(coalesce(p.fee_cents, 0) + coalesce(p.connect_cents, 0) - coalesce(p.fee_refund_cents, 0)) filter (where p.kind = 'fund'), 0) as card_fees,
-                    coalesce(sum(p.amount_cents) filter (where p.kind = 'refund'), 0) as refunded,
+                    -- refunds minus the refunds that failed at Stripe (their money came back to Cuvori)
+                    coalesce(sum(p.amount_cents) filter (where p.kind = 'refund'), 0) - coalesce(sum(p.amount_cents) filter (where p.kind = 'refund_failed'), 0) as refunded,
                     coalesce(sum(p.amount_cents) filter (where p.kind = 'chargeback'), 0) as to_bank,
                     coalesce(sum(p.payout_cents) filter (where p.kind = 'release'), 0) as payouts,
                     coalesce(sum(p.amount_cents) filter (where p.kind = 'reversal'), 0) as pulled_back,
@@ -835,6 +918,39 @@ begin
                  exists (select 1 from public.contracts c where c.id = rp.id and c.chargeback_id = rp.dispute and c.chargeback_status = 'won')
                  or exists (select 1 from public.order_events e where e.order_id = rp.id and e.event = 'chargeback_won' and e.data->>'chargeback' = rp.dispute) as won
             from rp),
+  -- every Order paid through Cuvori, at any prices: its totals against its lines. An Order from before the money
+  -- counters (funded_cents 0 while it holds money) reads as paid in at its price, as the payment code reads it
+  e as (select c.id, coalesce(c.released_cents, 0) as count_out, coalesce(c.refunded_cents, 0) as count_back,
+               case when coalesce(c.funded_cents, 0) = 0 and c.status in ('funded', 'delivered', 'disputed', 'releasing', 'resolving')
+                    then coalesce(c.amount_cents, 0) else coalesce(c.funded_cents, 0) end as count_in,
+               coalesce(sum(p.amount_cents) filter (where p.kind = 'fund'), 0) as lines_in,
+               coalesce(sum(p.amount_cents) filter (where p.kind = 'release'), 0) - coalesce(sum(p.amount_cents) filter (where p.kind = 'reversal'), 0) as lines_out,
+               -- a plan 2 line that says what of it the Order counts ("dashboard_refund counted <cents>": a refund made in
+               -- the dashboard after the money was paid out; "chargeback_lost counted <cents>": the bank took the payment in
+               -- full, the Order counts what Cuvori still held) takes that part; every other line counts whole
+               coalesce(sum(case when p.pricing_version >= 2 and p.note ~ '^(dashboard_refund|chargeback_lost) counted [0-9]{1,12}$'
+                                 then least(substring(p.note from ' counted ([0-9]{1,12})$')::bigint, p.amount_cents::bigint)
+                                 else p.amount_cents end) filter (where p.kind in ('refund', 'chargeback')), 0)
+                 - coalesce(sum(p.amount_cents) filter (where p.kind = 'refund_failed'), 0) as lines_back
+          from public.contracts c left join public.order_payments p on p.order_id = c.id and p.status = 'succeeded'
+         where c.payment_mode = 'escrow' group by c.id),
+  -- each part's normal payout lines (a re-payment after a won chargeback is not one; at today's prices its line reads
+  -- "chargeback_won"). A payout from money held apart at Stripe (funds segregation, not on yet) is made of one transfer per
+  -- payment it comes from, each line naming its payment (charge_ref), and at most one more from Cuvori's balance: such
+  -- lines together are the part's one payout.
+  mp as (select m.order_id as id, m.id as milestone, m.amount_cents, count(*) as lines, sum(p.amount_cents) as paid,
+                count(*) filter (where p.charge_ref is null) as unlinked, count(p.charge_ref) as linked, count(distinct p.charge_ref) as charges
+           from public.order_milestones m join public.contracts c on c.id = m.order_id and c.payment_mode = 'escrow'
+           join public.order_payments p on p.milestone_id = m.id and p.kind = 'release' and p.status = 'succeeded'
+                and coalesce(p.payout_purpose, case when p.note like 'chargeback_won%' then 'repay' else 'release' end) in ('release', 'release_late')
+          group by m.order_id, m.id, m.amount_cents),
+  -- one Stripe payment written on more than one payment line (only lines from before v56 can be)
+  pt as (select distinct p.order_id as id, p.provider_ref as payment, d.lines
+           from public.order_payments p
+           join (select provider_ref, count(*) as lines from public.order_payments where kind = 'fund' and provider = 'stripe' and provider_ref is not null
+                  group by provider_ref having count(*) > 1) d on d.provider_ref = p.provider_ref
+           join public.contracts c on c.id = p.order_id and c.payment_mode = 'escrow'
+          where p.kind = 'fund' and p.provider = 'stripe'),
   bad as (
     select jsonb_build_object('order', id, 'problem', 'commission_off', 'kept_cents', kept, 'expected_cents', public.pricing_commission(released, commission_bps)) as b
       from od where kept <> public.pricing_commission(released, commission_bps)
@@ -876,7 +992,19 @@ begin
     union all
     select jsonb_build_object('order', id, 'problem', 'line_missing', 'counted_in_cents', count_in, 'lines_in_cents', paid_in,
                               'counted_out_cents', count_out, 'lines_out_cents', released_all - pulled_back, 'counted_back_cents', count_back, 'lines_back_cents', refunded + to_bank)
-      from od where count_in > paid_in or count_out > released_all - pulled_back or count_back > refunded + to_bank),
+      from od where count_in > paid_in or count_out > released_all - pulled_back or count_back > refunded + to_bank
+    union all
+    -- a line written but the Order's total not raised: the next payout or refund would move the same money again
+    select jsonb_build_object('order', id, 'problem', 'counter_behind_ledger', 'counted_in_cents', count_in, 'lines_in_cents', lines_in,
+                              'counted_out_cents', count_out, 'lines_out_cents', lines_out, 'counted_back_cents', count_back, 'lines_back_cents', lines_back)
+      from e where count_in < lines_in or count_out < lines_out or count_back < lines_back
+    union all
+    select jsonb_build_object('order', id, 'problem', 'milestone_payout_off', 'milestone', milestone, 'milestone_cents', amount_cents,
+                              'payout_lines', lines, 'paid_out_cents', paid)
+      from mp where paid <> amount_cents or (lines > 1 and (unlinked > 1 or charges <> linked))
+    union all
+    select jsonb_build_object('order', id, 'problem', 'payment_line_twice', 'payment', payment, 'lines', lines)
+      from pt),
   decide as (
     select jsonb_build_object('order', id, 'item', 'commission_on_lost_chargeback', 'commission_cents', kept, 'lost_part_commission_cents', least(kept, lost_loss),
                               'pulled_back_cents', pulled_back) as d
@@ -925,13 +1053,565 @@ grant execute on function public.pricing_next_commission(uuid, integer) to servi
 grant execute on function public.order_price_breakdown(uuid), public.order_money_summary(uuid) to authenticated;
 grant execute on function public.admin_pricing_report(date, date), public.admin_pricing_check() to authenticated;
 
+-- ---------- 10. every Order, from the moment v56 runs (the payment audit of 31 October) ----------
+-- On every Order paid through Cuvori:
+--   * the work is delivered only once every price increase both sides accepted is paid in (the money is there before
+--     the work is done); an Order already delivered whose price goes up is back to being worked on, its automatic
+--     payout stopped: the client pays the increase, then the freelancer delivers again (a part is handed in while the
+--     money paid in covers it: section 6).
+--     An Order from before the money counters (funded_cents 0) reads as paid at its price, as the payment code reads
+--     it; an increase under €0.50 can never be charged and does not stop it. Its price can no longer change at all
+--     ("order_needs_check"): read as paid at the NEW price, an accepted increase would have counted as paid and been paid
+--     out of other clients' money (check of 1 November). Its paid-in total is set from its payment lines first, by hand.
+--   * the payment code starts paying out a whole Order only while it is being worked on (paid in or delivered) and no
+--     chargeback is open. Cuvori's decision on a dispute is not a payout of this kind: the payment code moves a disputed
+--     Order to "resolving" for it, and that goes through as before. An automatic payout (no approval: nobody named as
+--     having decided) starts only once the Order's review period is over ("release_too_early").
+create or replace function public.contracts_money_first()
+returns trigger language plpgsql set search_path = public as $$
+declare owed int;
+begin
+  if new.payment_mode is distinct from 'escrow' then return new; end if;
+  if new.amount_cents is distinct from old.amount_cents and coalesce(old.funded_cents, 0) = 0
+     and old.status in ('funded', 'delivered', 'disputed', 'releasing', 'resolving') then
+    raise exception 'order_needs_check' using hint = 'this Order records nothing paid in: its paid-in total is set from its payment lines before its price can change';
+  end if;
+  owed := greatest(coalesce(new.amount_cents, 0) - coalesce(nullif(new.funded_cents, 0), new.amount_cents, 0), 0);
+  if owed >= 50 then
+    if old.status = 'delivered' and new.status = 'delivered' and new.amount_cents > old.amount_cents then
+      new.status := 'funded'; new.auto_release_at := null;
+    elsif new.status = 'delivered' and old.status is distinct from 'delivered' then
+      raise exception 'increase_not_paid' using hint = 'the price increase is paid in before the work is delivered';
+    end if;
+  end if;
+  if current_user = 'service_role' and new.status = 'releasing' and new.resolution = 'release'
+     and (old.status is distinct from 'releasing' or old.resolution is distinct from 'release')
+     and (old.status not in ('funded', 'delivered') or coalesce(old.chargeback_status, '') = 'open' or coalesce(new.chargeback_status, '') = 'open') then
+    raise exception 'release_paused' using hint = 'a whole Order is paid out only while it is being worked on and no chargeback is open';
+  end if;
+  -- an automatic payout (nobody approved it: no one is named as having decided) starts only once the Order's review period
+  -- is over; the client's approval names the client, and Cuvori's decision goes through "resolving"
+  if current_user = 'service_role' and new.status = 'releasing' and new.resolution = 'release' and new.resolved_by is null
+     and (old.status is distinct from 'releasing' or old.resolution is distinct from 'release')
+     and (old.auto_release_at is null or old.auto_release_at > now()) then
+    raise exception 'release_too_early' using hint = 'an automatic payout starts only once the review period is over';
+  end if;
+  return new;
+end $$;
+drop trigger if exists contracts_money_first on public.contracts;
+create trigger contracts_money_first before update on public.contracts for each row execute function public.contracts_money_first();
+revoke execute on function public.contracts_money_first() from public, anon, authenticated, service_role;
+
+-- The Order's buttons (v38's function, with one change marked v56): an Order paid directly that the client approves
+-- records as paid out what the freelancer confirmed as paid in, the same amount on its total and on its line (a price
+-- increase accepted after the payment was confirmed is not money Cuvori saw; v38 wrote the new price on the line and
+-- kept the old one on the total).
+create or replace function public.order_action(p_order uuid, p_action text, p_note text default null, p_link text default null, p_version integer default null)
+returns text language plpgsql security definer set search_path = public as $$
+declare c public.contracts%rowtype; me uuid := auth.uid(); ev text := p_action;
+begin
+  if me is null then return 'not_signed_in'; end if;
+  select * into c from public.contracts where id = p_order and me in (editor, client) for update;
+  if not found then return 'not_found'; end if;
+  if public.is_banned(me) then return 'banned'; end if;
+  p_note := nullif(btrim(coalesce(p_note, '')), ''); p_link := nullif(btrim(coalesce(p_link, '')), '');
+  if length(coalesce(p_note, '')) > 2000 then return 'note_too_long'; end if;
+  if p_link is not null and not public.is_safe_url(p_link) then return 'bad_link'; end if;
+  begin perform public.rate_limit('contract_action', 60, interval '1 hour'); exception when others then return 'rate_limited'; end;
+  if p_action = 'accept' then return public.order_accept(p_order, p_version);
+  elsif p_action = 'decline' then
+    if c.status <> 'proposed' or c.proposed_by = me then return 'not_allowed'; end if;
+    update public.contracts set status = 'declined', closed_at = now() where id = c.id returning * into c;
+    perform public.order_log(c.id, 'declined', jsonb_build_object('note', p_note));
+  elsif p_action = 'cancel' then
+    -- before money is held either side can walk away; a funded Order ends only by approval, refund or Cuvori's decision
+    if c.status in ('proposed','accepted') then null;
+    elsif c.payment_mode = 'direct' and c.status in ('paid_marked') then null;
+    else return 'not_allowed'; end if;
+    update public.contracts set status = 'cancelled', closed_at = now() where id = c.id returning * into c;
+    perform public.order_log(c.id, 'cancelled', jsonb_build_object('note', p_note));
+  elsif p_action = 'mark_paid' then
+    if c.payment_mode <> 'direct' or c.status <> 'accepted' or me <> c.client then return 'not_allowed'; end if;
+    update public.contracts set status = 'paid_marked', paid_marked_at = now() where id = c.id returning * into c;
+    perform public.order_log(c.id, 'paid_marked', '{}'::jsonb);
+  elsif p_action = 'confirm_paid' then
+    if c.payment_mode <> 'direct' or c.status not in ('accepted','paid_marked') or me <> c.editor then return 'not_allowed'; end if;
+    update public.contracts set status = 'paid', paid_at = now(), paid_marked_at = coalesce(paid_marked_at, now()), funded_cents = amount_cents where id = c.id returning * into c;
+    insert into public.order_payments (order_id, kind, amount_cents, provider, note) values (c.id, 'fund', c.amount_cents, 'direct', 'confirmed by the freelancer');
+    perform public.order_log(c.id, 'paid_confirmed', jsonb_build_object('amount_cents', c.amount_cents));
+  elsif p_action = 'complete' then
+    if c.payment_mode <> 'direct' or c.status <> 'paid' or me <> c.client then return 'not_allowed'; end if;
+    -- v56: the total and the line say the same: what was confirmed as paid (an Order from before the money counters,
+    -- funded_cents 0, its price, as before)
+    -- (and the paid-in total of an Order confirmed before the counters, so paid out never exceeds paid in: check of 1 November)
+    update public.contracts set status = 'completed', completed_at = now(), closed_at = now(), released_cents = coalesce(nullif(funded_cents, 0), amount_cents),
+           funded_cents = coalesce(nullif(funded_cents, 0), amount_cents) where id = c.id returning * into c;
+    insert into public.order_payments (order_id, kind, amount_cents, provider, note) values (c.id, 'release', c.released_cents, 'direct', 'work approved by the client');
+    perform public.order_log(c.id, 'completed', '{}'::jsonb);
+  elsif p_action = 'deliver' then
+    if c.status not in ('funded','paid') or me <> c.editor or c.has_milestones then return 'not_allowed'; end if;
+    if c.payment_mode = 'escrow' then
+      update public.contracts set status = 'delivered', delivered_at = now(), delivery_note = p_note, delivery_url = p_link, changes_open = false,
+             auto_release_at = now() + (coalesce(c.auto_days, 7) || ' days')::interval where id = c.id returning * into c;
+    else
+      update public.contracts set delivered_at = now(), delivery_note = p_note, delivery_url = p_link, changes_open = false where id = c.id returning * into c;
+    end if;
+    perform public.order_log(c.id, 'delivered', jsonb_build_object('note', p_note, 'link', p_link));
+  elsif p_action = 'request_changes' then
+    if me <> c.client then return 'not_allowed'; end if;
+    if c.payment_mode = 'escrow' then
+      if c.status <> 'delivered' then return 'not_allowed'; end if;
+      -- within the paid revision rounds the review clock stops; after them it keeps running (a dispute is the route then)
+      if c.changes_used < coalesce(c.revisions, 0) then
+        update public.contracts set status = 'funded', changes_used = c.changes_used + 1, changes_open = true, auto_release_at = null where id = c.id returning * into c;
+      else
+        update public.contracts set changes_used = c.changes_used + 1, changes_open = true where id = c.id returning * into c;
+      end if;
+    else
+      if c.status not in ('paid','paid_marked','accepted') or c.delivered_at is null then return 'not_allowed'; end if;
+      update public.contracts set changes_used = c.changes_used + 1, changes_open = true where id = c.id returning * into c;
+    end if;
+    if p_note is not null then insert into public.messages (conversation_id, sender, kind, body) values (c.conversation_id, me, 'change_request', p_note); end if;
+    perform public.order_log(c.id, 'changes_requested', jsonb_build_object('note', p_note, 'round', c.changes_used));
+  elsif p_action = 'dispute' then
+    if c.payment_mode <> 'escrow' or c.status not in ('funded','delivered') then return 'not_allowed'; end if;
+    update public.contracts set status = 'disputed', dispute_by = me, dispute_reason = p_note, disputed_at = now(), auto_release_at = null where id = c.id returning * into c;
+    update public.order_milestones set auto_release_at = null where order_id = c.id;
+    perform public.order_log(c.id, 'disputed', jsonb_build_object('note', p_note));
+  else return 'bad_action'; end if;
+  perform public.contract_event(c, ev);
+  return 'ok';
+end $$;
+
+-- A part's buttons (v43's function, with one change marked v56): the Order is locked first and then the part, in the
+-- same order as the Order's own buttons (a dispute locks the Order and then its parts). The other way round, a part
+-- handed in at the same moment as a dispute was opened made each wait for the other until Postgres stopped one of
+-- them ("deadlock detected").
+create or replace function public.order_milestone_action(p_ms uuid, p_action text, p_note text default null, p_link text default null)
+returns text language plpgsql security definer set search_path = public as $$
+declare m public.order_milestones%rowtype; c public.contracts%rowtype; me uuid := auth.uid(); left_open int; v_order uuid;
+begin
+  if me is null then return 'not_signed_in'; end if;
+  -- v56: the Order first, then the part
+  select order_id into v_order from public.order_milestones where id = p_ms;
+  if not found then return 'not_found'; end if;
+  select * into c from public.contracts where id = v_order and me in (editor, client) for update;
+  if not found then return 'not_found'; end if;
+  select * into m from public.order_milestones where id = p_ms and order_id = c.id for update;
+  if not found then return 'not_found'; end if;
+  if public.is_banned(me) then return 'banned'; end if;
+  p_note := nullif(btrim(coalesce(p_note, '')), ''); p_link := nullif(btrim(coalesce(p_link, '')), '');
+  if length(coalesce(p_note, '')) > 2000 then return 'note_too_long'; end if;
+  if p_link is not null and not public.is_safe_url(p_link) then return 'bad_link'; end if;
+  begin perform public.rate_limit('contract_action', 60, interval '1 hour'); exception when others then return 'rate_limited'; end;
+  if p_action = 'submit' then
+    if me <> c.editor or c.status not in ('funded','paid') or m.status <> 'pending' then return 'not_allowed'; end if;
+    update public.order_milestones set status = 'submitted', submitted_at = now(), delivery_note = p_note, delivery_url = p_link,
+           auto_release_at = case when c.payment_mode = 'escrow' then now() + (coalesce(c.auto_days, 7) || ' days')::interval end where id = m.id returning * into m;
+    update public.contracts set changes_open = false where id = c.id returning * into c;
+    perform public.order_log(c.id, 'milestone_submitted', jsonb_build_object('milestone', m.id, 'title', m.title, 'amount_cents', m.amount_cents, 'note', p_note, 'link', p_link));
+    perform public.order_amount_event(c, 'milestone_submitted', m.amount_cents, m.title);
+  elsif p_action = 'request_changes' then
+    -- v43: only while the Order is open for work (as the Order screen shows the button), never during a dispute or after it ended
+    if me <> c.client or m.status <> 'submitted'
+       or not ((c.payment_mode = 'escrow' and c.status = 'funded') or (c.payment_mode = 'direct' and c.status = 'paid')) then return 'not_allowed'; end if;
+    if c.changes_used < coalesce(c.revisions, 0) then
+      update public.order_milestones set status = 'pending', auto_release_at = null where id = m.id returning * into m;
+      update public.contracts set changes_used = c.changes_used + 1, changes_open = true where id = c.id returning * into c;
+    else
+      update public.contracts set changes_used = c.changes_used + 1, changes_open = true where id = c.id returning * into c;   -- clock keeps running
+    end if;
+    if p_note is not null then insert into public.messages (conversation_id, sender, kind, body) values (c.conversation_id, me, 'change_request', p_note); end if;
+    perform public.order_log(c.id, 'milestone_changes_requested', jsonb_build_object('milestone', m.id, 'title', m.title, 'note', p_note, 'round', c.changes_used));
+    perform public.order_amount_event(c, 'request_changes', m.amount_cents, m.title);
+  elsif p_action = 'approve' then
+    -- direct payments only: approval records agreement, the money moved outside Cuvori
+    if me <> c.client or c.payment_mode <> 'direct' or c.status <> 'paid' or m.status <> 'submitted' then return 'not_allowed'; end if;   -- v43: only while open
+    update public.order_milestones set status = 'approved', approved_at = now() where id = m.id returning * into m;
+    perform public.order_log(c.id, 'milestone_approved', jsonb_build_object('milestone', m.id, 'title', m.title, 'amount_cents', m.amount_cents));
+    perform public.order_amount_event(c, 'milestone_approved', m.amount_cents, m.title);
+    select count(*) into left_open from public.order_milestones where order_id = c.id and status not in ('approved','released');
+    if left_open = 0 then update public.contracts set delivered_at = now() where id = c.id; end if;
+  else return 'bad_action'; end if;
+  return 'ok';
+end $$;
+
+-- Reading an Order's payment lines. Both sides of an Order read each line's amounts, its card fee, Stripe's fee on it,
+-- the 5% kept and what was sent; the page uses no more. A line's Stripe ids (provider_ref, charge_ref, fee_refund_ref),
+-- its entry key and its note (it names Stripe disputes) are for the payment code and the admin only, in the table and
+-- in the Order screen's data (order_bundle, v18's function with one change marked v56). An Order's own row stays
+-- readable whole by its two sides: the page reads it with select('*'), which needs every column.
+revoke select on table public.order_payments from authenticated;
+grant select (id, order_id, milestone_id, kind, amount_cents, fee_cents, provider, status, created_at, provider_fee_cents, fee_refund_cents,
+              connect_cents, commission_cents, payout_cents, payout_purpose, pricing_version) on table public.order_payments to authenticated;
+create or replace function public.order_bundle(p_order uuid)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'order', to_jsonb(c),
+    'milestones', coalesce((select jsonb_agg(to_jsonb(m) order by m.position) from public.order_milestones m where m.order_id = c.id), '[]'::jsonb),
+    'amendments', coalesce((select jsonb_agg(to_jsonb(a) order by a.created_at) from public.order_amendments a where a.order_id = c.id), '[]'::jsonb),
+    'events', coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'actor', e.actor, 'event', e.event, 'data', e.data, 'at', e.created_at) order by e.id) from public.order_events e where e.order_id = c.id), '[]'::jsonb),
+    -- v56: the payment lines without their Stripe ids, entry key and note, except for the admin
+    'payments', coalesce((select jsonb_agg(case when public.is_admin() then to_jsonb(p) else to_jsonb(p) - array['provider_ref', 'charge_ref', 'fee_refund_ref', 'entry_key', 'note'] end order by p.created_at)
+                            from public.order_payments p where p.order_id = c.id), '[]'::jsonb),
+    'client_name', (select coalesce(pc.first_name, '') from public.profiles pc where pc.id = c.client),
+    'freelancer_name', (select coalesce(e.display_name, pe.first_name, '') from public.profiles pe left join public.editor_profiles e on e.id = pe.id where pe.id = c.editor))
+  from public.contracts c where c.id = p_order and (auth.uid() in (c.editor, c.client) or public.is_admin());
+$$;
+
+-- A second chargeback that comes while another one is open on the same Order is noted on the Order by the payment code
+-- ("chargeback dp_… also open on payment pi_…", the payment audit of 31 October). That note keeps every payout and refund
+-- on the Order stopped until the payment code takes the chargeback over, or the bank decides it for Cuvori; the hourly
+-- run removes it then. So "Mark as handled" (v55's function, with one change marked v56) leaves it, as it leaves the other
+-- notes the hourly run works from: the rest of the note goes, that part stays. The same for the note of the bank's
+-- inquiry on a payment: it is what holds back the automatic payout while the bank asks, and the payment code removes it
+-- when the inquiry ends (the hourly run asks Stripe, in case the notice was lost); marked as handled, the payout went
+-- ahead while the bank was still asking (check of 1 November). And an Order with a second chargeback's note still has
+-- money on the way (v51's function), and so does its people's money for deleting an account (v35's function), each with
+-- one change marked v56: test and live mode can't be switched, and the account can't be deleted, meanwhile.
+-- (v56, check of 7 November: nobody marks a note on their own Order as handled (an admin who is its client or freelancer:
+-- another admin does it, as with a decision or the evidence: 'your_order'); and when a part of the note stays, the answer
+-- says so ('partly'), never 'ok' as though the whole note had gone)
+create or replace function public.admin_clear_order_note(p_order uuid, p_note text)
+returns text language plpgsql security definer set search_path = public as $$
+declare v_note text; v_keep text; v_client uuid; v_editor uuid;
+begin
+  if not public.is_admin() then return 'forbidden'; end if;
+  select money_error, client, editor into v_note, v_client, v_editor from public.contracts where id = p_order for update;
+  if not found then return 'not_found'; end if;
+  if auth.uid() in (v_client, v_editor) then return 'your_order'; end if;
+  if v_note is null then return 'ok'; end if;                                   -- already gone
+  if v_note is distinct from p_note then return 'changed'; end if;              -- a newer note came in: the admin reads it first
+  if v_note like 'chargeback:%' or v_note like 'chargeback won%'
+     or v_note like 'ledger line of the first payment not saved: %' or v_note like 'ledger line of a milestone payout not saved: %'
+     or v_note like 'ledger line of the re-payment not saved: %' then
+    return 'automatic';
+  end if;
+  -- v56: a second chargeback, or the bank's inquiry, noted on the Order stays (the payment code removes it itself); so
+  -- does "decision not on record" (Cuvori's decision whose history line could not be saved: the admin decides the Order
+  -- again, and the payment code removes the note once the decision is on record); the rest of the note goes
+  select string_agg(n, ' · Also: ' order by i) into v_keep
+    from unnest(string_to_array(v_note, ' · Also: ')) with ordinality as u(n, i)
+   where n ~ '^chargeback \S+ also (open )?on payment ' or n like 'the client''s bank asked about payment %'
+      or n like 'decision not on record: %';
+  if v_keep = v_note then return 'automatic'; end if;
+  update public.contracts set money_error = v_keep where id = p_order;
+  return case when v_keep is null then 'ok' else 'partly' end;
+end $$;
+
+-- The admin's list of Orders (v26's function, with one change marked v56): "the card cost came out higher than what the
+-- client paid for it" is only a question at today's prices, where the client pays the card cost. Under the new prices Cuvori
+-- pays it, so every such Order showed Stripe's whole fee as "not covered" and was sorted above every other Order not in a
+-- dispute (check of 7 November). And who made a decision under way (resolved_by, the last column): the Evidence button tells
+-- an admin's decision from the freelancer's own cancel by it, as the database does (check of 8 November). The function is made
+-- again (its columns changed); undo_v56.sql puts v26's back.
+drop function if exists public.admin_list_contracts();
+create or replace function public.admin_list_contracts()
+returns table (id uuid, title text, price numeric, currency text, pricing text, status text, payment_mode text, created_at timestamptz,
+               delivered_at timestamptz, disputed_at timestamptz, dispute_by uuid, dispute_reason text, delivery_note text, delivery_url text,
+               auto_release_at timestamptz, resolution text, conversation_id uuid,
+               editor uuid, editor_name text, editor_email text, client uuid, client_name text, client_email text,
+               profession_slug text, amount_cents int, funded_cents int, released_cents int, refunded_cents int, has_milestones boolean, amendments int,
+               money_error text, chargeback_status text, chargeback_cents int, chargeback_id text, stripe_payment_intent text, stripe_transfer_id text, stripe_refund_id text,
+               fee_short_cents int, resolved_by uuid)
+language sql stable security definer set search_path = public as $$
+  select c.id, c.title, c.price, c.currency, c.pricing, c.status, c.payment_mode, c.created_at,
+         c.delivered_at, c.disputed_at, c.dispute_by, c.dispute_reason, c.delivery_note, c.delivery_url, c.auto_release_at, c.resolution, c.conversation_id,
+         c.editor, coalesce(e.display_name, pe.first_name), pe.email, c.client, pc.first_name, pc.email,
+         c.profession_slug, c.amount_cents, c.funded_cents, c.released_cents, c.refunded_cents, c.has_milestones, c.amendments,
+         c.money_error, c.chargeback_status, c.chargeback_cents, c.chargeback_id, c.stripe_payment_intent, c.stripe_transfer_id, c.stripe_refund_id,
+         fs.short_cents, c.resolved_by
+  from public.contracts c
+  left join public.editor_profiles e on e.id = c.editor
+  left join public.profiles pe on pe.id = c.editor
+  left join public.profiles pc on pc.id = c.client
+  left join lateral (
+    select coalesce(sum(greatest(p.provider_fee_cents - p.fee_cents, 0)), 0)::int as short_cents
+    from public.order_payments p
+    where p.order_id = c.id and p.kind = 'fund' and p.status = 'succeeded' and p.provider_fee_cents is not null
+      and coalesce(c.pricing_version, 1) < 2                                     -- v56: only at today's prices
+  ) fs on true
+  where public.is_admin()
+  order by (c.chargeback_status = 'open' or c.money_error is not null) desc nulls last, (c.status = 'disputed') desc, (fs.short_cents > 0) desc, c.created_at desc;
+$$;
+grant execute on function public.admin_list_contracts() to authenticated;
+
+create or replace function public.orders_with_money_on_the_way()
+returns int language sql stable security definer set search_path = public as $$
+  select count(*)::int from public.contracts c
+   where c.payment_mode = 'escrow'
+     and (c.status in ('funded','delivered','disputed','releasing','resolving')
+          or c.chargeback_status = 'open'
+          or c.money_error like 'chargeback won%'
+          -- v56: a second chargeback noted on the Order, not taken over yet (the payment audit of 31 October)
+          or c.money_error ~ '(^| · Also: )chargeback \S+ also (open )?on payment '
+          or exists (select 1 from public.money_keys k
+                      where k.scope = 'lock:' || c.id::text and k.created_at > now() - interval '90 seconds'));
+$$;
+
+create or replace function public.has_money_held(target uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.contracts c where target in (c.editor, c.client)
+                 and (c.status in ('funded','delivered','disputed','releasing','resolving')
+                      or c.chargeback_status = 'open'
+                      or coalesce(c.money_error, '') like 'chargeback won%'
+                      -- v56: a second chargeback noted on the Order, not taken over yet (the check of 1 November)
+                      or coalesce(c.money_error, '') ~ '(^| · Also: )chargeback \S+ also (open )?on payment '
+                      or exists (select 1 from public.money_keys k
+                                  where k.scope = 'lock:' || c.id::text and k.created_at > now() - interval '90 seconds')));
+$$;
+
+-- ---------- 11. the admin log ----------
+-- Every change an admin makes through the site (the admin panel's buttons: a ban, a role, a flag, an invite, a review or
+-- a report handled, a setting, the fee table, a note marked as handled, a message to someone, …) is written, as it
+-- happens and by the database itself, into the admin log: who, when, what and on which row, with the values before and
+-- after (long texts cut). Cuvori's decisions on disputes, which the payment code carries out, are written there by the
+-- payment code, before any money moves. Nobody can change or delete a line, not even an admin; admins can read it.
+-- (Changes made in this SQL editor are yours and are not in it.)
+create table if not exists public.admin_audit (
+  id           bigserial primary key,
+  at           timestamptz not null default now(),
+  actor        uuid,
+  action       text not null check (length(action) between 1 and 80),
+  target_table text,
+  target_id    text,
+  detail       jsonb not null default '{}'::jsonb
+);
+create index if not exists admin_audit_at on public.admin_audit (at desc);
+create index if not exists admin_audit_target on public.admin_audit (target_table, target_id);
+alter table public.admin_audit enable row level security;
+drop policy if exists "admins read the admin log" on public.admin_audit;
+create policy "admins read the admin log" on public.admin_audit for select to authenticated using (public.is_admin());
+revoke all on public.admin_audit from public, anon, authenticated;
+grant select on public.admin_audit to authenticated;
+revoke update, delete, truncate on public.admin_audit from service_role;
+grant select, insert on public.admin_audit to service_role;
+grant usage on sequence public.admin_audit_id_seq to service_role;
+
+create or replace function public.admin_audit_frozen()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  raise exception 'admin_audit_frozen' using hint = 'the admin log is never changed or emptied';
+end $$;
+drop trigger if exists admin_audit_frozen on public.admin_audit;
+create trigger admin_audit_frozen before update or delete on public.admin_audit for each row execute function public.admin_audit_frozen();
+drop trigger if exists admin_audit_frozen_truncate on public.admin_audit;
+create trigger admin_audit_frozen_truncate before truncate on public.admin_audit for each statement execute function public.admin_audit_frozen();
+revoke execute on function public.admin_audit_frozen() from public, anon, authenticated, service_role;
+
+-- a value for the log: a long text is cut to 300 characters
+create or replace function public.admin_audit_cut(v jsonb)
+returns jsonb language sql immutable set search_path = public as $$
+  select case when jsonb_typeof(v) = 'string' and length(v #>> '{}') > 300 then to_jsonb(left(v #>> '{}', 300) || '…') else v end;
+$$;
+revoke execute on function public.admin_audit_cut(jsonb) from public, anon, authenticated, service_role;
+
+-- the database writes the line itself whenever a signed-in admin's request changes one of these tables (the admin panel's
+-- functions run as the admin, so they are caught however they are called); everyone else's changes, and the payment
+-- code's, are not admin changes and are not written.
+-- The log can never be changed or emptied, so it never keeps what people wrote or who they are (check of 7 November: a
+-- deleted account's chat messages, word for word, its Orders, reviews and job posts, and its e-mail address stayed in the log
+-- for good, and so did an admin's own private chats and Orders):
+--   - a chat message's text and attachment are never written: only how long it is, and that it changed;
+--   - a deleted row of what people write or who they are (a chat message, a conversation, a profile, an Order, a review, a
+--     job post, a flag, a report, an identity check) is written by its ids (and its kind or status) only; Cuvori's own
+--     settings (an invite, a setting, the fee table, a filter, a profession) are written whole, as before;
+--   - erasing a profile (deleting an account) writes which fields were erased, never what they said;
+--   - the admin's own rows, as anyone uses Cuvori (their own Orders, reviews, job posts, reports, chats), are written without
+--     any text (only ids, amounts, dates, yes/no and the status); and being seen online is not written at all.
+-- What an admin does to someone else (a ban and its reason, a flag, a note marked as handled) is written as before; a message
+-- to them is written with its words by admin_message_user (below), never a job warning's (it quotes the job's title), and
+-- the chat line itself by its length as every message.
+-- The owner can change this rule.
+create or replace function public.admin_audit_row()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); o jsonb; n jsonb; o0 jsonb; n0 jsonb; ch jsonb := '{}'::jsonb; k text; own boolean;
+        uuid_re constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+        time_re constant text := '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9:.+-]+)?$';
+        people constant text[] := array['messages', 'conversations', 'profiles', 'contracts', 'order_reviews', 'jobs', 'user_flags', 'reports', 'identity_verifications', 'job_flags'];
+begin
+  if me is null or not public.is_admin() then return null; end if;
+  if tg_op in ('UPDATE', 'DELETE') then o := to_jsonb(old); end if;
+  if tg_op in ('INSERT', 'UPDATE') then n := to_jsonb(new); end if;
+  o0 := o; n0 := n;
+  -- the admin's own profile, when only the time they were last seen changed
+  if tg_op = 'UPDATE' and tg_table_name = 'profiles' and n ->> 'id' = me::text
+     and (o - 'last_seen_at' - 'updated_at') = (n - 'last_seen_at' - 'updated_at') then return null; end if;
+  if tg_op = 'DELETE' and tg_table_name = any(people) then
+    select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) into o from jsonb_each(o0) e
+     where e.key in ('kind', 'status', 'key') or (jsonb_typeof(e.value) = 'string' and (e.value #>> '{}') ~ uuid_re);
+  elsif tg_op <> 'DELETE' then
+    -- a chat message: its length, never its words or its attachment
+    if tg_table_name = 'messages' then
+      if o is not null then o := o || jsonb_build_object('body', 'text, ' || length(coalesce(o0 ->> 'body', '')) || ' characters', 'payload', case when coalesce(o0 -> 'payload', 'null'::jsonb) = 'null'::jsonb then null else to_jsonb('attachment'::text) end); end if;
+      if n is not null then n := n || jsonb_build_object('body', 'text, ' || length(coalesce(n0 ->> 'body', '')) || ' characters', 'payload', case when coalesce(n0 -> 'payload', 'null'::jsonb) = 'null'::jsonb then null else to_jsonb('attachment'::text) end); end if;
+      if tg_op = 'UPDATE' and (o0 -> 'body') is distinct from (n0 -> 'body') then o := o || jsonb_build_object('body', 'text (before)'); n := n || jsonb_build_object('body', 'text (changed)'); end if;
+      if tg_op = 'UPDATE' and (o0 -> 'payload') is distinct from (n0 -> 'payload') then o := o || jsonb_build_object('payload', 'attachment (before)'); n := n || jsonb_build_object('payload', 'attachment (changed)'); end if;
+    end if;
+    -- a profile erased (its account deleted: its fields set to nothing): which fields, never what they said
+    if tg_op = 'UPDATE' and tg_table_name = 'profiles' and (o0 ->> 'deleted_at') is null and (n0 ->> 'deleted_at') is not null then
+      for k in select jsonb_object_keys(n0) loop
+        if jsonb_typeof(o0 -> k) = 'string' and coalesce(n0 -> k, 'null'::jsonb) in ('null'::jsonb, '""'::jsonb) then o := o || jsonb_build_object(k, '(erased)'); end if;
+      end loop;
+    end if;
+    -- the admin's own rows (their own Order, review, job post or chat, their own profile, and the flags the site puts on
+    -- their own job posts, which copy its title): without their texts (check of 8 November: the admin's own name and job
+    -- titles were kept)
+    own := me::text in (coalesce(n0, o0) ->> 'client', coalesce(n0, o0) ->> 'editor', coalesce(n0, o0) ->> 'reviewer', coalesce(n0, o0) ->> 'reviewee',
+                        coalesce(n0, o0) ->> 'owner', coalesce(n0, o0) ->> 'sender', coalesce(n0, o0) ->> 'user_a', coalesce(n0, o0) ->> 'user_b',
+                        coalesce(n0, o0) ->> 'reporter')
+           or (tg_table_name = 'profiles' and coalesce(n0, o0) ->> 'id' = me::text)
+           or (tg_table_name = 'job_flags' and exists (select 1 from public.jobs j where j.id::text = coalesce(n0, o0) ->> 'job_id' and j.owner = me));
+    if own then
+      -- every text goes, short ones too (a phone number fits in a few characters); ids, amounts, dates, yes/no and the
+      -- status stay, and so does what an admin does to the row as an admin (a review's moderation and its reason, also on a
+      -- review about themselves; check of 8 November: that was hidden as "(text)"). A chat message is already written by its
+      -- length.
+      for k in select jsonb_object_keys(coalesce(n0, o0)) loop
+        if k not in ('status', 'kind', 'resolution', 'payment_mode', 'pricing', 'currency', 'role', 'moderation_status', 'moderation_reason')
+           and not (tg_table_name = 'messages' and k in ('body', 'payload')) then
+          if o is not null and (jsonb_typeof(o -> k) in ('object', 'array') or (jsonb_typeof(o -> k) = 'string' and (o ->> k) !~ uuid_re and (o ->> k) !~ time_re)) then o := o || jsonb_build_object(k, '(text)'); end if;
+          if n is not null and (jsonb_typeof(n -> k) in ('object', 'array') or (jsonb_typeof(n -> k) = 'string' and (n ->> k) !~ uuid_re and (n ->> k) !~ time_re)) then
+            n := n || jsonb_build_object(k, case when tg_op = 'UPDATE' and (o0 -> k) is distinct from (n0 -> k) then '(text, changed)' else '(text)' end);
+          end if;
+        end if;
+      end loop;
+    end if;
+  end if;
+  if tg_op = 'UPDATE' then
+    for k in select jsonb_object_keys(n0) loop
+      if (o0 -> k) is distinct from (n0 -> k) then
+        ch := ch || jsonb_build_object(k, jsonb_build_object('from', public.admin_audit_cut(o -> k), 'to', public.admin_audit_cut(n -> k)));
+      end if;
+    end loop;
+    if ch = '{}'::jsonb then return null; end if;
+  else
+    for k in select jsonb_object_keys(coalesce(n, o)) loop
+      ch := ch || jsonb_build_object(k, public.admin_audit_cut(coalesce(n, o) -> k));
+    end loop;
+  end if;
+  insert into public.admin_audit (actor, action, target_table, target_id, detail)
+  values (me, lower(tg_op), tg_table_name, coalesce(n0 ->> 'id', o0 ->> 'id', n0 ->> 'key', o0 ->> 'key', n0 ->> 'user_id', o0 ->> 'user_id'), ch);
+  return null;
+end $$;
+revoke execute on function public.admin_audit_row() from public, anon, authenticated, service_role;
+do $$
+declare t text;
+begin
+  foreach t in array array['contracts', 'profiles', 'user_flags', 'invites', 'jobs', 'job_flags', 'order_reviews', 'reports',
+                           'site_settings', 'fee_schedules', 'filters', 'identity_verifications', 'professions',
+                           'profession_filters', 'messages', 'conversations'] loop
+    if to_regclass('public.' || t) is not null then
+      execute format('drop trigger if exists admin_audit_row on public.%I', t);
+      execute format('create trigger admin_audit_row after insert or update or delete on public.%I for each row execute function public.admin_audit_row()', t);
+    end if;
+  end loop;
+end $$;
+
+-- An admin's message to someone: v20's function, and the admin log keeps its words, as for any other thing an admin does to
+-- someone (a ban and its reason). The chat line itself is written by its length only, as every message (check of 8
+-- November: since the log keeps no chat words, an admin's message to someone was in it as "(text)"). Its one caller on the
+-- site is the job "warn" action (admin_job_action), whose message quotes the job's title, the poster's own words: then the
+-- log says a job warning went to them, never its words (the warning's reason is in the moderation log, as for every job
+-- action; check of 8 November, re-check: the title stayed in the log for good, also after the account was deleted). A job
+-- warning is the message the "warn" action sends itself, while it runs (Postgres's call stack says so); any other message
+-- keeps its words, also one sent after a job action in the same transaction (second re-check of 8 November: the job
+-- action's marker, cuvori.job_admin, lasts until the transaction ends, and such a message was logged as a job warning
+-- without its words). v56; undo_v56.sql puts v20's back.
+create or replace function public.admin_message_user(p_user uuid, p_text text)
+returns text language plpgsql security definer set search_path = public as $$
+declare adm uuid := auth.uid(); a uuid; b uuid; cid uuid; mid uuid; stack text;
+begin
+  if not public.is_admin() or p_user is null or p_user = adm then return 'forbidden'; end if;
+  if adm < p_user then a := adm; b := p_user; else a := p_user; b := adm; end if;
+  select id into cid from public.conversations where user_a = a and user_b = b;
+  if cid is null then insert into public.conversations (user_a, user_b) values (a, b) returning id into cid; end if;
+  insert into public.messages (conversation_id, sender, kind, body) values (cid, adm, 'text', left(coalesce(p_text, ''), 4000)) returning id into mid;
+  update public.conversations set last_message_at = now() where id = cid;
+  -- v56: the words, into the admin log (long ones cut, as every value there); a job warning without them (called from
+  -- within the job "warn" action: admin_job_action calls this for nothing else). Only a line of the call stack that names
+  -- the function counts, never the text of a statement in it, and the pattern has no backslash, so it reads the same
+  -- whatever the session's standard_conforming_strings (re-check of 9 November: with that setting off, every admin message
+  -- and job warning failed)
+  get diagnostics stack = pg_context;
+  insert into public.admin_audit (actor, action, target_table, target_id, detail)
+  values (adm, 'message_user', 'profiles', p_user::text, jsonb_build_object('to', p_user, 'message', mid, 'text',
+          case when stack ~ '(?n)^PL/pgSQL function (public[.])?admin_job_action[(]' then to_jsonb('a job warning (its reason is in the moderation log)'::text)
+               else public.admin_audit_cut(to_jsonb(left(coalesce(p_text, ''), 4000))) end));
+  return 'ok';
+end $$;
+grant execute on function public.admin_message_user(uuid, text) to authenticated;
+
+-- What Cuvori reviews to decide a dispute (the dispute clause: "the contract, the messages and the work delivered"), and
+-- to answer a bank's chargeback: the agreed text, the work handed in (the delivery and every part), the Order's history,
+-- what was paid in and out, and the chat of the two sides. Only for an admin who is not on the Order, and only while
+-- there is something to decide: a dispute or a decision under way, a chargeback still open, or the bank's inquiry. Every look is in
+-- the admin log, so it is known who read which chat and when. The chat's newest 500 messages, oldest first.
+create or replace function public.admin_order_evidence(p_order uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); c public.contracts%rowtype; res jsonb; n int;
+begin
+  if me is null or not public.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  select * into c from public.contracts where id = p_order;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  if me in (c.client, c.editor) then return jsonb_build_object('error', 'your_order'); end if;
+  -- (only while it is open: a dispute or a decision under way, a chargeback the bank has not decided, or the bank's inquiry.
+  -- Once decided the chat is the two people's own again, also what they write afterwards; check of 7 November: an admin
+  -- could read it for good once a dispute had ever been opened)
+  -- (a second chargeback noted on the Order counts as open too; a freelancer's own cancel that stopped is no dispute, check of
+  -- 7 November, re-check)
+  if not (c.status = 'disputed' or (c.status = 'resolving' and (c.disputed_at is not null or c.resolved_by is distinct from c.editor))
+          or coalesce(c.chargeback_status, '') = 'open'
+          or coalesce(c.money_error, '') ~ '(^| · Also: )the client''s bank asked about payment '        -- (v56: where a note starts, as the page)
+          or coalesce(c.money_error, '') ~ '(^| · Also: )chargeback \S+ also (open )?on payment ') then
+    return jsonb_build_object('error', 'nothing_to_decide');
+  end if;
+  select count(*) into n from public.messages where conversation_id = c.conversation_id;
+  res := jsonb_build_object(
+    'order', jsonb_build_object('id', c.id, 'title', c.title, 'status', c.status, 'price_cents', c.amount_cents, 'currency', c.currency,
+             'deadline', c.deadline, 'revisions', c.revisions, 'changes_used', c.changes_used, 'deliverables', c.deliverables,
+             'client_duties', c.client_duties, 'freelancer_duties', c.freelancer_duties, 'rights', c.rights, 'terms', c.terms,
+             'terms_doc', c.terms_doc, 'accepted_at', c.accepted_at, 'delivered_at', c.delivered_at, 'delivery_url', c.delivery_url,
+             'delivery_note', c.delivery_note, 'dispute_by', case when c.dispute_by = c.client then 'client' when c.dispute_by = c.editor then 'freelancer' end,
+             'dispute_reason', c.dispute_reason, 'disputed_at', c.disputed_at, 'chargeback_status', c.chargeback_status,
+             'funded_cents', c.funded_cents, 'released_cents', c.released_cents, 'refunded_cents', c.refunded_cents,
+             'pricing_version', c.pricing_version, 'review_days', c.auto_days),
+    'parts', coalesce((select jsonb_agg(jsonb_build_object('position', m.position, 'title', m.title, 'amount_cents', m.amount_cents, 'status', m.status,
+             'submitted_at', m.submitted_at, 'delivery_url', m.delivery_url, 'delivery_note', m.delivery_note) order by m.position)
+             from public.order_milestones m where m.order_id = c.id), '[]'::jsonb),
+    'history', coalesce((select jsonb_agg(jsonb_build_object('at', e.created_at, 'event', e.event,
+             'by', case when e.actor = c.client then 'client' when e.actor = c.editor then 'freelancer' when e.actor is null then 'Cuvori' else 'admin' end, 'data', e.data) order by e.id)
+             from public.order_events e where e.order_id = c.id), '[]'::jsonb),
+    'messages', coalesce((select jsonb_agg(x.j order by x.created_at, x.id) from (
+             select m.id, m.created_at, jsonb_build_object('at', m.created_at, 'kind', m.kind, 'body', left(coalesce(m.body, ''), 4000),
+               'from', case when m.sender = c.client then 'client' when m.sender = c.editor then 'freelancer' else 'Cuvori' end,
+               'link', case when jsonb_typeof(m.payload) = 'object' then coalesce(m.payload ->> 'url', m.payload ->> 'link', m.payload ->> 'videoSrc') end) as j
+               from public.messages m where m.conversation_id = c.conversation_id order by m.created_at desc, m.id desc limit 500) x), '[]'::jsonb),
+    'messages_total', n);
+  insert into public.admin_audit (actor, action, target_table, target_id, detail)
+  values (me, 'order.evidence', 'contracts', c.id::text, jsonb_build_object('messages_read', least(n, 500), 'status', c.status));
+  return res;
+end $$;
+revoke execute on function public.admin_order_evidence(uuid) from public, anon;
+grant execute on function public.admin_order_evidence(uuid) to authenticated;
+
 -- Shows whether this ran: one row that says "v56 applied", which plan new Orders get, and that Orders from before v56
 -- were left as they were.
 select case when to_regclass('public.pricing_plans') is not null and to_regclass('public.pricing_switch') is not null
              and (select count(*) from pg_trigger where tgname in ('contracts_pricing', 'order_payments_pricing', 'order_payments_pricing_totals',
                     'order_payments_pricing_frozen', 'order_milestones_pricing', 'order_amendments_pricing', 'pricing_plans_guard', 'pricing_switch_logged',
-                    'money_keys_pricing') and not tgisinternal) = 9
+                    'money_keys_pricing', 'contracts_money_first') and not tgisinternal) = 10
              and pg_get_functiondef('public.order_accept(uuid, integer)'::regprocedure) like '%prices_changed%'
+             and pg_get_functiondef('public.order_milestone_action(uuid, text, text, text)'::regprocedure) like '%v56: the Order first%'
+             and pg_get_functiondef('public.order_action(uuid, text, text, text, integer)'::regprocedure) like '%v56: the total and the line say the same%'
+             and pg_get_functiondef('public.admin_clear_order_note(uuid, text)'::regprocedure) like '%v56: a second chargeback%'
+             and pg_get_functiondef('public.orders_with_money_on_the_way()'::regprocedure) like '%v56: a second chargeback%'
+             and pg_get_functiondef('public.has_money_held(uuid)'::regprocedure) like '%v56: a second chargeback%'
+             and pg_get_functiondef('public.admin_clear_order_note(uuid, text)'::regprocedure) like '%asked about payment%'
+             and pg_get_functiondef('public.admin_clear_order_note(uuid, text)'::regprocedure) like '%decision not on record%'
+             and to_regclass('public.order_payments_fund_ref_uq') is not null
+             and (select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.order_payments'::regclass and conname = 'order_payments_kind_check') like '%''refund_failed''%'
+             and not has_column_privilege('authenticated', 'public.order_payments', 'provider_ref', 'select')
              and to_regprocedure('public.order_create_at_prices(uuid, jsonb, integer)') is not null
              and to_regprocedure('public.order_update_at_prices(uuid, jsonb, integer)') is not null
              and not has_column_privilege('anon', 'public.pricing_switch', 'note', 'select')
@@ -939,8 +1619,16 @@ select case when to_regclass('public.pricing_plans') is not null and to_regclass
              and not has_function_privilege('service_role', 'public.pricing_switch_to(integer, text)', 'execute')
              and not has_table_privilege('service_role', 'public.pricing_plans', 'update')
              and not exists (select 1 from information_schema.columns where table_schema = 'public' and column_name like 'client_fee%')
+             and to_regclass('public.admin_audit') is not null
+             and (select count(*) from pg_trigger where tgname = 'admin_audit_row' and not tgisinternal) >= 14
+             and pg_get_functiondef('public.contracts_money_first()'::regprocedure) like '%release_too_early%'
+             and to_regprocedure('public.admin_order_evidence(uuid)') is not null
             then 'v56 applied: the new prices are in the database' || case when (select version from public.pricing_switch) = 1 then ' and switched off' else '' end
                  || '. New Orders get plan ' || (select version from public.pricing_switch)
                  || ' (' || (select name from public.pricing_plans p join public.pricing_switch s on s.version = p.version) || '). Orders from before v56, left as they were: '
                  || (select count(*) from public.contracts where pricing_version is null) || '.'
+                 || coalesce((select ' Payments written twice before v56 (the ledger check lists them as payment_line_twice): ' || count(distinct provider_ref) || '.'
+                                from public.order_payments where kind = 'fund' and provider = 'stripe' and provider_ref is not null
+                                  and provider_ref in (select provider_ref from public.order_payments where kind = 'fund' and provider = 'stripe' group by provider_ref having count(*) > 1)
+                              having count(*) > 0), '')
             else 'v56 NOT applied' end as result;
