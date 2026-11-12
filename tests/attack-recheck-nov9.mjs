@@ -4,7 +4,9 @@
 //    pull-back refused (the bank's take is no pull-back). The note now stays until a person marks it as handled.
 // Z2 a chargeback decided for Cuvori: what was pulled back from the freelancer is paid again only up to what the Order still
 //    has, and when that is less, the "re-payment pending" note went with nothing saying the freelancer was not paid back.
-//    The Order now says how much, once ("freelancer not paid back after chargeback …").
+//    The Order now says how much ("freelancer not paid back after chargeback …"), that Cuvori pays it itself once the Order
+//    has the money (never by hand: check of 11 November, a person following the note and Cuvori both paid it), only for
+//    the chargeback's own pull-backs, and the note goes once it is paid.
 // Z3 the note "payouts not in the books" was best effort: when the database did not answer while it was written, there was
 //    no note at all (the books showing paid out 0.00 where the freelancer had 100.00). Now a note that can't be saved fails
 //    the step: Stripe sends its notice again, the hourly run tries again, a person is asked to try again in a minute.
@@ -159,59 +161,122 @@ for (const [name, mkX, plan] of PLANS) {
   });
 }
 
-// ---------- Z2 what the freelancer was not paid back after a won chargeback is said, once ----------
-// (today's prices with the small chargeback: its notices still fail every time Stripe sends them, a separate older problem
-// of the pull-back's bookkeeping; left out here)
+// ---------- Z2 what the freelancer was not paid back after a won chargeback is said, and follows Stripe ----------
+// (today's prices with the small chargeback, part 1's answer lost: its notices failed every time Stripe sent them until the
+// check of 11 November, tests/attack-check-nov11.mjs.) The note says how much is not paid back yet and that Cuvori pays it itself
+// once the Order has the money: never to pay it by hand (check of 11 November: a person following "decide whether to pay
+// it to them by hand", then Cuvori paying it too once the money came back, paid the freelancer twice). Then the refund made
+// in the Stripe dashboard fails, its money back at Cuvori: the hourly run pays the rest, once, and the note goes.
 for (const [name, mkX, plan] of PLANS) for (const [split, cb] of [[[9000, 1000], 1000], [[6000, 4000], "rest"], [[9000, 1000], "rest"]]) for (const lost of [false, true]) {
-  if (plan === 1 && cb === 1000 && lost) continue;
   await guard(`Z2 [${name}] ${split} ${cb} ${lost}`, async () => {
     ready(true);
     const c = mkX({ amount_cents: 10000, price: 100 }); const f = await fund2(c); const pi = f.session.payment_intent, ch = chargeOf(pi);
     row(c).status = "funded"; const [m1] = ms(c, split);
     if (lost) lostTransfer(); await approve(c, m1.id); FAULT.pred = null; later(5);
-    dashRefund(pi, 5000); await webhook(refundedEvent(pi));
+    const r1 = dashRefund(pi, 5000); await webhook(refundedEvent(pi));
     const amt = cb === "rest" ? ch.amount - ch.amount_refunded : cb;
     const w1 = await stripeSends(c, ch, "needs_response", amt);
     later(60); await hourly();
     const w2 = await stripeSends(c, ch, "won", amt);
-    for (let i = 0; i < 3; i++) { later(60); await hourly(); }
-    const d = "dp_" + ch.id;
-    const pulled = STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
-    const repaid = tsOf(c).filter(t => t.metadata.purpose === `retransfer_${d}`).reduce((a, t) => a + t.amount, 0);
-    const short = Math.max(pulled - repaid, 0), said = shortNotes(c);
-    const pending = notes(c).filter(n => /^chargeback won/.test(n)).length;
-    // "Mark as handled", then the hourly run and a decision attempt: the note does not come back
-    row(c).money_error = null;
     for (let i = 0; i < 2; i++) { later(60); await hourly(); }
-    if (row(c).status !== "disputed") disputed(c);
-    const dd = await resolve(c, "release"); later(5); await hourly();
-    const back = shortNotes(c).length;
-    const ok = short > 0 ? said.length === 1 && said[0].includes(eur(short)) && said[0].includes(d) : said.length === 0;
-    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || !ok || pending || back,
-      `Z2 [${name}] parts ${split.join("+")}, part 1's answer ${lost ? "lost" : "kept"}; 50.00 refunded in the dashboard; the bank charges back ${amt / 100}, won (${w1.join("/")}, ${w2.join("/")}): pulled back ${pulled}, paid again ${repaid}, not paid back ${short}; ${show(c)}; notes ${JSON.stringify(notes(c).map(n => n.slice(0, 70)))}; said ${said.length ? '"' + said[0].slice(0, 160) + '"' : "nothing"}; re-payment waiting ${pending}; after "Mark as handled" and a decision (${dd.status}): back ${back} (must be: ${short > 0 ? "said once, with the amount and the chargeback" : "nothing said"}, no re-payment waiting)`);
+    const d = "dp_" + ch.id;
+    const pulledOf = () => STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
+    const repaidOf = () => tsOf(c).filter(t => t.metadata.purpose === `retransfer_${d}`).reduce((a, t) => a + t.amount, 0);
+    const pulled = pulledOf(), repaid1 = repaidOf(), short = Math.max(pulled - repaid1, 0), said = shortNotes(c);
+    const pending = notes(c).filter(n => /^chargeback won/.test(n)).length;
+    const okSaid = short > 0 ? said.length === 1 && said[0].includes(eur(short)) && said[0].includes(d) && !/pay it to them by hand/i.test(said[0]) : said.length === 0;
+    // the money comes back to the Order: the refund made in the Stripe dashboard fails
+    const wf = await webhook(refundFails(r1));
+    for (let i = 0; i < 3; i++) { later(60); await hourly(); }
+    const repaid2 = repaidOf(), left = shortNotes(c).length;
+    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || !okSaid || pending || repaid2 !== pulled || left,
+      `Z2 [${name}] parts ${split.join("+")}, part 1's answer ${lost ? "lost" : "kept"}; 50.00 refunded in the dashboard; the bank charges back ${amt / 100}, won (${w1.join("/")}, ${w2.join("/")}): pulled back ${pulled}, paid again ${repaid1}, not paid back ${short}; said ${said.length ? '"' + said[0].slice(0, 170) + '"' : "nothing"}; re-payment waiting ${pending}; then the dashboard refund fails (${wf.status}) and the hourly runs: paid again ${repaid2} of ${pulled}, the note ${left ? "STILL THERE" : "gone"}; ${show(c)} (must be: ${short > 0 ? "said with the amount, never to pay by hand" : "nothing said"}; once the money is back, paid again exactly what was pulled back, and the note gone)`);
   });
 }
 
-// (Z2b: the re-payment can't be made at once (the freelancer's Stripe account not ready): the note is written, the person
-// marks it as handled, the hourly run then makes the re-payment and does not say it again)
-for (const [name, mkX, plan] of PLANS) {
+// (Z2b: the note marked as handled while nothing is waiting, the way the admin panel allows: it does not come back by
+// itself; once the money is back, Cuvori pays the rest itself with the Order's next step, once, and says nothing more)
+for (const [name, mkX, plan, split, cbAmt] of [["plan 2", mk2, 2, [9000, 1000], 1000], ["plan 1", mk1, 1, [6000, 4000], "rest"]]) {
   await guard(`Z2b [${name}]`, async () => {
+    ready(true);
+    const c = mkX({ amount_cents: 10000, price: 100 }); const f = await fund2(c); const pi = f.session.payment_intent, ch = chargeOf(pi);
+    row(c).status = "funded"; const [m1] = ms(c, split);
+    lostTransfer(); await approve(c, m1.id); FAULT.pred = null; later(5);
+    const r1 = dashRefund(pi, 5000); await webhook(refundedEvent(pi));
+    const amt = cbAmt === "rest" ? ch.amount - ch.amount_refunded : cbAmt;
+    const w1 = await stripeSends(c, ch, "needs_response", amt);
+    const w2 = await stripeSends(c, ch, "won", amt);
+    const said1 = shortNotes(c).length, waiting = notes(c).filter(n => /^chargeback won/.test(n)).length;
+    row(c).money_error = notes(c).filter(n => !n.startsWith(SHORT_HEAD)).join(" · Also: ") || null;     // "Mark as handled" (that note)
+    for (let i = 0; i < 2; i++) { later(60); await hourly(); }
+    const back1 = shortNotes(c).length;
+    const wf = await webhook(refundFails(r1)); later(5);
+    notDisputed(c); const k = await cancel(c);
+    for (let i = 0; i < 2; i++) { later(60); await hourly(); }
+    const d = "dp_" + ch.id;
+    const pulled = STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
+    const repaid = tsOf(c).filter(t => t.metadata.purpose === `retransfer_${d}`).reduce((a, t) => a + t.amount, 0);
+    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || said1 !== 1 || waiting || back1 || k.status !== 200 || repaid !== pulled || shortNotes(c).length,
+      `Z2b [${name}] parts ${split.join("+")}, part 1's payout made (the answer lost); 50.00 refunded in the dashboard; the bank charges back ${amt / 100}, won (${w1.join("/")}, ${w2.join("/")}): said ${said1}, waiting ${waiting}; marked as handled, 2 hourly runs: back ${back1}; the dashboard refund fails (${wf.status}); the freelancer's cancel -> ${k.status}: paid again ${repaid} of ${pulled}; the note ${shortNotes(c).length ? "BACK" : "not back"}; ${show(c)} (must be: said once, not back after "Mark as handled", paid again once all that was pulled back)`);
+  });
+}
+
+// (Z2d: the money comes back in two steps (two refunds made in the Stripe dashboard, 45.00 and 5.00, one failing at a time): after each, the
+// note says what is still not paid back, or goes; the rest paid by the Order's next decision is a re-payment of its own,
+// never taken for the earlier one)
+for (const [name, mkX, plan] of PLANS) {
+  await guard(`Z2d [${name}]`, async () => {
     ready(true);
     const c = mkX({ amount_cents: 10000, price: 100 }); const f = await fund2(c); const pi = f.session.payment_intent, ch = chargeOf(pi);
     row(c).status = "funded"; const [m1] = ms(c, [6000, 4000]);
     lostTransfer(); await approve(c, m1.id); FAULT.pred = null; later(5);
-    dashRefund(pi, 5000); await webhook(refundedEvent(pi));
+    const r1 = dashRefund(pi, 4500); await webhook(refundedEvent(pi)); later(1);
+    const r2 = dashRefund(pi, 500); await webhook(refundedEvent(pi));
     const amt = ch.amount - ch.amount_refunded;
     const w1 = await stripeSends(c, ch, "needs_response", amt);
-    ready(false); const w2 = await stripeSends(c, ch, "won", amt);
-    const said1 = shortNotes(c).length, waiting = notes(c).filter(n => /^chargeback won/.test(n)).length;
-    row(c).money_error = notes(c).filter(n => !n.startsWith(SHORT_HEAD)).join(" · Also: ") || null;     // "Mark as handled" (that note)
-    ready(true); for (let i = 0; i < 3; i++) { later(60); await hourly(); }
+    const w2 = await stripeSends(c, ch, "won", amt);
+    for (let i = 0; i < 2; i++) { later(60); await hourly(); }
+    const d = "dp_" + ch.id;
+    const pulledOf = () => STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
+    const repaidOf = () => tsOf(c).filter(t => t.metadata.purpose === `retransfer_${d}`).reduce((a, t) => a + t.amount, 0);
+    const follows = () => { const owed = Math.max(pulledOf() - repaidOf(), 0), said = shortNotes(c); return owed > 0 ? said.length === 1 && said[0].includes(eur(owed)) : said.length === 0; };
+    const s1 = [repaidOf(), shortNotes(c).map(n => n.slice(42, 80)).join()], ok1 = follows();
+    await webhook(refundFails(r2)); for (let i = 0; i < 2; i++) { later(60); await hourly(); }
+    const s2 = [repaidOf(), shortNotes(c).map(n => n.slice(42, 80)).join()], ok2 = follows();
+    // the rest comes back; "Mark as handled" first, so the Order's next decision (not the hourly run) pays it
+    await webhook(refundFails(r1)); row(c).money_error = notes(c).filter(n => !n.startsWith(SHORT_HEAD)).join(" · Also: ") || null;
+    if (row(c).status !== "disputed") disputed(c);
+    const dd = await resolve(c, "release"); for (let i = 0; i < 2; i++) { later(60); await hourly(); }
+    const pays = tsOf(c).filter(t => t.metadata.purpose === `retransfer_${d}`).map(t => t.amount);
+    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || !ok1 || !ok2 || dd.status !== 200 || repaidOf() !== pulledOf() || shortNotes(c).length,
+      `Z2d [${name}] part 1 (60.00) paid out (the answer lost); 45.00 and 5.00 refunded in the dashboard; the rest charged back, won: pulled back ${pulledOf()}, paid again ${s1[0]}, note "${s1[1]}" (follows ${ok1}); the 5.00 refund fails: paid again ${s2[0]}, note "${s2[1]}" (follows ${ok2}); the 45.00 fails too, the note marked as handled, a decision 'release' -> ${dd.status}: re-payments ${JSON.stringify(pays)}, ${repaidOf()} of ${pulledOf()}; ${show(c)} (must be: the note always the amount still owed, or gone; all of it paid again in the end, each re-payment its own)`);
+  });
+}
+
+// (Z2c: money pulled back from the freelancer by hand in the Stripe dashboard is no pull-back of the chargeback's: the note
+// never counts it as owed (check of 11 November: at today's prices it said 10.00 was not paid back, where Cuvori had paid
+// back more than the chargeback took))
+for (const [name, mkX, plan] of PLANS) {
+  await guard(`Z2c [${name}]`, async () => {
+    ready(true);
+    const c = mkX({ amount_cents: 10000, price: 100 }); const f = await fund2(c); const pi = f.session.payment_intent, ch = chargeOf(pi);
+    row(c).status = "funded"; const [m1] = ms(c, [6000, 4000]);
+    lostTransfer(); await approve(c, m1.id); FAULT.pred = null; later(5);                 // (its answer lost: the books don't show it)
+    const t = tsOf(c).find(x => (x.metadata.purpose || "release") === "release");
+    const pb = await fetch(`https://api.stripe.com/v1/transfers/${t.id}/reversals`, { method: "POST", headers: { Authorization: "Bearer " + process.env.STRIPE_SECRET_KEY, "content-type": "application/x-www-form-urlencoded" }, body: "amount=2000" });
+    dashRefund(pi, 5000); await webhook(refundedEvent(pi));
+    const amt = ch.amount - ch.amount_refunded;
+    const w1 = await stripeSends(c, ch, "needs_response", amt); later(60); await hourly();
+    const w2 = await stripeSends(c, ch, "won", amt);
+    for (let i = 0; i < 2; i++) { later(60); await hourly(); }
     const d = "dp_" + ch.id;
     const pulled = STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
-    const repaid = tsOf(c).filter(t => t.metadata.purpose === `retransfer_${d}`).reduce((a, t) => a + t.amount, 0);
-    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || said1 !== 1 || !waiting || repaid <= 0 || shortNotes(c).length || notes(c).some(n => /^chargeback won/.test(n)),
-      `Z2b [${name}] part 1 (60.00) paid out (the answer lost); 50.00 refunded in the dashboard; the rest charged back, won while the freelancer's account can't take money (${w1.join("/")}, ${w2.join("/")}): the note ${said1}, re-payment waiting ${waiting}; the note marked as handled; the hourly runs: pulled back ${pulled}, paid again ${repaid}; the note back ${shortNotes(c).length}; ${show(c)}; notes ${JSON.stringify(notes(c).map(n => n.slice(0, 60)))} (must be: said once, paid again what the Order has, never said again)`);
+    const repaid = tsOf(c).filter(x => x.metadata.purpose === `retransfer_${d}`).reduce((a, x) => a + x.amount, 0);
+    const said = shortNotes(c);
+    const owedNow = Math.max(pulled - repaid, 0);
+    const ok = owedNow > 0 ? said.length === 1 && said[0].includes(eur(owedNow)) : said.length === 0;
+    vuln(pb.status !== 200 || w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || !ok,
+      `Z2c [${name}] part 1 paid out (the answer lost); 20.00 pulled back from the freelancer by hand in the Stripe dashboard (${pb.status}); 50.00 refunded in the dashboard; the rest charged back, won (${w1.join("/")}, ${w2.join("/")}): the chargeback pulled back ${pulled}, paid again ${repaid}; said ${said.length ? '"' + said[0].slice(0, 110) + '"' : "nothing"} (must be: only what the chargeback itself pulled back and was not paid again)`);
   });
 }
 
@@ -279,17 +344,17 @@ for (const [name, mkX, plan, split, cbAmt] of [["plan 2", mk2, 2, [9000, 1000], 
     dashRefund(pi, 5000); await webhook(refundedEvent(pi));
     const amt = cbAmt === "rest" ? ch.amount - ch.amount_refunded : cbAmt;
     const w1 = await stripeSends(c, ch, "needs_response", amt);
-    let armed = false; const st = { hit: 0 };
+    // every write of that note fails while the first "won" notice is handled
+    const st = { hit: 0 };
     hooks.db = async (method, table, search, body) => {
-      if (!st.hit && method === "GET" && table === "money_keys" && String(search).includes("repay_short")) { armed = true; return null; }
-      if (armed && method === "GET" && table === "contracts" && String(search).includes(c.id)) { armed = false; st.hit++; return timeoutResp(); }
+      if (method === "PATCH" && table === "contracts" && String(search).includes(c.id) && String(body).includes(SHORT_HEAD)) { st.hit++; return timeoutResp(); }
       return null;
     };
     const first = await dispute(c, ch, "won", { amount: amt }); hooks.db = null;
     const waiting = notes(c).filter(n => /^chargeback won/.test(n)).length, said1 = shortNotes(c).length;
     later(60); const w2 = await stripeSends(c, ch, "won", amt);
-    vuln(st.hit !== 1 || first.status !== 500 || !waiting || said1 || w2[w2.length - 1] !== 200 || shortNotes(c).length !== 1 || notes(c).some(n => /^chargeback won/.test(n)),
-      `Z3d [${name}] parts ${split.join("+")}, part 1's payout made (the answer lost); 50.00 refunded in the dashboard; the bank charges back ${amt / 100} (${w1.join("/")}), won: the note's read fails (${st.hit}) -> ${first.status} (re-payment waiting ${waiting}, said ${said1}); Stripe sends it again -> ${w2.join("/")}: said ${shortNotes(c).length}, waiting ${notes(c).filter(n => /^chargeback won/.test(n)).length}; ${show(c)} (must be: 500 with the re-payment still waiting, then 200 with the note)`);
+    vuln(!st.hit || first.status !== 500 || !waiting || said1 || w2[w2.length - 1] !== 200 || shortNotes(c).length !== 1 || notes(c).some(n => /^chargeback won/.test(n)),
+      `Z3d [${name}] parts ${split.join("+")}, part 1's payout made (the answer lost); 50.00 refunded in the dashboard; the bank charges back ${amt / 100} (${w1.join("/")}), won: the note's writes fail (${st.hit}) -> ${first.status} (re-payment waiting ${waiting}, said ${said1}); Stripe sends it again -> ${w2.join("/")}: said ${shortNotes(c).length}, waiting ${notes(c).filter(n => /^chargeback won/.test(n)).length}; ${show(c)} (must be: 500 with the re-payment still waiting, then 200 with the note)`);
   });
 }
 
