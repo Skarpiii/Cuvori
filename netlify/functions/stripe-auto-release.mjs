@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart } from "../lib/cuvori.mjs";
+import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, REPAY_SHORT_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -198,6 +198,19 @@ export default async () => {
       else await owed.ok(c.id);
     }
     catch (e) { failed.push({ id: c.id, why: e.message }); console.error("re-payment retry failed for", c.id, e.message); await owed.failed(c.id); }
+  }
+  // freelancers not paid back all a won chargeback pulled back from them, the Order having had nothing left for it then
+  // (the note "freelancer not paid back after chargeback …"): the rest is paid once the Order has the money, and the note
+  // goes (check of 11 November: the note said so, and nothing looked)
+  const shortOwed = (x) => !repayOwed(x) && hasNote(x.money_error, n => n.startsWith(REPAY_SHORT_HEAD));
+  const shorts = await list("repayshort", `chargeback_status=eq.won&payment_mode=eq.escrow&money_error=like.${encodeURIComponent("*" + REPAY_SHORT_HEAD + "*")}&select=*`, shortOwed);
+  for (const c of shorts.list) {
+    if (over("chargebacks")) { waiting++; continue; }
+    try {
+      await repayWon(c);
+      if (await still(c.id, shortOwed)) await shorts.failed(c.id); else { done.push(c.id); await shorts.ok(c.id); }
+    }
+    catch (e) { failed.push({ id: c.id, why: e.message }); console.error("re-payment of the rest failed for", c.id, e.message); await shorts.failed(c.id); }
   }
   // Cuvori's decisions not told to both sides yet (the database refused it at the time): told now, once
   if (!over("chargebacks")) { try { await tellDecisions(); } catch (e) { console.error("telling decisions failed", e && e.message); } }
