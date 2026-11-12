@@ -118,6 +118,9 @@ const noFunds = async (path, method) => (method === "POST" && /\/reversals$/.tes
 // Stripe: a notice not answered 200 is sent again (here up to 3 more times)
 const stripeSends = async (c, ch, status, amount) => { const got = []; for (let i = 0; i < 4; i++) { const r = await dispute(c, ch, status, { amount }); got.push(r.status); if (r.status === 200) break; later(60); } return got; };
 const unNote = (c) => notes(c).filter(n => n.startsWith("payouts not in the books")).length;
+// the Order says money went out twice: "payouts not in the books", or (check of 13 November: a refund made in the dashboard
+// during a decision under way counts the decision's payout first) what of the refund had already been paid out
+const saysTwice = (c) => notes(c).filter(n => n.startsWith("payouts not in the books") || /had already been paid/.test(n)).length;
 const COVER_HEAD = "re-payment covered by Cuvori after chargeback ";
 const covers = (c) => notes(c).filter(n => n.startsWith(COVER_HEAD));
 const eur = (cents) => (cents / 100).toFixed(2) + " EUR";
@@ -154,12 +157,12 @@ for (const kind of ["part", "whole"]) {
   await guard(`K1 [${kind}]`, async () => {
     const { c, ch, d } = await twice(kind);
     const w1 = await stripeSends(c, ch, "needs_response", 1000);
-    const p1 = pulledAt(c, d), l1 = revSum(c, d), n1 = unNote(c), m1 = cbNote(c), s1 = row(c).chargeback_status;
+    const p1 = pulledAt(c, d), l1 = revSum(c, d), n1 = saysTwice(c), m1 = cbNote(c), s1 = row(c).chargeback_status;
     // Stripe may send the same notice again; the hourly runs meanwhile
     const w2 = await resend(c, ch, 1000); await hours(2);
     const p2 = pulledAt(c, d), l2 = revSum(c, d), lc = revLines(c, d).length;
-    vuln(last(w1) !== 200 || s1 !== "open" || p1 !== 1000 || l1 !== 1000 || n1 !== 1 || m1 || w2.some(s => s !== 200) || p2 !== 1000 || l2 !== 1000 || lc !== 1 || unNote(c) !== 1,
-      `K1 [${kind}] ${kind === "part" ? "part 1's 90.00" : "the decision's 100.00"} paid out, the answer lost; 50.00 refunded in the dashboard; the bank charges back 10.00: Stripe's notices answered ${w1.join("/")} (chargeback ${s1}); pulled back ${p1}, its line ${l1}, the note "payouts not in the books" ${n1}, a pull-back still owed ${m1}; the same notice again ${w2.join("/")} and 2 hourly runs: pulled back ${p2} in all, ${lc} line(s) of ${l2}; ${show(c)} (must be: answered 200, the 10.00 pulled back once and written down once, the note there, nothing owed)`);
+    vuln(last(w1) !== 200 || s1 !== "open" || p1 !== 1000 || l1 !== 1000 || n1 !== 1 || m1 || w2.some(s => s !== 200) || p2 !== 1000 || l2 !== 1000 || lc !== 1 || saysTwice(c) !== 1,
+      `K1 [${kind}] ${kind === "part" ? "part 1's 90.00" : "the decision's 100.00"} paid out, the answer lost; 50.00 refunded in the dashboard; the bank charges back 10.00: Stripe's notices answered ${w1.join("/")} (chargeback ${s1}); pulled back ${p1}, its line ${l1}, money went out twice said ${n1}, a pull-back still owed ${m1}; the same notice again ${w2.join("/")} and 2 hourly runs: pulled back ${p2} in all, ${lc} line(s) of ${l2}; ${show(c)} (must be: answered 200, the 10.00 pulled back once and written down once, the note there, nothing owed)`);
   });
 }
 

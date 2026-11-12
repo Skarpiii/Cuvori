@@ -155,11 +155,14 @@ for (const [name, mkX, plan] of PLANS) for (const outcome of ["won", "lost"]) {
     const w2 = await stripeSends(c, ch, outcome, 4000);
     for (let i = 0; i < 3; i++) { later(60); await hourly(); }
     hooks.stripe = null;
-    const pending = noteOf(c, /^chargeback won; re-payment/), told = noteOf(c, /not in the books/), covered = noteOf(c, /^re-payment covered by Cuvori/);
+    // (check of 13 November: a refund made in the dashboard that leaves the Order holding nothing counts its payouts first, so
+    // the Order says right then what of it went out twice; Cuvori's part of a re-payment is then already in that)
+    const twiceSaid = noteOf(c, /had already been paid/);
+    const pending = noteOf(c, /^chargeback won; re-payment/), told = [...noteOf(c, /not in the books/), ...twiceSaid], covered = [...noteOf(c, /^re-payment covered by Cuvori/), ...twiceSaid];
     const madeOut = freelancerGets(plan, 5000) + freelancerGets(plan, 1000);
     const d = "dp_" + ch.id, pulled = STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
     const paidBack = repays(c).reduce((a, t) => a + t.amount, 0);
-    const okBack = outcome === "won" ? pulled > 0 && paidBack === pulled && repays(c).length === 1 && covered.length === 1 : !repays(c).length && !covered.length;
+    const okBack = outcome === "won" ? pulled > 0 && paidBack === pulled && repays(c).length === 1 && covered.length === 1 : !repays(c).length && !noteOf(c, /^re-payment covered by Cuvori/).length;
     vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || row(c).chargeback_status !== outcome || pending.length || !told.length || !okBack || sent(c) > madeOut,
       `W2 [${name}] parts 50.00 + 10.00 paid out (answers lost), 60.00 refunded in the dashboard; 40.00 charged back, only part 2's payout can be pulled back; decided ${outcome}: notices ${w1.join("/")}, ${w2.join("/")}; ${show(c)}; chargeback ${row(c).chargeback_status}; pulled back ${pulled}, paid back ${paidBack} in ${repays(c).length} payout(s); notes: ${JSON.stringify(notes(c).map(n => n.slice(0, 45)))} (must be: every notice answered 200 in the end, ${outcome}, ${outcome === "won" ? "what was pulled back paid back once, Cuvori's part said" : "nothing paid again"}, no re-payment waiting, the Order says what can't be counted)`);
   });

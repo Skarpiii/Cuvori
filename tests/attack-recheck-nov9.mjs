@@ -116,6 +116,9 @@ const noFunds = async (path, method) => (method === "POST" && /\/reversals$/.tes
 // Stripe: a notice not answered 200 is sent again (here up to 3 more times)
 const stripeSends = async (c, ch, status, amount) => { const got = []; for (let i = 0; i < 4; i++) { const r = await dispute(c, ch, status, { amount }); got.push(r.status); if (r.status === 200) break; later(60); } return got; };
 const unNote = (c) => notes(c).filter(n => n.startsWith("payouts not in the books")).length;
+// the Order says money went out twice: "payouts not in the books", or (check of 13 November: a refund made in the dashboard
+// during a decision under way counts the decision's payout first) what of the refund had already been paid out
+const saysTwice = (c) => notes(c).filter(n => n.startsWith("payouts not in the books") || /had already been paid/.test(n)).length;
 const COVER_HEAD = "re-payment covered by Cuvori after chargeback ";
 const covers = (c) => notes(c).filter(n => n.startsWith(COVER_HEAD));
 // what Cuvori covers of a re-payment: what the Order no longer had of it then (paid in, less given back, less what Stripe
@@ -138,10 +141,10 @@ for (const [name, mkX, plan] of PLANS) {
     lostTransfer(); const d1 = await resolve(c, "release"); FAULT.pred = null; later(5);
     dashRefund(pi, 5000); await webhook(refundedEvent(pi));
     hooks.stripe = noFunds; const w1 = await stripeSends(c, ch, "needs_response", 5000); hooks.stripe = null; later(5);
-    const w2 = await stripeSends(c, ch, "won", 5000); const n1 = unNote(c);
-    later(5); const d2 = await resolve(c, "release"); const n2 = unNote(c);
+    const w2 = await stripeSends(c, ch, "won", 5000); const n1 = saysTwice(c);
+    later(5); const d2 = await resolve(c, "release"); const n2 = saysTwice(c);
     for (let i = 0; i < 2; i++) { later(60); await hourly(); }
-    const n3 = unNote(c);
+    const n3 = saysTwice(c);
     vuln(n1 !== 1 || n2 !== 1 || n3 !== 1,
       `Z1a [${name}] decision 'release' (${d1.status}: its payout made, the answer lost); 50.00 refunded in the dashboard; the bank charges back the other 50.00, the pull-back refused (${w1.join("/")}), won (${w2.join("/")}); the note ${n1}; the admin's same decision again -> ${d2.status}: the note ${n2}, after 2 hourly runs ${n3}; ${show(c)}; at Stripe ${outAtStripe(c, pi)} went out of 10000 (must be: the note stays, money went out twice)`);
   });
