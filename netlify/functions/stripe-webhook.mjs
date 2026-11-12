@@ -3,7 +3,7 @@
 //   charge.refunded, charge.dispute.created, charge.dispute.funds_withdrawn, charge.dispute.closed, charge.refund.updated
 //   (refund.updated, refund.failed on newer API versions). Connect endpoint
 //   (separate secret): account.updated.
-import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET, addNote, stepsOver, isPlan2, mirrorOutsideRefundV2, recordFailedRefund, failedBackOf, failedRefundsFirst } from "../lib/cuvori.mjs";
+import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET, addNote, stepsOver, isPlan2, mirrorOutsideRefundV2, recordFailedRefund, failedBackOf, failedRefundsFirst, updateNoted } from "../lib/cuvori.mjs";
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 // the events Cuvori acts on (the first six from Cuvori's own Stripe account, account.updated from the freelancers' accounts)
 // (a refund that fails at Stripe after it was recorded: "charge.refund.updated" on the API version Cuvori uses, and the newer
@@ -132,18 +132,19 @@ async function mirrorOutsideRefund(c, o) {
   const onlyPayment = funds.length <= 1 && (c.stripe_payment_intent === o.payment_intent || !!thisFund);
   if (onlyPayment && o.refunded) {
     // the one payment behind this order is back with the client in full: the order is refunded, whatever was still held is gone
-    const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(${HOLDING.join(",")})&${sameCounter}`, { status: "refunded", closed_at: now, resolution: "refund", auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind,
-      // the Order's money steps are over; money paid out twice is said for the admin, and any other note stays
-      money_error: twice > 0 ? addNote(stepsOver(c.money_error), `refund made outside Cuvori: ${(twice / 100).toFixed(2)} had already been paid to the freelancer — check by hand`) : stepsOver(c.money_error) });
+    // the Order's money steps are over; money paid out twice is said for the admin, and any other note stays (also one another
+    // step saved meanwhile: the note is worked out from the note as it is when written, updateNoted)
+    const rows = await updateNoted(c, `id=eq.${c.id}&status=in.(${HOLDING.join(",")})&${sameCounter}`, { status: "refunded", closed_at: now, resolution: "refund", auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind },
+      (n) => twice > 0 ? addNote(stepsOver(n), `refund made outside Cuvori: ${(twice / 100).toFixed(2)} had already been paid to the freelancer — check by hand`) : stepsOver(n));
     const u = rows && rows[0] || null;
     if (u) { await orderEvent(u, "refunded", { outside: true, amount_cents: o.amount_refunded }, null); return; }
   }
   // part of a payment, one payment of several (a top-up), or an order no longer holding: the order now has less
   // than it shows, or money went out twice. A person decides; the books take the loss now.
   const why = `Refund of ${(cents / 100).toFixed(2)} ${String(o.currency || c.currency || "").toUpperCase()} made outside Cuvori on payment ${o.payment_intent}; the order holds ${(behind / 100).toFixed(2)} less than before${twice > 0 ? `; ${(twice / 100).toFixed(2)} of it had already been paid out — money went out twice` : ""}`;
-  const note = addNote(c.money_error, why.slice(0, 300));                              // after the notes already there, never in their place
-  let u = ((await db.update("contracts", `id=eq.${c.id}&status=in.(funded,delivered)&${sameCounter}`, { status: "disputed", dispute_reason: why.slice(0, 2000), disputed_at: now, dispute_by: c.client, auto_release_at: null, money_error: note, refunded_cents: nz(c.refunded_cents) + behind })) || [])[0]
-    || ((await db.update("contracts", `id=eq.${c.id}&${sameCounter}`, { money_error: note, refunded_cents: nz(c.refunded_cents) + behind })) || [])[0];
+  const note = (n) => addNote(n, why.slice(0, 300));                                   // after the notes already there, never in their place
+  let u = ((await updateNoted(c, `id=eq.${c.id}&status=in.(funded,delivered)&${sameCounter}`, { status: "disputed", dispute_reason: why.slice(0, 2000), disputed_at: now, dispute_by: c.client, auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind }, note)) || [])[0]
+    || ((await updateNoted(c, `id=eq.${c.id}&${sameCounter}`, { refunded_cents: nz(c.refunded_cents) + behind }, note)) || [])[0];
   // the counter moved under someone else's hands (it can't under the lock): this event fails, and Stripe sends it again
   if (!u) throw new Error(`refund made outside Cuvori on ${o.payment_intent}: the Order changed while it was counted`);
   await orderEvent(u, "disputed", { outside_refund: true, amount_cents: part || behind, note: "Refund made outside Cuvori — Cuvori checks this by hand" }, null);
