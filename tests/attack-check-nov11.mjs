@@ -7,7 +7,8 @@
 // K2 the pull-back is made once, however often the notice comes and whatever the bank decides: what the Order "held" came
 //    out below nothing there, and every notice and hourly run worked out more to pull back (with a larger chargeback on such
 //    an Order, already before: Stripe's 24-hour key held it back for a day, then 90.00 was taken for a 50.00 chargeback).
-// K3 decided for Cuvori: the freelancer is paid back once the Order has the money; decided for the client: it closes.
+// K3 decided for Cuvori: the freelancer is paid back in full right away, Cuvori's own money said (the owner's decision of 12
+//    November; tests/attack-check-nov12.mjs); decided for the client: it closes.
 // K4 only a refusal for good goes on that way: a passing error still fails the notice (Stripe sends it again).
 // K5 the payout stays out of the books with the total (never its line alone): a cancel or Cuvori's decision afterwards is
 //    refused with the books to check by hand, and nothing moves.
@@ -117,8 +118,8 @@ const noFunds = async (path, method) => (method === "POST" && /\/reversals$/.tes
 // Stripe: a notice not answered 200 is sent again (here up to 3 more times)
 const stripeSends = async (c, ch, status, amount) => { const got = []; for (let i = 0; i < 4; i++) { const r = await dispute(c, ch, status, { amount }); got.push(r.status); if (r.status === 200) break; later(60); } return got; };
 const unNote = (c) => notes(c).filter(n => n.startsWith("payouts not in the books")).length;
-const SHORT_HEAD = "freelancer not paid back after chargeback ";
-const shortNotes = (c) => notes(c).filter(n => n.startsWith(SHORT_HEAD));
+const COVER_HEAD = "re-payment covered by Cuvori after chargeback ";
+const covers = (c) => notes(c).filter(n => n.startsWith(COVER_HEAD));
 const eur = (cents) => (cents / 100).toFixed(2) + " EUR";
 const notDisputed = (c) => { const x = row(c); if (x.status === "disputed") { x.status = "funded"; x.disputed_at = null; x.dispute_by = null; } };
 // the Order's money at Stripe: what went out (payouts net of pull-backs, refunds, a lost chargeback) against what came in
@@ -164,7 +165,7 @@ for (const kind of ["part", "whole"]) {
 
 // ---------- K2 the larger chargeback on such an Order: never pulled back twice ----------
 // (the bank decides weeks later; Stripe keeps a request's key for 24 hours only, so a pull-back worked out again then is made)
-const COULD_NOT = /could not be pulled back/;
+const COULD_NOT = /could not be pulled back/, COVERED = /^chargeback lost; Cuvori covered ([0-9]+\.[0-9]{2}) of what the bank took: the Order no longer had it/;
 for (const outcome of ["lost", "won"]) {
   await guard(`K2 [${outcome}]`, async () => {
     const { c, ch, d } = await twice("part");
@@ -177,27 +178,29 @@ for (const outcome of ["lost", "won"]) {
     later(30 * DAY); STRIPE.idem.clear();
     const w3 = await stripeSends(c, ch, outcome, amt); await hours(2);
     // (lost: what Cuvori is really short is said, 40.00: 90.00 + 50.00 went out of 100.00 before the chargeback, and what the
-    // bank took the freelancer gave back whole; won: nothing is missing)
-    const p3 = pulledAt(c, d), said = notes(c).filter(n => COULD_NOT.test(n));
-    const saidOk = outcome === "lost" ? said.length === 1 && said[0].includes("40.00") : said.length === 0;
+    // bank took the freelancer gave back whole, so never "could not be pulled back" (check of 12 November, third part);
+    // won: nothing is missing)
+    const p3 = pulledAt(c, d), said = notes(c).filter(n => COULD_NOT.test(n) || COVERED.test(n));
+    const saidOk = outcome === "lost" ? said.length === 1 && (COVERED.exec(said[0]) || [])[1] === "40.00" : said.length === 0;
     vuln(last(w1) !== 200 || w2.some(s => s !== 200) || last(w3) !== 200 || row(c).chargeback_status !== outcome || p1 !== principal || p2 !== principal || p3 !== principal || !saidOk || cbNote(c),
-      `K2 [${outcome}] part 1's 90.00 paid out, the answer lost; 50.00 refunded in the dashboard; the bank charges back the other 50.00 (${w1.join("/")}): pulled back ${p1}; the same notice again and two days of hourly runs ${w2.join("/")}: ${p2}; ${outcome} a month later (${w3.join("/")}): pulled back ${p3} in all${said.length ? `; the Order says "${said[0].slice(0, 90)}"` : ""}; ${show(c)} (must be: every notice 200, pulled back ${principal} once, chargeback ${outcome}${outcome === "lost" ? ", Cuvori's 40.00 short said" : ", nothing said to be missing"})`);
+      `K2 [${outcome}] part 1's 90.00 paid out, the answer lost; 50.00 refunded in the dashboard; the bank charges back the other 50.00 (${w1.join("/")}): pulled back ${p1}; the same notice again and two days of hourly runs ${w2.join("/")}: ${p2}; ${outcome} a month later (${w3.join("/")}): pulled back ${p3} in all${said.length ? `; the Order says "${said[0].slice(0, 90)}"` : ""}; ${show(c)} (must be: every notice 200, pulled back ${principal} once, chargeback ${outcome}${outcome === "lost" ? ", Cuvori's 40.00 said as the Order no longer having it, never as not pulled back" : ", nothing said to be missing"})`);
   });
 }
 
-// ---------- K3 decided by the bank: closed, and the freelancer paid back once the money is there ----------
+// ---------- K3 decided by the bank: closed, and the freelancer paid back in full right away ----------
 await guard(`K3 [won]`, async () => {
   const { c, ch, d, r1 } = await twice("part");
   const w1 = await stripeSends(c, ch, "needs_response", 1000); await hours(1);
   const w2 = await stripeSends(c, ch, "won", 1000); await hours(2);
-  const st = row(c).chargeback_status, pend = notes(c).filter(n => /^chargeback won/.test(n)).length, said = shortNotes(c), rp1 = repaidOf(c, d);
-  // the money comes back to the Order: the refund made in the Stripe dashboard fails
+  const st = row(c).chargeback_status, pend = notes(c).filter(n => /^chargeback won/.test(n)).length, said = covers(c), rp1 = repaidOf(c, d);
+  // the money comes back to the Order: the refund made in the Stripe dashboard fails; nothing more is paid. Then the
+  // freelancer cancels the rest: the payout is counted first (the books can take it now), the client gets back what is left
   const wf = await webhook(refundFails(r1)); await hours(3);
   const rp2 = repaidOf(c, d);
-  // (the books can take the payout now: counted, and the paid-out total is Stripe's, matching its lines)
+  notDisputed(c); const k = await cancel(c); await hours(1);
   const books = row(c).released_cents === sent(c) && linesOk(c);
-  vuln(last(w1) !== 200 || last(w2) !== 200 || st !== "won" || pend || rp1 !== 0 || said.length !== 1 || !said[0].includes(eur(1000)) || pulledAt(c, d) !== 1000 || rp2 !== 1000 || shortNotes(c).length || unNote(c) !== 1 || !books,
-    `K3 [won] the bank charges back 10.00 (${w1.join("/")}), won (${w2.join("/")}): chargeback ${st}, re-payment waiting ${pend}, paid again ${rp1}, said ${said.length ? '"' + said[0].slice(0, 120) + '"' : "nothing"}; the dashboard refund fails (${wf.status}) and the hourly runs: paid again ${rp2} of ${pulledAt(c, d)}, the note ${shortNotes(c).length ? "still there" : "gone"}, the books ${books ? "follow Stripe" : "DON'T follow Stripe"}; ${show(c)} (must be: won, 10.00 not paid back said, then paid again once, the note gone, the payout counted once the books can take it)`);
+  vuln(last(w1) !== 200 || last(w2) !== 200 || st !== "won" || pend || rp1 !== 1000 || said.length !== 1 || !said[0].includes(eur(1000)) || pulledAt(c, d) !== 1000 || rp2 !== 1000 || k.status !== 200 || unNote(c) !== 1 || !books,
+    `K3 [won] the bank charges back 10.00 (${w1.join("/")}), won (${w2.join("/")}): chargeback ${st}, re-payment waiting ${pend}, paid back ${rp1}, said ${said.length ? '"' + said[0].slice(0, 120) + '"' : "nothing"}; the dashboard refund fails (${wf.status}) and the hourly runs: paid back ${rp2} of ${pulledAt(c, d)}; the freelancer cancels -> ${k.status}, the books ${books ? "follow Stripe" : "DON'T follow Stripe"}; ${show(c)} (must be: won, all 10.00 paid back at once with Cuvori's part said, nothing more later, the payout counted once the books can take it)`);
 });
 await guard(`K3 [lost]`, async () => {
   const { c, ch, d } = await twice("part");

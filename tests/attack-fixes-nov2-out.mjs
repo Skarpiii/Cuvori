@@ -302,8 +302,16 @@ for (const [name, mkX, plan] of PLANS) {
 // ---------- D8 the hourly run's retry lists: 20 that fail for ever, then one that can be done ----------
 const synthetic = new Set();
 const stuckOrder = (o) => { const c = mk1({ status: "completed", funded_cents: 10000, released_cents: 0, refunded_cents: 0, ...o }); synthetic.add(c.id); return c; };
+// the pull-back at Stripe that such an Order's pull-back line stands for (its payout, pulled back in full, naming the
+// chargeback): since the check of 12 November only what Stripe says a chargeback pulled back is paid back, never a line alone
+const pulledAtStripe = (c, d, cents) => {
+  const now = Date.now() / 1000, tid = `tr_${d.slice(3)}`;
+  STRIPE.transfers.push({ id: tid, object: "transfer", created: now, amount: cents, currency: "eur", destination: "acct_1EditorAAAAAAAA", reversed: true, amount_reversed: cents, contract: c.id, metadata: { contract_id: c.id, milestone_id: "", purpose: "release", attempt: "" }, transfer_group: `contract_${c.id}`, source_transaction: null });
+  STRIPE.reversals.push({ id: `trr_${d.slice(3)}`, object: "transfer_reversal", amount: cents, transfer: tid, created: now, metadata: { contract_id: c.id, reason: d } });
+};
 const dropSynthetic = () => {
   for (const t of ["contracts", "order_payments", "order_milestones"]) { const keep = DB[t].filter(r => !synthetic.has(t === "contracts" ? r.id : r.order_id)); DB[t].length = 0; DB[t].push(...keep); }
+  for (const t of ["transfers", "reversals"]) { const keep = STRIPE[t].filter(x => !synthetic.has(x.metadata && x.metadata.contract_id)); STRIPE[t].length = 0; STRIPE[t].push(...keep); }
   synthetic.clear();
 };
 async function starved(tag, makeStuck, makeReal, isDone, what) {
@@ -323,6 +331,7 @@ await starved("D8a", (i) => {
   users.ed2.banned = true;
   const c = stuckOrder({ editor: users.ed2.id, chargeback_status: "won", chargeback_id: `dp_stuck${i}`, money_error: "chargeback won; re-payment pending", released_cents: 0 });
   DB.order_payments.push({ id: uuid(), order_id: c.id, provider: "stripe", status: "succeeded", kind: "reversal", amount_cents: 10000, provider_ref: `tr_stuck${i}`, note: `chargeback dp_stuck${i}`, created_at: new Date().toISOString() });
+  pulledAtStripe(c, `dp_stuck${i}`, 10000);
 }, async () => {
   const c = mk1(); const f = await fund2(c); c.status = "delivered";
   const ch = chargeOf(f.session.payment_intent);
@@ -337,6 +346,7 @@ await guard("D8h", async () => {
   for (let i = 0; i < 20; i++) {
     const c = stuckOrder({ editor: users.ed2.id, chargeback_status: "won", chargeback_id: `dp_h${i}`, money_error: "chargeback won; re-payment pending" });
     DB.order_payments.push({ id: uuid(), order_id: c.id, provider: "stripe", status: "succeeded", kind: "reversal", amount_cents: 10000, provider_ref: `tr_h${i}`, note: `chargeback dp_h${i}`, created_at: new Date().toISOString() });
+    pulledAtStripe(c, `dp_h${i}`, 10000);
     stuck.push(c);
   }
   let tried = 0;

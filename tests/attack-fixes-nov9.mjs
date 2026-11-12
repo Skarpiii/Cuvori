@@ -9,7 +9,8 @@
 //    its count refused for good (a refund in the Stripe dashboard meanwhile), or failing for a moment (counted on the next
 //    run, never noted as refused).
 // Now the re-payment step goes on with the books as they are when the database refuses the count for good: the Order says
-// what can't be counted ("payouts not in the books", for a person), and nothing is paid again beyond what the Order still has.
+// what can't be counted ("payouts not in the books", for a person). What the chargeback pulled back is paid back in full, the
+// part the Order no longer has from Cuvori's own money, said on the Order (the owner's decision of 12 November).
 import { DB, DBQ, STRIPE, V56, users, hooks, req, call, mk, reset, fns, pay, signed, uuid, fsReset } from "./fn-harness.mjs";
 import { checkLines, reconcile, listed } from "./plan2-ledger.mjs";
 import fs from "node:fs";
@@ -154,10 +155,13 @@ for (const [name, mkX, plan] of PLANS) for (const outcome of ["won", "lost"]) {
     const w2 = await stripeSends(c, ch, outcome, 4000);
     for (let i = 0; i < 3; i++) { later(60); await hourly(); }
     hooks.stripe = null;
-    const pending = noteOf(c, /^chargeback won; re-payment/), told = noteOf(c, /not in the books/);
+    const pending = noteOf(c, /^chargeback won; re-payment/), told = noteOf(c, /not in the books/), covered = noteOf(c, /^re-payment covered by Cuvori/);
     const madeOut = freelancerGets(plan, 5000) + freelancerGets(plan, 1000);
-    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || row(c).chargeback_status !== outcome || pending.length || !told.length || repays(c).length || sent(c) > madeOut,
-      `W2 [${name}] parts 50.00 + 10.00 paid out (answers lost), 60.00 refunded in the dashboard; 40.00 charged back, only part 2's payout can be pulled back; decided ${outcome}: notices ${w1.join("/")}, ${w2.join("/")}; ${show(c)}; chargeback ${row(c).chargeback_status}; paid again ${repays(c).length}; notes: ${JSON.stringify(notes(c).map(n => n.slice(0, 45)))} (must be: every notice answered 200 in the end, ${outcome}, nothing paid again (the money went out twice already), no re-payment waiting, the Order says what can't be counted)`);
+    const d = "dp_" + ch.id, pulled = STRIPE.reversals.filter(r => r.metadata && r.metadata.reason === d).reduce((a, r) => a + r.amount, 0);
+    const paidBack = repays(c).reduce((a, t) => a + t.amount, 0);
+    const okBack = outcome === "won" ? pulled > 0 && paidBack === pulled && repays(c).length === 1 && covered.length === 1 : !repays(c).length && !covered.length;
+    vuln(w1[w1.length - 1] !== 200 || w2[w2.length - 1] !== 200 || row(c).chargeback_status !== outcome || pending.length || !told.length || !okBack || sent(c) > madeOut,
+      `W2 [${name}] parts 50.00 + 10.00 paid out (answers lost), 60.00 refunded in the dashboard; 40.00 charged back, only part 2's payout can be pulled back; decided ${outcome}: notices ${w1.join("/")}, ${w2.join("/")}; ${show(c)}; chargeback ${row(c).chargeback_status}; pulled back ${pulled}, paid back ${paidBack} in ${repays(c).length} payout(s); notes: ${JSON.stringify(notes(c).map(n => n.slice(0, 45)))} (must be: every notice answered 200 in the end, ${outcome}, ${outcome === "won" ? "what was pulled back paid back once, Cuvori's part said" : "nothing paid again"}, no re-payment waiting, the Order says what can't be counted)`);
   });
 }
 
