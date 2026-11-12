@@ -1909,9 +1909,15 @@ export async function releaseToEditor(c, editorCents, milestoneId = null, purpos
   const p2 = isPlan2(c);
   // a transfer for the same milestone / the same settlement attempt is never made twice. Whole-order releases carry
   // the attempt (the decision's timestamp): a later, different decision on the same Order may transfer again.
-  const attemptTag = p2 && typeof opts.attempt === "string" ? opts.attempt : milestoneId || purpose !== "release" ? "" : String(c.resolved_at || "");
+  // A re-payment after a won chargeback made after an earlier one for the same chargeback (the Order had too little for all
+  // of it then, and has the money now) is a payout of its own: named by what was paid again before it (repaySeq), so it is
+  // never taken for the earlier one, and a retry of it finds it (check of 11 November: the earlier one was found, "exists with
+  // a different amount", and the rest was never paid; or, the same amount, it was counted as paid with nothing at Stripe).
+  // The first one stays as it always was.
+  const nextRepay = purpose.startsWith("retransfer_") && Number.isInteger(opts.repaySeq) && opts.repaySeq > 0 ? `r${opts.repaySeq}` : null;
+  const attemptTag = nextRepay || (p2 && typeof opts.attempt === "string" ? opts.attempt : milestoneId || purpose !== "release" ? "" : String(c.resolved_at || ""));
   const existing = await transfersOf(c);
-  const thisPayout = (t) => (t.metadata.milestone_id || "") === (milestoneId || "") && (t.metadata.purpose || "release") === purpose && (!t.metadata.attempt || t.metadata.attempt === attemptTag);
+  const thisPayout = (t) => (t.metadata.milestone_id || "") === (milestoneId || "") && (t.metadata.purpose || "release") === purpose && (nextRepay ? (t.metadata.attempt || "") === nextRepay : (!t.metadata.attempt || t.metadata.attempt === attemptTag));
   const same = (t) => !t.reversed && thisPayout(t);
   // a payout of this that a chargeback pulled back (in part or in full) was made: it is counted by the step that asks for it
   // (the settlement, the part's own step), never made again (check of 7 November). Asked for all the same, nothing is paid.
@@ -2691,7 +2697,7 @@ async function owedRepays(c, ts, rows) {
   for (const d of await wonDisputes(c)) {
     const pulled = rows.filter(r => r.kind === "reversal" && r.note === `chargeback ${d}`).reduce((a, r) => a + r.amount_cents, 0);
     const repaid = ts.filter(t => repayOf(t) === d).reduce((a, t) => a + t.amount, 0);
-    if (pulled - repaid > 0) out.push({ id: d, owed: pulled - repaid });
+    if (pulled - repaid > 0) out.push({ id: d, owed: pulled - repaid, repaid });
   }
   return out;
 }
@@ -2769,7 +2775,7 @@ async function settleLockedV2(c, actor, ev) {
         const x = Math.min(d.owed, left);
         if (x <= 0) break;
         const out = {};
-        await releaseToEditor(c, x, null, `retransfer_${d.id}`, { attempt, out });
+        await releaseToEditor(c, x, null, `retransfer_${d.id}`, { attempt, out, repaySeq: d.repaid });
         rows = await linesOf(c);
         for (const t of out.transfers || [out.transfer]) { c = await bookTransfer(c, t, rows, { note: ev }); if (!ts.some(y => y.id === t.id)) ts.push(t); }
         left -= x;
@@ -3860,7 +3866,15 @@ async function coverChargebackLocked(id, disputeId, centsHint, pullBack = true) 
         const paidOut = holding ? Math.max(cents - Math.max(heldReal - already, 0), 0) : cents;
         const received = paidOut - pricingCommission(paidOut, c.commission_bps);
         need = Math.min(st.paid, Math.max(received - already, 0));
-      } else need = Math.min(st.net, holding ? Math.max(cents - heldReal, 0) : Math.max(cents - already, 0));
+      } else {
+        // Today's prices the same way: what the Order held before this chargeback's pull-backs came back into it covers the
+        // payment first, and what this chargeback pulled back already is never pulled back again (check of 11 November: on an
+        // Order where money went out twice, what it held came out below nothing, and every notice, hourly run and the bank's
+        // decision worked out the whole pull-back again: a 50.00 chargeback took 90.00 from the freelancer once Stripe had
+        // forgotten the earlier request). The same amounts as before whenever the Order held money.
+        const paidOut = holding ? Math.max(cents - Math.max(heldReal - already, 0), 0) : cents;
+        need = Math.min(st.net, Math.max(paidOut - already, 0));
+      }
     }
     let err = null;
     if (need > 0) {
@@ -3889,7 +3903,15 @@ async function syncReversals(c, disputeId) {
   let row = c;
   if (delta > 0) {
     const ids = ts.filter(t => nz(t.amount_reversed) > 0).map(t => t.id).join(",").slice(0, 200);
-    row = (await db.update("contracts", `id=eq.${c.id}`, { stripe_reversal_id: ids, released_cents: net }))[0] || c;
+    // When the database refuses that total for good (Stripe made payouts the books don't show and can't take: paid out and
+    // given back would be more than was paid in, after a refund in the Stripe dashboard, say), the total stays as it is, the
+    // Order's note says what to check, and the pull-back is written down all the same: what is still to be pulled back and
+    // what is paid again when the bank decides for Cuvori are worked out from it (check of 11 November: that refusal failed
+    // every notice of the chargeback, which stayed open for good). Anything else fails as before (Stripe sends it again).
+    let refused = null;
+    const upd = await db.update("contracts", `id=eq.${c.id}`, { stripe_reversal_id: ids, released_cents: net }).catch(e => { if (!refusedForGood(e)) throw e; refused = e; return null; });
+    if (refused) { await mustNoteUncounted(c, refused, `at chargeback ${disputeId}`); row = (await db.contract(c.id)) || c; }
+    else row = (upd && upd[0]) || c;
     await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind: "reversal", amount_cents: delta, provider_ref: ids, note: `chargeback ${disputeId}` });
   }
   // The paid-out total counts every payout at Stripe now (it follows Stripe's net of all of them), so each one the books don't
@@ -3897,8 +3919,9 @@ async function syncReversals(c, disputeId) {
   // and a part's payout marks the part paid out: nothing is ever paid for it again (check of 7 November: a part's payout
   // pulled back before it was counted was paid a second time, and the books of a whole Order charged back in full never
   // showed its payout). Also on a later run (a notice sent again) when a line could not be saved: one that can't be saved
-  // fails this step, so Stripe sends its notice again.
-  if (atStripe > 0 && delta >= 0 && (delta > 0 || nz(row.released_cents) === net)) {
+  // fails this step, so Stripe sends its notice again. Only while the total follows Stripe: one the database refused (above)
+  // leaves the payouts it can't take out of the books, as the note says.
+  if (atStripe > 0 && delta >= 0 && nz(row.released_cents) === net) {
     const rows = (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.release&select=kind,provider_ref`)) || [];
     let failed = 0;
     for (const t of ts.filter(t => !hasLine(rows, "release", t.id) && t.amount > 0)) {
@@ -4280,8 +4303,8 @@ export async function countFirst(c) {
   } catch (e) {
     console.error("counting the payouts before a cancel or a decision", c.id, e && e.message);
     if (e && e.expose) throw e;                                             // another step is moving this Order's money ("busy")
-    // refused for good (the books can't take a payout Stripe made): never "try again"; the Order's note says what to check
-    // (check of 8 November, re-check)
+    // refused for good (the books can't take a payout Stripe made): "under review", the Order's note saying what to check
+    // (check of 8 November, re-check); "try again in a minute" only while that note can't be saved
     if (refusedForGood(e)) {
       // (the note it points to, or "try again in a minute": never "see the Order's note" with no note there)
       if (!(await noteUncounted(c, e, "before a cancel or a decision"))) throw fail(PROVIDER_DOWN, 503, "provider_down");
@@ -4304,18 +4327,35 @@ export async function payoutsNotCounted(c) {
   const ahead = Math.max(nz(c.released_cents) - (sumKind(rows, "release") - sumKind(rows, "reversal")), 0);
   return Math.max(missing - ahead, 0);
 }
-// Said once per chargeback and amount (its key), so a note marked as handled never comes back; one that can't be saved
-// fails the step (Stripe sends its notice again, the hourly run tries again: the re-payment waiting note stays meanwhile).
+// What a won chargeback pulled back from the freelancer and is not paid back to them yet because the Order has nothing left
+// for it (money went out twice: a refund in the Stripe dashboard after a payout, say), said on the Order for a person. It
+// follows Stripe: written with the amount still not paid back, rewritten when that changes, and gone once Cuvori has paid it
+// (the hourly run looks at every Order with this note and pays the rest itself once the Order has the money). Never "pay it
+// by hand" (check of 11 November: a person following that, and Cuvori paying it once the money was back, paid the freelancer
+// twice). One that can't be saved fails the step (Stripe sends its notice again, the hourly run tries again).
 export const REPAY_SHORT_HEAD = "freelancer not paid back after chargeback ";
 async function noteRepayShort(c, short) {
-  if (!(short > 0)) return;
-  const key = `repay_short:${c.id}:${c.chargeback_id}:${short}`;
-  if (await db.one("money_keys", `scope=eq.${q(key)}&select=scope`)) return;
+  const mine = (x) => x.startsWith(`${REPAY_SHORT_HEAD}${c.chargeback_id}:`);
+  if (!(short > 0)) {
+    if (hasNote(c.money_error, mine)) await putNote(c.id, n => dropNote(n, mine)).catch(() => null);
+    return;
+  }
   const amount = `${(short / 100).toFixed(2)} ${String(c.currency || "EUR").toUpperCase()}`;
-  const text = `${REPAY_SHORT_HEAD}${c.chargeback_id}: ${amount} pulled back from them for it was not paid to them again, as the Order has nothing left for it (money went out twice?). Check its payouts and refunds in the Stripe dashboard and decide whether to pay it to them by hand`.slice(0, 300);
-  const row = await putNote(c.id, n => addNote(n, text, x => x.startsWith(`${REPAY_SHORT_HEAD}${c.chargeback_id}:`))).catch(() => null);
+  const text = `${REPAY_SHORT_HEAD}${c.chargeback_id}: ${amount} pulled back from them is not paid back yet: the Order has nothing left for it (money went out twice?). Cuvori pays it itself once the Order has the money, not by hand. Check its payouts and refunds in Stripe`.slice(0, 300);
+  if (hasNote(c.money_error, x => x === text)) return;
+  const row = await putNote(c.id, n => addNote(n, text, mine)).catch(() => null);
   if (!(row && hasNote(row.money_error, x => x === text))) { const e = new Error(`the note about the freelancer not paid back on order ${c.id} could not be saved`); e.outcomeUnknown = true; throw e; }
-  await db.insert("money_keys", { scope: key, key: "noted" }).catch(() => {});
+}
+// What Stripe says a chargeback pulled back from the freelancer (Cuvori's pull-backs name their chargeback): at today's
+// prices the books' lines also name it for a pull-back made by hand in the Stripe dashboard meanwhile (check of 11 November:
+// the note then said 10.00 was not paid back where Cuvori had paid back more than the chargeback took)
+async function pulledFor(ts, disputeId) {
+  let sum = 0;
+  for (const t of ts.filter(t => nz(t.amount_reversed) > 0)) {
+    const rs = ((await stripe("GET", `/transfers/${t.id}/reversals`, { limit: 100 })).data || []);
+    sum += rs.filter(r => r && r.metadata && r.metadata.reason === disputeId).reduce((a, r) => a + nz(r.amount), 0);
+  }
+  return sum;
 }
 async function repayWonLocked(c0) {
   let c = (await db.contract(c0.id)) || c0;
@@ -4353,10 +4393,12 @@ async function repayWonLocked(c0) {
   const repaid = ts.filter(t => t.metadata.purpose === `retransfer_${c.chargeback_id}`).reduce((a, t) => a + t.amount, 0);   // (at its full amount: owedRepays)
   const stillIn = Math.max(nz(c.funded_cents) - nz(c.refunded_cents) - netOut(ts), 0);
   const back = Math.min(pulled - repaid, stillIn);
-  // What this chargeback pulled back that can't be paid again (the Order has nothing left for it: money went out twice, a
-  // refund in the Stripe dashboard after a payout, say) is said on the Order for a person, with the amount, before the
-  // re-payment waiting note goes (re-check of 9 November: it went with nothing saying the freelancer was not paid back)
-  await noteRepayShort(c, Math.max(pulled - repaid, 0) - Math.max(back, 0));
+  // What this chargeback pulled back that can't be paid again now (the Order has nothing left for it) is said on the Order,
+  // with the amount, before the re-payment waiting note goes (re-check of 9 November: it went with nothing saying the
+  // freelancer was not paid back); the note goes once it is paid (noteRepayShort). Only the chargeback's own pull-backs as
+  // Stripe names them (today's prices: the lines may hold a pull-back made by hand too)
+  const own = p2 ? pulled : Math.min(pulled, await pulledFor(ts, c.chargeback_id));
+  await noteRepayShort(c, Math.max(own - repaid, 0) - Math.max(back, 0));
   const repayMark = (n) => n.startsWith("chargeback won");
   if (back <= 0) { if (pendingRepay(c)) await putNote(c.id, n => dropNote(n, repayMark)); return counted; }
   // Paid right away, also while the Order still holds money for its other parts (check of 2 November). Waiting for "the
@@ -4367,7 +4409,7 @@ async function repayWonLocked(c0) {
   // the hourly run tries again.
   try {
     const out = {};
-    const t = await releaseToEditor(c, back, null, `retransfer_${c.chargeback_id}`, { out });
+    const t = await releaseToEditor(c, back, null, `retransfer_${c.chargeback_id}`, { out, repaySeq: repaid });
     const v0 = (await db.update("contracts", `id=eq.${c.id}`, { released_cents: nz(c.released_cents) + back }))[0];
     const v = (await putNote(c.id, n => dropNote(n, repayMark))) || v0;                  // paid again: the re-payment's note goes, any other stays
     // the line is what says the re-payment was made (what is still owed is worked out from it): checked, never left out in
