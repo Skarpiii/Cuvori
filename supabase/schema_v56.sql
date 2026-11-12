@@ -1528,15 +1528,20 @@ begin
   if cid is null then insert into public.conversations (user_a, user_b) values (a, b) returning id into cid; end if;
   insert into public.messages (conversation_id, sender, kind, body) values (cid, adm, 'text', left(coalesce(p_text, ''), 4000)) returning id into mid;
   update public.conversations set last_message_at = now() where id = cid;
-  -- v56: the words, into the admin log (long ones cut, as every value there); a job warning without them (called from
-  -- within the job "warn" action: admin_job_action calls this for nothing else). Only a line of the call stack that names
-  -- the function counts, never the text of a statement in it, and the pattern has no backslash, so it reads the same
-  -- whatever the session's standard_conforming_strings (re-check of 9 November: with that setting off, every admin message
-  -- and job warning failed)
+  -- v56: the words, into the admin log (long ones cut, as every value there); a job warning without them: called by the job
+  -- "warn" action itself (admin_job_action calls this for nothing else). Postgres's call stack then reads, line by line: this
+  -- function; the warn action's own statement ("SQL statement "SELECT public.admin_message_user(j.owner, ..."); and
+  -- admin_job_action(uuid,text,text), whose statement that is. Only those two lines, in those places, count: not the text of another
+  -- statement (also one over several lines), a function with a like name, one in another schema or one with other arguments
+  -- (check of 11 November); only someone who can create functions (the database owner) could make one look like it on
+  -- purpose. The patterns have no backslash, so they read the same whatever the session's standard_conforming_strings
+  -- (re-check of 9 November: with that setting off, every admin message and job warning failed).
   get diagnostics stack = pg_context;
   insert into public.admin_audit (actor, action, target_table, target_id, detail)
   values (adm, 'message_user', 'profiles', p_user::text, jsonb_build_object('to', p_user, 'message', mid, 'text',
-          case when stack ~ '(?n)^PL/pgSQL function (public[.])?admin_job_action[(]' then to_jsonb('a job warning (its reason is in the moderation log)'::text)
+          case when split_part(stack, chr(10), 2) ~ '^SQL statement "SELECT public[.]admin_message_user[(]j[.]owner, '
+                and split_part(stack, chr(10), 3) ~ '^PL/pgSQL function (public[.])?admin_job_action[(]uuid,text,text[)] line [0-9]+ at '
+               then to_jsonb('a job warning (its reason is in the moderation log)'::text)
                else public.admin_audit_cut(to_jsonb(left(coalesce(p_text, ''), 4000))) end));
   return 'ok';
 end $$;
