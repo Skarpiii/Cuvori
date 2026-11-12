@@ -1275,6 +1275,11 @@ export async function mirrorOutsideRefundV2(c, o) {
   let room = Math.max((thisFund ? thisFund.amount_cents : (nz(c.funded_cents) || centsOf(c) || 0))
     - rows.filter(r => r.kind === "refund" && listed.some(x => x.id === r.provider_ref)).reduce((a, r) => a + r.amount_cents, 0), 0);
   const countedAll = () => rows.filter(r => r.kind === "refund" || r.kind === "chargeback").reduce((a, r) => a + countedOf(r), 0) - failedBackOf(rows);
+  // A refund that leaves the Order holding nothing (it closes as refunded), or one during a payout or a decision under way:
+  // every payout Stripe made that the books don't show is counted first (countBeforeOutsideRefund), or nothing ever would
+  // be (check of 13 November). One that leaves money held is mirrored as before: the next step counts first.
+  const newCents = Math.min(outside.filter(r => !hasLine(rows, "refund", r.id)).reduce((a, r) => a + r.amount, 0), room);
+  if (newCents > 0 && (["releasing", "resolving"].includes(c.status) || newCents >= heldCents(c))) { c = await countBeforeOutsideRefund(c, o.payment_intent); rows = await linesOf(c); }
   let heldLeft = Math.max(heldCents(c) - Math.max(countedAll() - nz(c.refunded_cents), 0), 0);
   let part = 0, twice = 0;
   for (const r of outside) {
@@ -1289,7 +1294,13 @@ export async function mirrorOutsideRefundV2(c, o) {
   }
   const held = heldCents(c);
   const behind = Math.min(Math.max(countedAll() - nz(c.refunded_cents), 0), held);
-  if (part <= 0 && behind <= 0) return;
+  // what of this payment's refunds made in the dashboard went out twice, as their lines say, and what of it is not said yet
+  // (twiceToSay: also when an earlier try broke off after the lines were written)
+  const twiceAll = rows.filter(r => r.kind === "refund" && /^dashboard_refund/.test(String(r.note || "")) && listed.some(x => x.id === r.provider_ref)).reduce((a, r) => a + r.amount_cents - countedOf(r), 0);
+  twice = await twiceToSay(c, o.id, twiceAll);
+  if (part <= 0 && behind <= 0 && twice <= 0) return;
+  // said already (the Order's write landed, its answer lost before the key was saved): only the key now
+  if (part <= 0 && behind <= 0 && twiceOnNote(c.money_error, o.payment_intent, twice)) { await twiceSaid(c, o.id, twiceAll); return; }
   const cents = outside.reduce((a, r) => a + r.amount, 0);
   const sameCounter = eqOrNull("refunded_cents", c.refunded_cents);
   const onlyPayment = funds.length <= 1 && (c.stripe_payment_intent === o.payment_intent || !!thisFund);
@@ -1297,15 +1308,16 @@ export async function mirrorOutsideRefundV2(c, o) {
     // the one payment behind this order is back with the client in full: the order is refunded, whatever was still held is gone
     // (the note from the note as it is when written: one another step saved meanwhile stays, updateNoted)
     const rowsU = await updateNoted(c, `id=eq.${c.id}&status=in.(${HOLDING.join(",")})&${sameCounter}`, { status: "refunded", closed_at: now, resolution: "refund", auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind },
-      (n) => twice > 0 ? addNote(stepsOver(n), `refund made outside Cuvori: ${(twice / 100).toFixed(2)} had already been paid to the freelancer — check by hand`) : stepsOver(n));
+      (n) => twice > 0 ? addNote(stepsOver(n), twiceRefundedNote(o.payment_intent, twice)) : stepsOver(n));
     const u = rowsU && rowsU[0] || null;
-    if (u) { await orderEvent(u, "refunded", { outside: true, amount_cents: o.amount_refunded }, null); return; }
+    if (u) { if (twice > 0) await twiceSaid(c, o.id, twiceAll); await orderEvent(u, "refunded", { outside: true, amount_cents: o.amount_refunded }, null); return; }
   }
   const why = `Refund of ${(cents / 100).toFixed(2)} ${String(o.currency || c.currency || "").toUpperCase()} made outside Cuvori on payment ${o.payment_intent}; the order holds ${(behind / 100).toFixed(2)} less than before${twice > 0 ? `; ${(twice / 100).toFixed(2)} of it had already been paid out — money went out twice` : ""}`;
   const note = (n) => addNote(n, why.slice(0, 300));
   const u = ((await updateNoted(c, `id=eq.${c.id}&status=in.(funded,delivered)&${sameCounter}`, { status: "disputed", dispute_reason: why.slice(0, 2000), disputed_at: now, dispute_by: c.client, auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind }, note)) || [])[0]
     || ((await updateNoted(c, `id=eq.${c.id}&${sameCounter}`, { refunded_cents: nz(c.refunded_cents) + behind }, note)) || [])[0];
   if (!u) throw new Error(`refund made outside Cuvori on ${o.payment_intent}: the Order changed while it was counted`);
+  if (twice > 0) await twiceSaid(c, o.id, twiceAll);
   await orderEvent(u, "disputed", { outside_refund: true, amount_cents: part || behind, note: "Refund made outside Cuvori — Cuvori checks this by hand" }, null);
   if (HOLDING.includes(u.status) && heldCents(u) === 0) {
     const v = await db.claim(c.id, HOLDING, { status: "refunded", closed_at: now, resolved_at: now, resolution: "refund", auto_release_at: null });
@@ -2386,7 +2398,32 @@ export async function decisionRecorded(c) {
 // Whatever was already released for milestones stays where it is; this settles the remainder.
 export async function settle(c0, actor, ev) {
   const unlock = await lockOrder(c0.id);
-  try { return await settleLocked(c0, actor, ev); } finally { await unlock(); }
+  try { return await settleLocked(c0, actor, ev); }
+  catch (e) { if (refusedForGood(e)) await refusedAtSettlement(c0, e).catch(x => console.error("note of a refused settlement", c0.id, x && x.message)); throw e; }
+  finally { await unlock(); }
+}
+// The database refused the settlement for good: Stripe made payouts for the Order that its books can't take (paid out and
+// given back would be more than was paid in: a refund made in the Stripe dashboard after a payout whose answer was lost).
+// Retrying never helps, so the stopped step's note never says "try again" or "Nothing was lost"; the Order's note
+// "payouts not in the books" says what to check (check of 13 November: the Order stayed "releasing" for good, the note
+// saying "The payment provider did not answer. Nothing was lost — please try again in a minute").
+async function refusedAtSettlement(c, e) {
+  await noteUncounted(c, e, "at the payout or decision under way");
+  const head = stepHead("settlement");
+  const text = `${head}Stripe made payouts for this Order that its books can't take: nothing more moves until it is checked by hand (see the note "payouts not in the books")`;
+  await putNote(c.id, n => addNote(n, text, p => p.startsWith(head) || oldStepNote(p)));
+}
+// What of the refunds a settlement is counting now Stripe has already told Cuvori failed: their "refund_failed" line is
+// written, and nothing of them was counted back then, as they were not counted yet (the refund's answer was lost, and it
+// failed before the step that made it was finished). That much never reached the client: the settlement counts it as given
+// back and come back at once, as when a refund fails after it was counted, so the Order holds it again and its note (refund
+// it again in the Stripe dashboard) is right (check of 13 November: the Order counted it as given back, and the refund made
+// again, as the note said, was then taken for money that went out twice).
+async function failedBefore(c, ids, cents) {
+  const list = String(ids || "").split(",").filter(isStripeId);
+  if (!list.length || !(cents > 0)) return 0;
+  const rows = (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.refund_failed&provider_ref=in.(${list.join(",")})&select=amount_cents`)) || [];
+  return Math.min(rows.reduce((a, r) => a + nz(r.amount_cents), 0), cents);
 }
 // The Order's paid-out total follows Stripe's own record of its payouts, once every payout has been counted in this pass
 // (check of 6 November, second round). Each payout the books didn't show is counted by the gap between that total and the
@@ -2535,9 +2572,10 @@ async function countOwnP1(c, ts0, rows, note) {
 // then a chargeback whose pull-back Stripe refused, decided for the client: the freelancer kept the money, the books never
 // showed the payout, and the Order said nothing of what Cuvori lost). A payout paid in pieces that is not whole yet is left to
 // its own step.
-async function countAllAtChargeback(c, disputeId) {
+// (also before a refund made in the Stripe dashboard is mirrored: countBeforeOutsideRefund)
+const countAllAtChargeback = (c, disputeId) => countAllPayouts(c, `payout counted at chargeback ${disputeId}`);
+async function countAllPayouts(c, ev) {
   if (!c || c.payment_mode !== "escrow" || (c.paid_mode && c.paid_mode !== STRIPE_MODE)) return c;
-  const ev = `payout counted at chargeback ${disputeId}`;
   const ts = await transfersOf(c);
   const todo = ts.filter(t => !isPart(t) || payoutWhole(ts, t));
   if (!todo.length) return c;
@@ -2575,6 +2613,43 @@ async function noteUncounted(c, e, where) {
 async function mustNoteUncounted(c, e, where) {
   if (!(await noteUncounted(c, e, where))) { const x = new Error(`the note about payouts not in the books of order ${c.id} could not be saved`); x.outcomeUnknown = true; throw x; }
 }
+// ---- a refund made in the Stripe dashboard: what both price plans' copies do first (stripe-webhook.mjs, mirrorOutsideRefundV2) ----
+// Every payout Stripe made for the Order that its books don't show is counted before the refund is mirrored, the one of a
+// payout or decision under way included (as at a chargeback): otherwise the refund was taken for money the Order still held.
+// A part's payout whose answer was lost, then the whole payment refunded in the dashboard: the Order closed as refunded
+// with nothing said, the freelancer's payout and the client's refund both gone; a whole Order's payout or a decision: the
+// Order stayed "releasing" or "resolving" for good (check of 13 November). What the database refuses for good (the books
+// can't take the payout) is said on the Order ("payouts not in the books") and the refund is mirrored with the books as they
+// are; anything else fails the notice, and Stripe sends it again.
+export async function countBeforeOutsideRefund(c, pi) {
+  try { return await countAllPayouts(c, `payout counted at a refund made outside Cuvori on payment ${pi}`); }
+  catch (e) {
+    console.error("counting the payouts at a refund made outside Cuvori", c.id, pi, e && e.message);
+    if (!refusedForGood(e)) throw e;
+    await mustNoteUncounted(c, e, `at a refund made outside Cuvori on payment ${pi}`);
+    return (await db.contract(c.id)) || c;
+  }
+}
+// What of a payment's refunds made in the dashboard had already been paid out to the freelancer (money that went out twice)
+// is said on the Order from its lines, not from what the notice found new: the lines are written first, so when the first
+// try broke off after them (the Order's write refused, or its answer lost) and Stripe sent the notice again, it was never
+// said (check of 13 November). A key per payment holds what the Order's note has said of it, written once the note is
+// saved: a notice sent again says only what was not said yet, and a note marked as handled does not come back with it.
+const twiceKey = (c, chargeId) => `outside_twice:${c.id}:${chargeId}`;
+export async function twiceToSay(c, chargeId, twiceAll) {
+  if (!(twiceAll > 0)) return 0;
+  const row = await db.one("money_keys", `scope=eq.${q(twiceKey(c, chargeId))}&select=key`);
+  const said = row && /^\d{1,12}$/.test(String(row.key)) ? Number(row.key) : 0;
+  return Math.max(twiceAll - said, 0);
+}
+export async function twiceSaid(c, chargeId, twiceAll) {
+  const scope = twiceKey(c, chargeId), key = String(twiceAll);
+  try { await db.insert("money_keys", { scope, key }); }
+  catch (e) { if (e.status !== 409) throw e; await db.update("money_keys", `scope=eq.${q(scope)}`, { key }); }
+}
+// the Order's note says it already (its write landed, the key's did not): the words of both notes below, naming the payment
+export const twiceOnNote = (note, pi, cents) => hasNote(note, n => n.includes(pi) && (n.includes(`; ${(cents / 100).toFixed(2)} of it had already been paid out`) || n.includes(`on payment ${pi}: ${(cents / 100).toFixed(2)} had already been paid`)));
+export const twiceRefundedNote = (pi, cents) => `refund made outside Cuvori on payment ${pi}: ${(cents / 100).toFixed(2)} had already been paid to the freelancer — check by hand`;
 async function settleLocked(c0, actor, ev) {
   // fresh row: the amounts were decided when the Order was claimed, and a milestone release that was already
   // running at that moment may have moved money since. Whatever is settled here never exceeds what is held now.
@@ -2616,16 +2691,17 @@ async function settleLocked(c0, actor, ev) {
     pendE = e2; pendR = r2;
     await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { split_editor_cents: (doneT ? editorCents : 0) + pendE, refund_cents: (doneR ? refundCents : 0) + pendR });
   }
-  const count = async (kind, cents, ref) => {
+  // (less: what of a refund Stripe already told Cuvori failed: failedBefore)
+  const count = async (kind, cents, ref, less = 0) => {
     const field = kind === "release" ? "released_cents" : "refunded_cents";
-    const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { [kind === "release" ? "stripe_transfer_id" : "stripe_refund_id"]: String(ref).slice(0, 200), [field]: nz(c[field]) + cents, funded_cents: nz(c.funded_cents) || centsOf(c) || 0 });
+    const rows = await db.update("contracts", `id=eq.${c.id}&status=eq.${c.status}`, { [kind === "release" ? "stripe_transfer_id" : "stripe_refund_id"]: String(ref).slice(0, 200), [field]: nz(c[field]) + cents - less, funded_cents: nz(c.funded_cents) || centsOf(c) || 0 });
     if (!rows || !rows[0]) throw new Error("order changed during settlement");
     c = rows[0];
     await db.insert("order_payments", { order_id: c.id, provider: "stripe", status: "succeeded", kind, amount_cents: cents, provider_ref: String(ref).slice(0, 200), note: ev });
   };
   try {
     if (pendE > 0) { if (!transferId) transferId = await releaseToEditor(c, pendE); await count("release", pendE, transferId); }
-    if (pendR > 0) { if (!refundId) refundId = await refundToClient(c, pendR); await count("refund", pendR, refundId); }
+    if (pendR > 0) { if (!refundId) refundId = await refundToClient(c, pendR); await count("refund", pendR, refundId, await failedBefore(c, refundId, pendR)); }
   } catch (e) {
     await stepStopped(c, "settlement", e);
     throw e;
@@ -2815,7 +2891,7 @@ async function settleLockedV2(c, actor, ev) {
     if (pendR > 0) {
       const out = {};
       const ids = await refundToClient(c, pendR, { out });
-      const upd = await db.update("contracts", `id=eq.${c.id}&status=eq.${q(c.status)}`, { stripe_refund_id: String(ids).slice(0, 200), refunded_cents: nz(c.refunded_cents) + pendR });
+      const upd = await db.update("contracts", `id=eq.${c.id}&status=eq.${q(c.status)}`, { stripe_refund_id: String(ids).slice(0, 200), refunded_cents: nz(c.refunded_cents) + pendR - await failedBefore(c, ids, pendR) });
       if (!upd || !upd[0]) throw new Error("order changed during settlement");
       c = upd[0];
       await refundLines(c, (out.refunds || []).filter(r => !hasLine(rows, "refund", r.id)), rows, ev);
