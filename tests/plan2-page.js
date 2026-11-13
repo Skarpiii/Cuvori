@@ -368,6 +368,24 @@ const say = (list) => list.length ? ' — ' + list.join('; ') : '';
       }
       await ctx.close();
     }
+    // 18. a cancel's line in the Order's history says what went back to the client (check of 16 November: it said €0, the
+    //     freelancer's share, on every cancel), and a payout's line still says what was released
+    for (const lang of RUN) for (const plan of [2, 1]) for (const role of ['client', 'freelancer']) {
+      const T = (k) => tx(lang, k);
+      const evs = [{ event: 'cancelled', data: { by: 'freelancer', refund_cents: 10000, note: '' }, created_at: '2026-10-31T10:00:00Z' },
+        { event: 'cancel_refund', data: { editor_cents: 0, refund_cents: 10000, decision: 'refund' }, created_at: '2026-10-31T10:01:00Z' }];
+      const { ctx, p, errs } = await orderPage(b, { lang, role, events: evs, order: { status: 'refunded', refunded_cents: 10000, resolution: 'refund', pricing_version: plan, commission_bps: plan === 2 ? 500 : 0, auto_days: plan === 2 ? 14 : 7 } });
+      const h = await history(p); await ctx.close();
+      const want = fill(T('o_ev_cancel_refund'), { amt: '€100' }), wrong = fill(T('o_ev_cancel_refund'), { amt: '€0' });
+      ok(h.includes(want) && !h.includes(wrong) && !errs.length, `${lang}: plan ${plan} cancelled Order, as the ${role}: its history says "${want}"${h.includes(wrong) ? ` (it says "${wrong}")` : h.includes(want) ? '' : ` (not found in "${h.replace(/\s+/g, ' ').slice(0, 200)}")`}${errs.length ? '; page errors ' + errs.join(' | ') : ''}`);
+    }
+    for (const lang of RUN) {
+      const T = (k) => tx(lang, k);
+      const { ctx, p, errs } = await orderPage(b, { lang, role: 'client', events: [{ event: 'released', data: { editor_cents: 10000, refund_cents: 0 }, created_at: '2026-10-31T10:00:00Z' }], order: { status: 'completed', released_cents: 10000, commission_cents: 500 } });
+      const h = await history(p); await ctx.close();
+      const want = fill(T('o_ev_released'), { amt: '€100' });
+      ok(h.includes(want) && !errs.length, `${lang}: a completed Order's history still says "${want}"${h.includes(want) ? '' : ` (not found in "${h.replace(/\s+/g, ' ').slice(0, 200)}")`}`);
+    }
     // 17. BASE: every plan 1 screen is exactly the one an older page shows (the same Order, the same test backend)
     if (process.env.BASE) {
       const base = 'file://' + path.resolve(process.env.BASE), diffs = [];
