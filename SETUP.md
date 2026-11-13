@@ -74,6 +74,7 @@ Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's 
    - `STRIPE_SECRET_KEY` = sk_…
    - `STRIPE_WEBHOOK_SECRET` = whsec_…
    - `STRIPE_CONNECT_WEBHOOK_SECRET` = the second destination's whsec_… (step 4, **Connected accounts**)
+     Keep each secret in its own setting. If the two are swapped, Stripe shows every notice about Cuvori's own account (payments, chargebacks, refunds) as failed, and its answer says "the two webhook secrets are swapped in Netlify": swap them back and Stripe sends those notices again.
    - `SITE_URL` = `https://cuvori.io` (where Stripe sends people back after paying or setting up payouts)
    - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key (or `SUPABASE_SECRET_KEY` = Supabase's newer secret key, `sb_secret_…`; if both are set, the newer one is used). Copy it in one piece: a key with a space, a line break or an invisible character in it is never sent — every button then says payments are paused (in the person's language), and Admin panel → Payment costs says **ON, but paused** and names the setting, as it does for the Stripe key.
    - optional: `ALLOWED_ORIGINS` (more page addresses allowed to call the functions, separated by commas; the site address, https://cuvori.io and https://www.cuvori.io are always allowed, so this setting can never lock the page out)
@@ -414,7 +415,7 @@ Below, Supabase must show one row: **audio-editor | Garso editorius**. If it sho
 
 **What it is. Stripe can keep each client payment "held apart" on Cuvori's Stripe account, tied to that one payment, until it is paid out to the freelancer or given back. Money held apart is not in Cuvori's balance: Cuvori's own payouts, Stripe's fees and refunds or chargebacks of other Orders cannot use it. Stripe calls it "funds segregation" (allocated funds). It is a private preview: Stripe must invite Cuvori's account first. Nothing in this update asks Stripe for it, and Cuvori does not have it.
 
-**What is ready, and switched off.** The payment code has it behind one Netlify setting, `STRIPE_FUNDS_SEGREGATION`. It does nothing unless the setting is exactly `on`. When it is on, for Orders under the new prices only:
+**What is ready, and switched off.** The payment code has it behind one Netlify setting, `STRIPE_FUNDS_SEGREGATION`. It does nothing unless the setting is `on` (capital letters, or a space or line break before or after it, make no difference; anything else means off). When it is on, for Orders under the new prices only:
 
 - the payment page asks Stripe to hold the payment apart, and takes only Visa, Mastercard and American Express cards (Stripe holds apart only these and Discover; the page can block Diners, JCB, UnionPay and Elo only together with Discover);
 - every payout is linked to the payment it comes from (an Order with a top-up is paid in two parts, one per payment), and Stripe moves the 5% to Cuvori's balance with each payout;
