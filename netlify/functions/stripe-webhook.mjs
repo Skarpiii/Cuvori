@@ -3,8 +3,7 @@
 //   charge.refunded, charge.dispute.created, charge.dispute.funds_withdrawn, charge.dispute.closed, charge.refund.updated
 //   (refund.updated, refund.failed on newer API versions). Connect endpoint
 //   (separate secret): account.updated.
-import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, heldCents, HOLDING, centsOf, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET, addNote, stepsOver, isPlan2, mirrorOutsideRefundV2, recordFailedRefund, failedBackOf, failedRefundsFirst, updateNoted, countBeforeOutsideRefund, twiceToSay, twiceSaid, twiceOnNote, twiceRefundedNote } from "../lib/cuvori.mjs";
-const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+import { verifyWebhook, db, json, bad, stripe, isAcct, WEBHOOK_SECRET, applyPaidSession, contractByPi, onDisputeCreated, onDisputeClosed, lockOrder, acctCols, accountReady, CONNECT_WEBHOOK_SECRET, isPlan2, mirrorOutsideRefundV2, recordFailedRefund, mirrorOutsideRefund } from "../lib/cuvori.mjs";
 // the events Cuvori acts on (the first six from Cuvori's own Stripe account, account.updated from the freelancers' accounts)
 // (a refund that fails at Stripe after it was recorded: "charge.refund.updated" on the API version Cuvori uses, and the newer
 // "refund.updated" / "refund.failed")
@@ -75,94 +74,3 @@ export default async (req) => {
   }
   return json(200, { received: true });
 };
-
-// A refund made in the Stripe dashboard, mirrored into the books (called under the order lock, with a fresh row).
-async function mirrorOutsideRefund(c, o) {
-  const list = await stripe("GET", "/refunds", { payment_intent: o.payment_intent, limit: 100 });
-  // Stripe's list is what counts. Only when it lists no refund at all is the event trusted; refunds it lists as failed or
-  // cancelled are nothing to mirror (check of 7 November: the notice of Cuvori's own card-fee refund, delivered after that
-  // refund had failed, was counted as a refund made in the dashboard, and the Order went into a dispute over 1.86)
-  const all = (list.data || []).filter(r => r && r.id);
-  // a refund Stripe lists as failed whose "failed" notice Cuvori has not handled yet is handled first (check of 8 November:
-  // made again before that notice, the refund was counted twice until it came; on a database without v56 for good)
-  c = await failedRefundsFirst(c, all, o.payment_intent);
-  const listed = all.filter(r => r.status !== "failed" && r.status !== "canceled");
-  const outside = all.length ? listed.filter(r => !(r.metadata && (r.metadata.contract_id || r.metadata.reason))) : [{ id: o.id, amount: o.amount_refunded }];   // no list: trust the event
-  const cents = Math.min(outside.reduce((a, r) => a + r.amount, 0), o.amount_refunded);
-  if (cents <= 0) return;
-  const funds = (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.fund&status=eq.succeeded&select=provider_ref,amount_cents`)) || [];
-  const thisFund = funds.find(f => f.provider_ref === o.payment_intent);
-  const orderMoney = Math.min(cents, thisFund ? thisFund.amount_cents : (nz(c.funded_cents) || centsOf(c) || cents));   // the Order money in it (the rest was the processing fee)
-  // what earlier events for this payment already put in the books: their lines (rows from before this version carry the
-  // charge id in provider_ref). The lines are written FIRST and are what says a refund is in the books: when the counter
-  // was raised first, a lost answer or a line that failed to save made the next event for the payment count the same
-  // refund again, and the client's later refund came up short by that much (check of 1 November).
-  const DASH_NOTES = "note=in.(dashboard_refund,dashboard_refund_paid_out)";
-  const mirroredRows = [...((await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.refund&${DASH_NOTES}&charge_ref=eq.${encodeURIComponent(o.id)}&select=kind,amount_cents,provider_ref,note`)) || []),
-                        ...((await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.refund&note=eq.dashboard_refund&charge_ref=is.null&provider_ref=eq.${encodeURIComponent(o.id)}&select=kind,amount_cents,provider_ref,note`)) || [])];
-  // a refund among them that failed at Stripe afterwards was taken off the books again (its refund_failed line): it is no
-  // longer in the books, so the refund made again in its place is new (check of 7 November: following the Order's note,
-  // the admin refunded 40.00 again in the dashboard; it was taken for the failed one, never counted, and the freelancer was
-  // then paid the client's 40.00 as well). Only one taken off: on a database without v56 it stays counted (no such line),
-  // and the refund made again in its place is that same money (check of 8 November)
-  const failedRows = (await db.select("order_payments", `order_id=eq.${c.id}&kind=eq.refund_failed&status=eq.succeeded&select=kind,amount_cents,provider_ref`)) || [];
-  const mirrored = Math.max(mirroredRows.reduce((a, r) => a + r.amount_cents, 0) - failedBackOf([...mirroredRows.map(r => ({ ...r, note: null })), ...failedRows]), 0);
-  const part = Math.max(orderMoney - mirrored, 0);                                     // new since the last event for this payment
-  // A refund that leaves the Order holding nothing (it closes as refunded), or one during a payout or a decision under way:
-  // every payout Stripe made that the books don't show is counted first, the one under way included, so what of this refund
-  // had already been paid out is seen (countBeforeOutsideRefund; check of 13 November: the Order closed with nothing said,
-  // or stayed "releasing" for good). One that leaves money held is mirrored as before: the next step counts first.
-  if (part > 0 && (["releasing", "resolving"].includes(c.status) || part >= heldCents(c))) c = await countBeforeOutsideRefund(c, o.payment_intent);
-  const now = new Date().toISOString(), refs = outside.map(r => r.id).join(",").slice(0, 200), held = heldCents(c);
-  const bump = Math.min(part, held);                                                   // the counters never claim more than was held
-  const twiceNew = part - bump;                                                        // already paid to the freelancer as well: money went out twice
-  if (part > 0) {
-    // 1. the lines: the part that was still held, and the part already paid out (its own line: never counted as held money).
-    //    A line that can't be saved fails this event, so Stripe sends it again and nothing is counted on a guess.
-    const base = { order_id: c.id, kind: "refund", provider: "stripe", provider_ref: refs, charge_ref: o.id, status: "succeeded" };
-    if (bump > 0) await db.insert("order_payments", { ...base, amount_cents: bump, note: "dashboard_refund" });
-    if (twiceNew > 0) await db.insert("order_payments", { ...base, amount_cents: twiceNew, note: "dashboard_refund_paid_out" });
-  }
-  // what of this payment's refunds went out twice, as its lines say, and what of it the Order's note has not said yet (also
-  // when an earlier try broke off after the lines were written: twiceToSay)
-  const twiceAll = mirroredRows.filter(r => r.note === "dashboard_refund_paid_out").reduce((a, r) => a + r.amount_cents, 0) + (part > 0 ? twiceNew : 0);
-  const twice = await twiceToSay(c, o.id, twiceAll);
-  // 2. the counter follows the lines: what they show given back that the Order doesn't count yet (this refund, or one an
-  //    earlier event wrote down and broke off before counting). Never more than is held.
-  // (a refund that failed at Stripe afterwards came off the total again: its refund_failed line takes it off here too)
-  const back = (await db.select("order_payments", `order_id=eq.${c.id}&status=eq.succeeded&kind=in.(refund,chargeback,refund_failed)&select=kind,amount_cents,provider_ref,note`)) || [];
-  // (a failed refund comes off only what was counted of it: a part of it already paid out twice, "dashboard_refund_paid_out",
-  // never was; check of 7 November, re-check)
-  const counts = back.filter(r => r.note !== "dashboard_refund_paid_out");
-  const behind = Math.min(Math.max(counts.filter(r => r.kind !== "refund_failed").reduce((a, r) => a + r.amount_cents, 0) - failedBackOf(counts) - nz(c.refunded_cents), 0), held);
-  if (part <= 0 && behind <= 0 && twice <= 0) return;
-  // said already (the Order's write landed, its answer lost before the key was saved): only the key now
-  if (part <= 0 && behind <= 0 && twiceOnNote(c.money_error, o.payment_intent, twice)) { await twiceSaid(c, o.id, twiceAll); return; }
-  // the counter moves only from the value read here (under the Order's lock): a second try never adds it twice
-  const sameCounter = c.refunded_cents == null ? "refunded_cents=is.null" : `refunded_cents=eq.${c.refunded_cents}`;
-  const onlyPayment = funds.length <= 1 && (c.stripe_payment_intent === o.payment_intent || !!thisFund);
-  if (onlyPayment && o.refunded) {
-    // the one payment behind this order is back with the client in full: the order is refunded, whatever was still held is gone
-    // the Order's money steps are over; money paid out twice is said for the admin, and any other note stays (also one another
-    // step saved meanwhile: the note is worked out from the note as it is when written, updateNoted)
-    const rows = await updateNoted(c, `id=eq.${c.id}&status=in.(${HOLDING.join(",")})&${sameCounter}`, { status: "refunded", closed_at: now, resolution: "refund", auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind },
-      (n) => twice > 0 ? addNote(stepsOver(n), twiceRefundedNote(o.payment_intent, twice)) : stepsOver(n));
-    const u = rows && rows[0] || null;
-    if (u) { if (twice > 0) await twiceSaid(c, o.id, twiceAll); await orderEvent(u, "refunded", { outside: true, amount_cents: o.amount_refunded }, null); return; }
-  }
-  // part of a payment, one payment of several (a top-up), or an order no longer holding: the order now has less
-  // than it shows, or money went out twice. A person decides; the books take the loss now.
-  const why = `Refund of ${(cents / 100).toFixed(2)} ${String(o.currency || c.currency || "").toUpperCase()} made outside Cuvori on payment ${o.payment_intent}; the order holds ${(behind / 100).toFixed(2)} less than before${twice > 0 ? `; ${(twice / 100).toFixed(2)} of it had already been paid out — money went out twice` : ""}`;
-  const note = (n) => addNote(n, why.slice(0, 300));                                   // after the notes already there, never in their place
-  let u = ((await updateNoted(c, `id=eq.${c.id}&status=in.(funded,delivered)&${sameCounter}`, { status: "disputed", dispute_reason: why.slice(0, 2000), disputed_at: now, dispute_by: c.client, auto_release_at: null, refunded_cents: nz(c.refunded_cents) + behind }, note)) || [])[0]
-    || ((await updateNoted(c, `id=eq.${c.id}&${sameCounter}`, { refunded_cents: nz(c.refunded_cents) + behind }, note)) || [])[0];
-  // the counter moved under someone else's hands (it can't under the lock): this event fails, and Stripe sends it again
-  if (!u) throw new Error(`refund made outside Cuvori on ${o.payment_intent}: the Order changed while it was counted`);
-  if (twice > 0) await twiceSaid(c, o.id, twiceAll);                                   // said: a notice sent again says it no more
-  await orderEvent(u, "disputed", { outside_refund: true, amount_cents: part || behind, note: "Refund made outside Cuvori — Cuvori checks this by hand" }, null);
-  // nothing held any more (every payment went back from the dashboard): the order is refunded, not stuck in a dispute nobody can decide
-  if (u && HOLDING.includes(u.status) && heldCents(u) === 0) {
-    const v = await db.claim(c.id, HOLDING, { status: "refunded", closed_at: now, resolved_at: now, resolution: "refund", auto_release_at: null });
-    if (v) await orderEvent(v, "refunded", { outside: true, amount_cents: nz(v.refunded_cents) }, null);
-  }
-}

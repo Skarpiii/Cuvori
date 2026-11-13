@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart } from "../lib/cuvori.mjs";
+import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart, outsideRefundsCounted } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -106,6 +106,9 @@ export default async () => {
       const cents = heldCents(c);
       let row = c;
       if (c.status === "delivered") {
+        // a refund made in the Stripe dashboard that the Order does not count yet is counted first (its notice did not get
+        // through): the Order goes into a dispute as when its notice comes, and is not paid out (check of 15 November)
+        if ((await outsideRefundsCounted(c)).status !== "delivered") { skipped.push({ id: c.id, why: "a refund made in the Stripe dashboard was counted first; the Order is in a dispute" }); continue; }
         if (!cents) throw new Error("amount missing");
         if (await isBanned(c.editor)) { failed.push({ id: c.id, why: "freelancer banned" }); continue; }
         const acct = await orderPayoutAccount(c);
