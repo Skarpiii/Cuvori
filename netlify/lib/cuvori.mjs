@@ -307,13 +307,15 @@ export const STRIPE_VERSION = "2024-06-20";
 // exactly as before, and every other request keeps STRIPE_VERSION: only the requests about money held apart carry the
 // preview version (Stripe's docs: "include the preview header ... in any API request relevant to the allocated funds").
 export const FS_PREVIEW_VERSION = "2026-10-28.preview";
-const fsPreview = () => { const v = String(process.env.STRIPE_PREVIEW_VERSION || ""); return /^20[0-9]{2}-[01][0-9]-[0-3][0-9]\.preview$/.test(v) ? v : FS_PREVIEW_VERSION; };
+// The three settings of money held apart are read like every other one (env): a space or a line break around them, and
+// capital letters, change nothing (check of 17 November: "on " with a space after it, or "ON", left it off without a word).
+const fsPreview = () => { const v = env("STRIPE_PREVIEW_VERSION"); return /^20[0-9]{2}-[01][0-9]-[0-3][0-9]\.preview$/.test(v) ? v : FS_PREVIEW_VERSION; };
 export const fsVersion = () => `${fsPreview()}; allocated_funds_preview=v1`;
-export const segregationOn = () => process.env.STRIPE_FUNDS_SEGREGATION === "on";
+export const segregationOn = () => env("STRIPE_FUNDS_SEGREGATION").toLowerCase() === "on";
 // Where a payment asks to be held apart: on Stripe's payment page ("checkout", the default), or, should Stripe's page turn
 // the parameter down, on the card hold just before Cuvori charges it ("capture"). Stripe's docs show neither; a test
 // payment in the sandbox decides (SETUP.md Part 22).
-export const fsWhere = () => (process.env.STRIPE_FS_WHERE === "capture" ? "capture" : "checkout");
+export const fsWhere = () => (env("STRIPE_FS_WHERE").toLowerCase() === "capture" ? "capture" : "checkout");
 // Stripe holds apart only payments by Visa, Mastercard, American Express and Discover cards. The page blocks the one card
 // network Stripe lets it block that has others (Discover Global Network: Diners, JCB, UnionPay, Elo — and Discover with
 // them); a payment that is still not held apart (another network) is recorded as it is and paid out the old way.
