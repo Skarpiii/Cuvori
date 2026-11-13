@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-or9cSFzo4Aj2D1GRLyLRiB6hinBCl796e4hMZyOu8oo=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-Wx6N4KOoX0CdiK8wZ4zrbYUGa9hhRmeH6mRMH3ps43Q=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -7870,7 +7870,7 @@
   /* history lines kept for Cuvori's own records, not shown on the Order: whether Stripe holds a payment apart (funds segregation) */
   const QUIET_EV=new Set(["held_apart","held_apart_released"]);
   function oEventLine(e, o){
-    const d=e.data||{}; const amt=oMoney(d.amount_cents??d.editor_cents??d.refund_cents??d.price_cents??0,o.currency);
+    const d=e.data||{}; const amt=oMoney(d.amount_cents??(e.event==="cancel_refund"?d.refund_cents:d.editor_cents)??d.refund_cents??d.price_cents??0,o.currency);   /* a cancel's line names what went back to the client, never the freelancer's €0 (check of 16 November) */
     const key="o_ev_"+e.event+(e.event==="cancelled"&&d.reason==="account_deleted"?"_deleted":"")+(e.event==="late_payment_refunded"&&d.full?"_full":"");   /* v37: closed because the other person deleted the account; a late payment that went back in full, the card fee too (always, at the new prices: Cuvori carries Stripe's card fee) */ const txt=fill(t(key),{amt, fee:oMoney(d.card_fee_cents??0,o.currency), total:oMoney(d.total_cents??0,o.currency), label:d.title||d.label||"", n:d.version||d.n||"", note:d.note||""});
     return `<div class="o-ev"><span class="muted small">${fmtDate(e.at)}</span> <span>${escapeHtml(txt)}</span>${d.note?`<div class="muted small" style="white-space:pre-wrap">${escapeHtml(String(d.note).slice(0,300))}</div>`:""}</div>`;
   }
