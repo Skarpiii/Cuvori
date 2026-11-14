@@ -4,14 +4,15 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const log = []; const ok = (c, m) => log.push((c ? 'PASS ' : 'FAIL ') + m);
-const url = 'file://' + path.resolve(__dirname, '..') + '/index.html';
+const root = process.env.TARGET ? path.resolve(process.env.TARGET) : path.resolve(__dirname, '..');   // the copy under test (TARGET), else this one
+const url = 'file://' + root + '/index.html';
 
 (async () => {
   const b = await chromium.launch();
   for (const shape of ['built-in map', 'database list']) {
     const p = await (await b.newContext({ viewport: { width: 1400, height: 950 } })).newPage();
     const errs = []; p.on('pageerror', e => errs.push(e.message));
-    await p.addInitScript(require('fs').readFileSync(__dirname + '/../mock-supabase.js', 'utf8'));
+    await p.addInitScript(require('fs').readFileSync(root + '/mock-supabase.js', 'utf8'));
     if (shape === 'database list') await p.addInitScript(() => {          // reshape the config the way the server sends it
       const iv = setInterval(() => { const c = window.CUVORI_PROFESSIONS;
         if (c && c.groups && !Array.isArray(c.groups)) { c.groups = Object.entries(c.groups).map(([slug, labels]) => ({ slug, labels })); clearInterval(iv); } }, 5);

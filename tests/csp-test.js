@@ -1,13 +1,14 @@
 // The browser itself must refuse injected scripts (defence in depth behind escaping).
 const { chromium } = require('playwright'); const fs=require('fs');
+const ROOT = process.env.TARGET ? require('path').resolve(process.env.TARGET) : process.cwd();   // the copy under test (TARGET), else the folder it is started in
 (async () => {
   const b = await chromium.launch(); const ctx = await b.newContext();
-  await ctx.addInitScript(fs.readFileSync(process.cwd()+'/mock-supabase.js','utf8'));
+  await ctx.addInitScript(fs.readFileSync(ROOT+'/mock-supabase.js','utf8'));
   await ctx.route('**/supabase.min.js', r=>r.fulfill({status:200,body:'/* mocked */',contentType:'application/javascript'}));
   const p = await ctx.newPage(); const errs=[]; const csp=[];
   p.on('pageerror', e=>errs.push(e.message));
   p.on('console', m=>{ if(/Content Security Policy/i.test(m.text())) csp.push(m.text().slice(0,120)); });
-  await p.goto('file://'+process.cwd()+'/index.html'); await p.waitForTimeout(800);
+  await p.goto('file://'+ROOT+'/index.html'); await p.waitForTimeout(800);
   const appRuns = await p.evaluate(()=>document.querySelectorAll('#quickFlags button').length>0 && document.querySelectorAll('#mobileIconbar .mib').length>0);
   await p.evaluate(()=>{ window.__csp=0; const d=document.createElement('div'); d.innerHTML='<img src="x" onerror="window.__csp=1"><a id="jsl" href="javascript:window.__csp=2">x</a>'; document.body.append(d); });
   await p.waitForTimeout(400);

@@ -1,7 +1,7 @@
 // Tries to break the UI: every language × phone/tablet/desktop width × every page, missing translations,
 // weird input (huge, emoji, HTML, RTL), rapid clicks, unknown routes, back/forward. Run: node tests/ui-fuzz.js
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path'); const { execSync } = require('child_process');
-const ROOT = process.cwd();
+const ROOT = process.env.TARGET ? path.resolve(process.env.TARGET) : process.cwd();   // the copy under test (TARGET), else the folder it is started in
 const log = []; const ok = (c, m) => log.push((c ? 'PASS ' : 'FAIL ') + m);
 const warn = (m) => log.push('WARN ' + m);
 

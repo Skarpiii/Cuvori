@@ -2,9 +2,10 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
-const url = 'file://' + path.resolve(__dirname, '..') + '/index.html';
+const root = process.env.TARGET ? path.resolve(process.env.TARGET) : path.resolve(__dirname, '..');   // the copy under test (TARGET), else this one
+const url = 'file://' + root + '/index.html';
 const log = []; const ok = (c, m) => log.push((c ? 'PASS ' : 'FAIL ') + m);
-const mock = fs.readFileSync(path.resolve(__dirname, '..', 'mock-supabase.js'), 'utf8');
+const mock = fs.readFileSync(path.join(root, 'mock-supabase.js'), 'utf8');
 
 async function boot(b, viewport) {
   const p = await (await b.newContext({ viewport })).newPage();
