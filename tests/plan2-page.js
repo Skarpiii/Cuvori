@@ -7,7 +7,7 @@
 // Run: node tests/plan2-page.js   (from the repo folder; LANGS=en,de,ru to choose languages, default en and de)
 //      BASE=/path/to/an/older/index.html node tests/plan2-page.js   also compares every plan 1 screen with that page
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path');
-const here = (f) => path.join(__dirname, '..', f);
+const here = (f) => path.join(process.env.TARGET ? path.resolve(process.env.TARGET) : path.join(__dirname, '..'), f);   // the copy under test (TARGET), else this one
 const url = 'file://' + here('index.html');
 const mock = fs.readFileSync(here('mock-supabase.js'), 'utf8');
 const SRC = fs.readFileSync(here('index.html'), 'utf8');

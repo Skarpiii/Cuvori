@@ -4,10 +4,11 @@ const { chromium } = require('playwright');
 const log=[]; const ok=(c,m)=>log.push((c?'PASS ':'FAIL ')+m);
 (async () => {
   const b = await chromium.launch(); const ctx=await b.newContext({viewport:{width:1400,height:900}});
-  const url='file://'+require('path').resolve(__dirname,'..')+'/index.html';
+  const root=process.env.TARGET?require('path').resolve(process.env.TARGET):require('path').resolve(__dirname,'..');   // the copy under test (TARGET), else this one
+  const url='file://'+root+'/index.html';
   async function fresh(hash){
     const p=await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(e.message));
-    await p.addInitScript(require('fs').readFileSync(__dirname+'/../mock-supabase.js','utf8'));
+    await p.addInitScript(require('fs').readFileSync(root+'/mock-supabase.js','utf8'));
     await p.route('**/supabase.min.js', r=>r.fulfill({status:200,body:'/* mocked */',contentType:'application/javascript'}));
     await p.goto(url+hash); await p.waitForTimeout(1500);
     return { p, errs };

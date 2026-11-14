@@ -5,7 +5,7 @@
 # the overtaken one was never built (the webhook fix of 18 November, main 8eb0e0f: Netlify showed it "Skipped" and the next
 # upload "Failed: no content change"). Every upload is built now (a branch deploy costs no credits; production is built
 # only on purpose). Runs the rule in a throwaway repository, the way Netlify runs it before a build.
-cd "$(dirname "$0")/.."
+cd "${TARGET:-$(dirname "$0")/..}"   # the copy under test (TARGET), else this one
 root=$(pwd); fail=0; n=0
 check() {  # what, expected exit code (0 skip, 1 build), CACHED_COMMIT_REF, COMMIT_REF, deploy context (default: branch-deploy)
   n=$((n+1)); local got

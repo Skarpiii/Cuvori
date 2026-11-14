@@ -1,11 +1,14 @@
 #!/bin/bash
 # Runs every check. Usage: bash tests/run-all.sh   (from the repo folder)
+# It checks the copy it is in. Pointed at another copy (TARGET set) it would mix the two, as most checks follow TARGET and
+# a few lines here check this copy, so it stops: run that copy's own tests/run-all.sh, or one test with TARGET=<folder>.
+if [ -n "${TARGET:-}" ]; then echo "tests/run-all.sh checks the copy it is in, not TARGET=$TARGET: run that copy's own tests/run-all.sh, or one test with TARGET=<folder>"; exit 2; fi
 cd "$(dirname "$0")/.."
 set -o pipefail
 r=0
 # The checks that live only in the test kit (the database attacks, the galleries, …) are unpacked from it first. A file
-# that is already here is never replaced: the kit is a snapshot from 19 September, and 17 of its files have newer
-# versions in the repo (page code, the page test, the test backend, the payment tests, this file).
+# that is already here is never replaced: the kit is a snapshot from 19 September, and many of its files have newer
+# versions in the repo (page code, the page tests, the test backend, the payment tests, the database runner, this file).
 tar --skip-old-files -xzf tests/test-kit.tar.gz || { echo "could not unpack tests/test-kit.tar.gz"; r=1; }
 # A check that opens the page passes only when it ran to the end (exit code 0), printed PASS lines and no FAIL or
 # CRASH line: a check that stops half-way, or prints nothing, is a failure, never a quiet pass.
@@ -50,7 +53,7 @@ echo "== check of 17 November (the two webhook secrets swapped in Netlify: a not
 echo "== check of 18 November (money held apart at Stripe as the owner sees it: the preview version's capitals, SETUP.md, the admin's payment status)"; out=$(node tests/attack-check-nov18.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== check of 18 November (the live site's webhook: with the two webhook secrets swapped in Netlify, a notice about Cuvori's own account is refused until they are put right, never dropped)"; out=$(node tests/attack-check-nov18-live.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== check of 19 November (refusals and errors readable by the page, each error its own ref, a store of its own per request, both signature orders)"; out=$(node tests/attack-check-nov19.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
-echo "== check of 20 November (every test reads and loads the copy it is pointed at: TARGET)"; out=$(node tests/target-follow.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== checks of 20 and 21 November (every test, page test and shell test reads and loads the copy it is pointed at: TARGET)"; out=$(node tests/target-follow.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== the payment code for the new prices (5% on payouts, no client fees, the ledger lines of schema v56, failures at every write)"; out=$(node tests/attack-plan2.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== roles & tampering"; out=$(node tests/attack-roles.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== Stripe accounts per mode"; out=$(node tests/attack-connect.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
@@ -105,6 +108,7 @@ echo "== jobs trust";       page jobstest.js
 echo "== post a job";       node tests/post-job.js | tail -1 || r=1
 echo "== reviews";          node tests/reviews.js | tail -1 || r=1
 echo "== galleries";        page galtest.js
+echo "== check of 21 November (on a phone, one swipe moves one video)"; page tests/phone-swipe.js
 echo "== auth";             page authtest.js
 echo "== oauth return";     page tests/oauth-return.js
 echo "== the new prices on the page"; page pricing-page.js
