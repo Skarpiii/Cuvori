@@ -8,6 +8,8 @@
 // the shell tests (.sh), the page tests next to index.html, the XSS proofs and the database runner did the same, and
 // limits-match.mjs followed ROOT but not TARGET. Every such place must follow TARGET and fall back to this copy only when
 // it is not set.
+// Also 21 November: a copy as GitHub's upload page leaves it must run too. That page drops the mark that lets a file be
+// started on its own (tests/db/run.sh and load.sh arrived without it), so every shell script is started with bash (T6).
 // Run: node tests/target-follow.mjs
 import fs from "node:fs";
 import path from "node:path";
@@ -44,17 +46,38 @@ function finds(lines, depth, sh) {
   });
   return hits;
 }
+// a shell script started on its own (not with bash): in a copy from GitHub's upload page it is refused ("Permission denied")
+function directStarts(lines, sh) {
+  const hits = [];
+  lines.forEach((l, i) => {
+    if (sh) {
+      if (/^\s*#/.test(l)) return;
+      const bare = l.replace(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g, (m, a, b) => (a ?? b).replace(/\s+/g, ""));   // quotes kept, spaces in them dropped
+      for (let cmd of bare.split(/;|&&|\|\||\||\$\(|\(|`|\bthen\b|\bdo\b|\belse\b/)) {
+        const first = cmd.trim().replace(/^(\w+=\S*\s+)+/, "").split(/\s+/)[0] || "";
+        if (/\.sh$/.test(first)) hits.push(i + 1);
+      }
+    } else if (!/^\s*\/\//.test(l) && /\b(?:execFileSync|spawnSync|execSync|execFile|spawn|exec)\(\s*(["'`])\s*[^"'`\s]*\.sh\b/.test(l)) hits.push(i + 1);
+  });
+  return hits;
+}
 // places that may find their own folder on purpose: each one names why the copy under test is still the one checked
 const ALLOWED = [
   { file: "tests/run-all.sh", line: /^cd "\$\(dirname "\$0"\)\/\.\."$/, why: "the full run checks the copy it is in, and refuses to start when TARGET is set (T3)" },
   { file: "tests/xss/run.sh", line: /^cd "\$\(dirname "\$0"\)\/\.\.\/\.\."$/, why: "finds its own proofs; each proof opens the page of the copy under test (tests/xss/kit.js follows TARGET)" },
 ];
+// a test file's lines; this check's own samples are the old ways on purpose, so they are left out
+function readLines(base, f) {
+  const lines = fs.readFileSync(path.join(base, f), "utf8").split("\n");
+  if (f !== SELF) return lines;
+  const a = lines.indexOf("// samples:"), z = lines.indexOf("// end of samples");
+  return lines.map((l, i) => i > a && i < z ? "" : l);
+}
 function scan(base) {
   const files = testFiles(base), bad = [], allowedSeen = new Set();
   for (const f of files) {
     const sh = f.endsWith(".sh"), depth = f.split(path.sep).length - 1;
-    let lines = fs.readFileSync(path.join(base, f), "utf8").split("\n");
-    if (f === SELF) { const a = lines.indexOf("// samples:"), z = lines.indexOf("// end of samples"); lines = lines.map((l, i) => i > a && i < z ? "" : l); }  // its own samples are the old ways on purpose
+    const lines = readLines(base, f);
     for (const n of finds(lines, depth, sh)) {
       const ok = ALLOWED.findIndex(a => a.file === f && a.line.test(lines[n - 1]));
       if (ok >= 0) allowedSeen.add(ok); else bad.push(`${f}:${n}`);
@@ -100,6 +123,12 @@ const KINDS = {
   "tests/deeper/e.sh": 'for f in $M; do psql -f "../../supabase/$f"; done',
   "pagetest.js": "const page = fs.readFileSync(__dirname + '/index.html', 'utf8');",
 };
+// started on their own (T6), and started with bash
+const STARTS_OLD = [["tests/a.sh", "tests/db/start-pg.sh >/dev/null"], ["tests/a.sh", 'out=$(EXTRA="a b" MIGRATE="m" tests/db/run.sh | tail -1)'],
+  ["tests/db/a.sh", "./load.sh >/dev/null || exit 1"], ["tests/db/a.sh", '"$H/load.sh" >/dev/null'], ["tests/a.mjs", 'execFileSync("tests/db/load.sh", { stdio: "ignore" });']];
+const STARTS_NEW = [["tests/a.sh", "bash tests/db/start-pg.sh >/dev/null"], ["tests/a.sh", 'out=$(EXTRA="a b" MIGRATE="m" bash tests/db/run.sh | tail -1)'],
+  ["tests/db/a.sh", "bash ./load.sh >/dev/null || exit 1"], ["tests/a.sh", '[ -f tools/netlify-skip-build.sh ] || echo "missing: tools/netlify-skip-build.sh"'],
+  ["tests/a.mjs", 'execFileSync("bash", [path.join(root, "tests/db/load.sh")], { stdio: "ignore" });']];
 // end of samples
 const flag = ([f, lines]) => finds(lines, f.split("/").length - 1, f.endsWith(".sh")).length > 0;
 const oldFlagged = OLD.map(flag), newFlagged = NEW.map(flag);
@@ -134,6 +163,11 @@ fs.writeFileSync(path.join(fake, "tests/run-all.sh"), "#!/bin/bash\necho \"== a 
 const kinds = scan(fake), missed = Object.keys(KINDS).filter(f => !kinds.bad.includes(`${path.normalize(f)}:1`));
 fs.rmSync(fake, { recursive: true, force: true });
 out.push((missed.length ? "VULNERABLE " : "safe       ") + `T5 the check reads every kind of test file (.mjs, .js and .sh in tests/ and its folders, and a page test next to index.html that tests/run-all.sh runs): ${Object.keys(KINDS).length - missed.length} of ${Object.keys(KINDS).length} old ways found in them${missed.length ? ", not found in: " + missed.join(", ") : ""}`);
+
+// --- a copy as GitHub's upload page leaves it runs: every shell script is started with bash
+const direct = files.flatMap(f => directStarts(readLines(root, f), f.endsWith(".sh")).map(n => `${f}:${n}`));
+const sOld = STARTS_OLD.map(([f, l]) => directStarts([l], f.endsWith(".sh")).length > 0), sNew = STARTS_NEW.map(([f, l]) => directStarts([l], f.endsWith(".sh")).length > 0);
+out.push((direct.length || !sOld.every(Boolean) || sNew.some(Boolean) ? "VULNERABLE " : "safe       ") + `T6 every shell script is started with bash, so a copy from GitHub's upload page (which drops the mark that lets a file be started on its own) runs: ${direct.length} started on their own${direct.length ? ": " + direct.join(", ") : ""} (must be: none); the check itself: ${sOld.filter(Boolean).length} of ${sOld.length} old ways reported, ${sNew.filter(Boolean).length} of ${sNew.length} with bash reported (must be 0)`);
 
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;
