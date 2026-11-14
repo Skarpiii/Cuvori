@@ -872,6 +872,17 @@ const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
   ok(!(await p.textContent('#adminBody')).includes('Netlify setting:'),'settings in order: no note');
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
   { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON — clients fund Orders through Stripe') && !tx.includes('ON, but paused'),'a real secret key: the admin panel says plain "ON" again'); }
+  // money held apart at Stripe (SETUP.md, Part 22): the admin panel says whether it is on, where it is asked for and with which
+  // preview version, as the payment status tells an admin (check of 18 November: nothing showed it but Netlify's settings)
+  const heldApartSays=async(h)=>{ await p.evaluate((x)=>{ window.__mockHeldApart=x; },h); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
+    await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+    return { tx:await p.textContent('#adminBody'), imgs:await p.locator('#adminBody img').count() }; };
+  { const r=await heldApartSays({on:false,where:'checkout',version:'2026-10-28.preview'}); ok(r.tx.includes('Money held apart at Stripe: off') && r.tx.includes('STRIPE_FUNDS_SEGREGATION') && !r.tx.includes('Money held apart at Stripe: ON'),'money held apart off: the admin panel says "off" and names the setting'); }
+  { const r=await heldApartSays({on:true,where:'checkout',version:'2026-10-28.preview'}); ok(r.tx.includes('Money held apart at Stripe: ON') && r.tx.includes("on Stripe's payment page") && r.tx.includes('2026-10-28.preview'),'money held apart on: the admin panel says "ON", asked for on Stripe\'s payment page, and the preview version'); }
+  { const r=await heldApartSays({on:true,where:'capture',version:'2026-12-01.preview'}); ok(r.tx.includes('Money held apart at Stripe: ON') && r.tx.includes('just before the card is charged') && r.tx.includes('STRIPE_FS_WHERE') && r.tx.includes('2026-12-01.preview'),'money held apart on, asked for when the card is charged: the admin panel says so, and the newer preview version'); }
+  { const r=await heldApartSays({on:true,where:'<b>x</b>',version:'<img src=x onerror="window.__heldApartInjected=1">'}); const hit=await p.evaluate(()=>!!window.__heldApartInjected);
+    ok(r.imgs===0 && !hit && r.tx.includes('Money held apart at Stripe: ON') && r.tx.includes("on Stripe's payment page") && !r.tx.includes('<img') && !r.tx.includes('<b>'),'an answer that is not a place or a preview version is never put into the page: Stripe\'s payment page, no version'); }
+  { const r=await heldApartSays(undefined); ok(!r.tx.includes('Money held apart'),'the payment status says nothing about money held apart (not an admin\'s answer): the admin panel says nothing either'); }
   await newOrder('Quick teaser',200);
   await signin('jonas@test.com'); await openOrders(); await p.click('[data-caction="cancel"]'); await p.waitForTimeout(800);
   ok(await db(()=>window.__mockdb.contracts.at(-1).status==='cancelled') && (await modal()).includes('Cancelled'),'before funding the client can cancel');
