@@ -1,11 +1,11 @@
 // Jobs a freelancer can trust: posted time, states, client history, Report job, limits, duplicates, risk, admin queue.
 const { chromium } = require('playwright'); const fs=require('fs');
 const log=[]; const ok=(c,m)=>log.push((c?'PASS ':'FAIL ')+m);
-const mock=fs.readFileSync(__dirname+'/mock-supabase.js','utf8');
+const mock=fs.readFileSync((process.env.TARGET?require('path').resolve(process.env.TARGET):__dirname)+'/mock-supabase.js','utf8');   // the copy under test (TARGET), else this one
 (async () => {
   const b = await chromium.launch(); const ctx=await b.newContext({viewport:{width:1400,height:900}});
   const errs=[];
-  const url='file://'+process.cwd()+'/index.html';
+  const url='file://'+(process.env.TARGET?require('path').resolve(process.env.TARGET):process.cwd())+'/index.html';   // the copy under test (TARGET), else the folder it is started in
   await ctx.addInitScript(mock);
   await ctx.route('**/supabase.min.js', r=>r.fulfill({status:200,body:'/* mocked */',contentType:'application/javascript'}));
   const p = await ctx.newPage(); p.on('pageerror',e=>errs.push('P1 '+e.message));

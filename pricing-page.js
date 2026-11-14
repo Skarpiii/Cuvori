@@ -4,12 +4,13 @@
 // Run: node pricing-page.js   (from the repo folder)
 const { chromium } = require('playwright'); const fs = require('fs');
 const log = []; const ok = (c, m) => log.push((c ? 'PASS ' : 'FAIL ') + m);
-const mock = fs.readFileSync(__dirname + '/mock-supabase.js', 'utf8');
-const path = require('path'); const here = (f) => path.join(__dirname, f);   // the files of this copy, wherever it is started from
+const path = require('path'); const ROOT = process.env.TARGET ? path.resolve(process.env.TARGET) : __dirname;   // the copy under test (TARGET), else this one, wherever it is started from
+const mock = fs.readFileSync(path.join(ROOT, 'mock-supabase.js'), 'utf8');
+const here = (f) => path.join(ROOT, f);
 const url = 'file://' + here('index.html');
 const LANGS = ['en', 'de', 'ru', 'lt', 'es', 'pl', 'uk'];
 // a text from the page's own tables, exactly as written there: T has today's texts, T_PRICES the new-price ones
-const SRC = fs.readFileSync(__dirname + '/index.html', 'utf8');
+const SRC = fs.readFileSync(here('index.html'), 'utf8');
 const textOf = (table, lang, key) => {
   const a = SRC.indexOf(`const ${table} = {`); if (a < 0) return null;
   const block = SRC.slice(a, SRC.indexOf('\n  };', a));

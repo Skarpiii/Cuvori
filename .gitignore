@@ -1,10 +1,10 @@
 # Working copies unpacked from tests/test-kit.tar.gz (the tarball is the tracked source; tests/run-all.sh unpacks them
-# without replacing any file that is already here)
+# without replacing any file that is already here; galtest.js and tests/db/run.sh and load.sh are tracked since 21 November,
+# as they follow TARGET now)
 admin-professions.js
 avail-i18n.js
 availability.js
 contracts-i18n/
-galtest.js
 orders-i18n.js
 prof-i18n.js
 professions-page.js
@@ -16,8 +16,6 @@ taginput.js
 tests/db/00_supabase_stub.sql
 tests/db/10_harness.sql
 tests/db/20_seed.sql
-tests/db/load.sh
-tests/db/run.sh
 tests/db/start-pg.sh
 tools/gen-professions.js
 
