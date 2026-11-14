@@ -6,7 +6,7 @@
 // The page's security policy blocks injected scripts as well, so "nothing ran" alone would pass even with a hole in
 // the escaping. The check that no tag from the attacker's text is in the page is what proves the escaping itself.
 const { chromium } = require('playwright'); const fs = require('fs');
-const ROOT = process.cwd();
+const ROOT = process.env.TARGET ? require('path').resolve(process.env.TARGET) : process.cwd();   // the copy under test (TARGET), else the folder it is started in
 const MOCK = fs.readFileSync(ROOT + '/mock-supabase.js', 'utf8');
 const URL = 'file://' + ROOT + '/index.html';
 const T = '2026-01-01T00:00:00Z';

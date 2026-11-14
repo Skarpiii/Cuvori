@@ -1,8 +1,9 @@
 // Stored XSS through an Order: title, scope, deliverables, milestone titles, amendment notes, delivery notes,
 // chat cards, notifications and the history must all show the text, never run it.
 const { chromium } = require('playwright'); const fs=require('fs');
-const mock=fs.readFileSync(process.cwd()+'/mock-supabase.js','utf8');
-const url='file://'+process.cwd()+'/index.html';
+const ROOT = process.env.TARGET ? require('path').resolve(process.env.TARGET) : process.cwd();   // the copy under test (TARGET), else the folder it is started in
+const mock=fs.readFileSync(ROOT+'/mock-supabase.js','utf8');
+const url='file://'+ROOT+'/index.html';
 const P=k=>`<img src=z data-xss="${k}" onerror="window.__pwn=Object.assign(window.__pwn||{},{${k}:1})">`;
 const { verdict, main } = require('./kit.js');
 main(async () => {
