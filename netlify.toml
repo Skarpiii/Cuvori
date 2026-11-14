@@ -2,7 +2,7 @@
 # so "/" is served from it. Every other unknown path also goes there.
 [build]
   publish = "."
-  # an upload that changes only tests, notes or database scripts makes no deploy (each costs credits): see the script
+  # every upload is built, also one that changes only tests or notes: see the script (why: the check of 19 November)
   ignore = "bash ./tools/netlify-skip-build.sh"
 
 [functions]
