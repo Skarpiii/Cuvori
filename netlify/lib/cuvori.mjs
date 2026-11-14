@@ -308,8 +308,9 @@ export const STRIPE_VERSION = "2024-06-20";
 // preview version (Stripe's docs: "include the preview header ... in any API request relevant to the allocated funds").
 export const FS_PREVIEW_VERSION = "2026-10-28.preview";
 // The three settings of money held apart are read like every other one (env): a space or a line break around them, and
-// capital letters, change nothing (check of 17 November: "on " with a space after it, or "ON", left it off without a word).
-const fsPreview = () => { const v = env("STRIPE_PREVIEW_VERSION"); return /^20[0-9]{2}-[01][0-9]-[0-3][0-9]\.preview$/.test(v) ? v : FS_PREVIEW_VERSION; };
+// capital letters, change nothing (check of 17 November: "on " with a space after it, or "ON", left it off without a word;
+// check of 18 November: the same for "2026-12-01.Preview", which left Stripe's newer preview version unused).
+export const fsPreview = () => { const v = env("STRIPE_PREVIEW_VERSION").toLowerCase(); return /^20[0-9]{2}-[01][0-9]-[0-3][0-9]\.preview$/.test(v) ? v : FS_PREVIEW_VERSION; };
 export const fsVersion = () => `${fsPreview()}; allocated_funds_preview=v1`;
 export const segregationOn = () => env("STRIPE_FUNDS_SEGREGATION").toLowerCase() === "on";
 // Where a payment asks to be held apart: on Stripe's payment page ("checkout", the default), or, should Stripe's page turn
