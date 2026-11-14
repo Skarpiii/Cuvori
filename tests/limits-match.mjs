@@ -4,7 +4,7 @@
 // people are told the wrong rule.
 // This check reads the files themselves, so it fails as soon as one copy is changed without the others.
 import fs from "node:fs";
-const root = (process.env.ROOT || new URL("..", import.meta.url).pathname).replace(/\/?$/, "/");
+const root = (process.env.ROOT || process.env.TARGET || new URL("..", import.meta.url).pathname).replace(/\/?$/, "/");
 const read = (f) => fs.readFileSync(root + f, "utf8");
 const out = [];
 const check = (ok, m) => out.push((ok ? "PASS " : "FAIL ") + m);

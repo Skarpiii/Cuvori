@@ -42,7 +42,7 @@ import { DB, STRIPE, hooks, req, call, mk, fund, pay, signed, reset, fns, uuid }
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.TARGET ? path.resolve(process.env.TARGET) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");   // the copy under test (TARGET), else this one
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
 const logs = []; const realError = console.error; console.error = (...a) => logs.push(a.map(String).join(" "));

@@ -12,7 +12,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.TARGET ? path.resolve(process.env.TARGET) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");   // the copy under test (TARGET), else this one
 const text = fs.readFileSync(path.join(root, "SETUP.md"), "utf8");
 let n = 0, failed = 0;
 const check = (ok, what) => { n++; if (!ok) failed++; console.log(`${ok ? "PASS" : "FAIL"} ${what}`); };
