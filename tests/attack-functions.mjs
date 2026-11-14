@@ -6,7 +6,11 @@ process.env.STRIPE_SECRET_KEY = "sk_test_fake"; process.env.SUPABASE_SERVICE_ROL
 process.env.STRIPE_CONNECT_WEBHOOK_SECRET = " whsec_connect_fake \n";   // pasted with a space and a line break, as can happen in Netlify
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { pathToFileURL } from "node:url";
 const F = (process.env.TARGET || new URL("..", import.meta.url).pathname.replace(/\/$/, "")) + "/netlify/functions/";
+// the payment code under test, also for the checks that load it directly (A24, A26, A27, A28): the copy TARGET names, never
+// only this folder's (check of 19 November: they always loaded this folder's, so a check against another copy missed them)
+const LIB_URL = pathToFileURL(F + "../lib/cuvori.mjs").href, NETLIFY_URL = pathToFileURL(F + "../").href;
 console.log("TARGET", F);
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
@@ -280,7 +284,9 @@ for (const [name, fn] of [["checkout", checkout], ["release", release], ["resolv
   const s = sigFor(raw);
   const a = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `t=${s.t},v1=${s.v1},v1=${"0".repeat(64)}` } }));
   const b = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `t=${s.t},v1=${"0".repeat(64)},v1=${s.v1}` } }));
-  vuln(a.status === 400, `A17a valid v1 followed by a 2nd v1 (secret rotation) -> HTTP ${a.status} ${a.json && a.json.error}; reversed order -> HTTP ${b.status}`);
+  // while a webhook secret is changed in Stripe a notice carries two signatures, in an order Stripe does not promise: both orders
+  // are taken (check of 19 November: only the right one first was checked)
+  vuln(a.status === 400 || b.status === 400, `A17a valid v1 followed by a 2nd v1 (secret rotation) -> HTTP ${a.status} ${a.json && a.json.error}; reversed order -> HTTP ${b.status} ${b.json && b.json.error} (must both be taken)`);
   const c = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `t=abc,v1=${s.v1}` } }));
   const d = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `v1=${s.v1}` } }));
   const e = await call(webhook, req("POST", "x", { raw, headers: { "stripe-signature": `t=${s.t},v1=${s.v1.slice(0, 63)}` } }));
@@ -347,7 +353,7 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
 // ---------- A24: which database key the functions use when Netlify has both the old and the new one ----------
 {
   const { execFileSync } = await import("node:child_process");
-  const lib = new URL("../netlify/lib/cuvori.mjs", import.meta.url).href;
+  const lib = LIB_URL;
   const keyWith = (extra) => {
     const env = { ...process.env, SITE_URL: "https://cuvori.io", SUPABASE_SERVICE_ROLE_KEY: "", SUPABASE_SECRET_KEY: "", ...extra };
     return execFileSync(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(lib)}); process.stdout.write(String(m.SERVICE_KEY))`], { env, encoding: "utf8" });
@@ -370,7 +376,7 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
 // ---------- A26: a Stripe key that is not a secret key: payments pause, and the log, the admin and the status say why ----------
 {
   const { execFileSync } = await import("node:child_process");
-  const base = new URL("../netlify/", import.meta.url).href;
+  const base = NETLIFY_URL;
   const probe = (key) => JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `
     const logs = []; console.error = (...a) => logs.push(a.map(String).join(" "));
     globalThis.fetch = async () => { throw new Error("no network in this test"); };   // nothing ever reaches the real database or Stripe
@@ -390,7 +396,7 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
 }
 // ---------- A27: extra headers can add something, but never change what every answer is (JSON, never cached, allowed websites only) ----------
 {
-  const L = await import(new URL("../netlify/lib/cuvori.mjs", import.meta.url).href);
+  const L = await import(LIB_URL);
   const sneaky = { "Content-Type": "text/html", "Cache-Control": "max-age=999", "access-control-allow-origin": "*", "Access-Control-Allow-Headers": "*", "VARY": "*", "retry-after": "30" };
   const lone = L.json(200, { ok: 1 }, sneaky);
   const fromEvil = await L.safe(async () => L.json(200, { ok: 1 }, sneaky))(new Request("https://x/", { method: "POST", headers: { origin: "https://evil.example" } }));
@@ -403,7 +409,7 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
 }
 // ---------- A28: shortening text looks only at its start: exactly what splitting the whole text gives, and a text of several megabytes takes no time ----------
 {
-  const L = await import(new URL("../netlify/lib/cuvori.mjs", import.meta.url).href);
+  const L = await import(LIB_URL);
   // the way it is meant to work: half an emoji already in the text becomes "�" (the database refuses half an emoji),
   // then the whole text is split into what people see as characters, and they are kept while they fit
   const SEG = new Intl.Segmenter(undefined, { granularity: "grapheme" });
