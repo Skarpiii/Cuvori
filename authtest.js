@@ -8,10 +8,10 @@ const log=[]; const ok=(c,m)=>log.push((c?'PASS ':'FAIL ')+m);
   await p.addInitScript(()=>{ window.__MOCK_SEED={ profiles:[{id:'11111111-1111-4111-8111-111111111111',email:'pro@test.com',first_name:'Pro',role:'editor',is_admin:false,banned:false,visibility:'public',created_at:new Date().toISOString()}],
     editor_profiles:[{id:'11111111-1111-4111-8111-111111111111',display_name:'Pro Editor',role_label:'editor',city:'Vilnius',country:'Lithuania',languages:['English'],specializations:['catShorts'],tools:[],bio:'',rate_amount:30,rate_unit:'hour',is_public:true,responds_hours:24,turnaround_days:5,revisions:2,availability:'open',availability_set_at:new Date().toISOString(),created_at:new Date().toISOString()}],
     services:[{id:'22222222-2222-4222-8222-222222222222',profile_id:'11111111-1111-4111-8111-111111111111',profession_slug:'video-editor',rate_amount:30,rate_unit:'hour',headline:'',values:{video_specialty:['catShorts']},is_public:true,sort_order:0,created_at:new Date().toISOString()}] }; });
-  await p.addInitScript(require('fs').readFileSync(__dirname+'/mock-supabase.js','utf8'));
+  await p.addInitScript(require('fs').readFileSync((process.env.TARGET?require('path').resolve(process.env.TARGET):__dirname)+'/mock-supabase.js','utf8'));
   // block the real CDN so the mock stays
   await p.route('**/supabase.min.js', r=>r.fulfill({status:200,body:'/* mocked */',contentType:'application/javascript'}));
-  const url='file://'+process.cwd()+'/index.html';
+  const url='file://'+(process.env.TARGET?require('path').resolve(process.env.TARGET):process.cwd())+'/index.html';   // the copy under test (TARGET), else the folder it is started in
   try {
   await p.goto(url); await p.waitForTimeout(500);
   ok(await p.locator('#demoBanner').isHidden(),'real mode: demo banner hidden');

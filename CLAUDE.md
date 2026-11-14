@@ -39,6 +39,24 @@ The owner reviews the code by pasting lines into the chat. This applies every ti
 - **Every report starts with a "Checked this time" list:** each place the pasted lines are used, by file and line, and next to each one "tested" or "read", all done in this answer. A place that is not on the list was not checked, so the owner can see a skip before trusting the answer. Never leave the list out, never shorten it to "all callers", and never fill it from an earlier check.
 - **Then report in plain words:** what is right, then each problem with what it means for a client, a freelancer or the owner, and one clear recommendation.
 
+## What goes live, and when
+
+- **The page:** `cuvori.io` is GitHub Pages serving `index.html` from `main`. An upload of the page to `main` is live within minutes (the check of 21 November found the live page byte for byte the same as `main`'s `index.html`).
+- **The payment functions** the page calls run at `main--cuvori.netlify.app`, Netlify's build of `main`. Every upload to `main` is built; its payment code is live once Netlify's list shows it **Completed** (app.netlify.com/projects/cuvori/deploys?filter=main).
+- **`production`** is Netlify's production build (`cuvori.netlify.app`), where the hourly job runs. It is deployed only on purpose, with Egidijus's approval.
+- **A waiting branch** such as `pricing-v2` changes nothing live until it is merged, which needs Egidijus's approval.
+
+## Checking another copy of Cuvori
+
+To show a check failing on the code that is on GitHub, or that a deliberate break is caught, run the test from this copy with `TARGET=<folder of the other copy>`. Every test file, page test and shell test follows `TARGET` (`tests/target-follow.mjs` checks this); `tests/run-all.sh` checks only the copy it is in and stops when `TARGET` is set.
+
+## Mistakes made before, and the rule against each
+
+- **Numbers.** Every number in a report or an upload summary (places found, checks passed, files changed) is copied from output produced in that same answer, after the last change to the code and to the check. Never from memory or from an earlier run. (20 November: the summary said 38 places; the check, corrected after that count, found 37.)
+- **Counting a problem.** Before saying how many places have a problem, search the whole repository for every way it can be written, in every kind of file (`.mjs`, `.js`, `.sh`, `.sql`, `.html`, the notes) and every folder, on both branches, and say how the search was done. (After the check of 19 November the report said "seven test files"; there were 36 and one more, and the page and shell tests that did the same were found only on 21 November.)
+- **A test that fails.** A test that fails, even once, is not "a timing slip" until its cause is found: repeat it the way it failed, find what made it fail, and say what that means for a client, a freelancer or the owner. (20 November: a phone swipe that skipped videos was called a timing slip; on a phone a quick swipe really did skip videos.)
+- **What goes live.** Never say whether an upload changes the live site without checking "What goes live, and when" above. (An upload to `main` was once wrongly called not live; it was the live payment code.)
+
 ## Product rules that override everything else
 
 - **Prices (final, owner's decision; `PRODUCT_SPEC.md` section 3).** Clients pay only the agreed price: free job posts, free matching help, no client fee, no subscription, no hidden fees. Freelancers pay 5% commission on projects paid through Cuvori (top-ups included); Cuvori pays the card costs. Projects paid directly between client and freelancer pay none, as Cuvori never holds that money; whether direct payments stay under the new prices is not decided yet (SETUP.md Part 20). Protected payments are paid out at once when the client approves, or 14 days after a valid delivery unless disputed; during a dispute nothing is paid out automatically; when Cuvori divides the money in a dispute, the 5% comes out of the freelancer's share, never out of the client's refund. These take effect only with the price switch (schema v56); until then today's prices (no commission, 7 days) apply, and Orders agreed before the switch keep them for good. Three rules start as soon as v56 runs (SETUP.md Part 20): nothing is paid out for a part of an Order while it is in dispute (or no longer being worked on) or a chargeback is open, though Cuvori's own decision on a dispute still goes through; a payment line's Order, kind, amounts, status and Stripe reference can never be changed (Stripe's fee and the card-fee refund are still added, as today); and an Order agreed after v56 can never be set back to a proposal. Never add fees, surcharges or subscriptions, and never disguise card costs, without asking Egidijus.
