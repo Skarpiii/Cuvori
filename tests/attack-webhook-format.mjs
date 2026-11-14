@@ -75,7 +75,7 @@ for (const type of ["payment_intent.created", "customer.created", "invoice.paid"
 
 // ---------- W9: SETUP.md creates the webhook with Snapshot, in Stripe's words of October 2026 ----------
 {
-  const text = fs.readFileSync(fileURLToPath(new URL("../SETUP.md", import.meta.url)), "utf8");
+  const text = fs.readFileSync(process.env.TARGET ? process.env.TARGET.replace(/\/?$/, "/") + "SETUP.md" : fileURLToPath(new URL("../SETUP.md", import.meta.url)), "utf8");
   const steps = text.split(/\n(?=\d+\.\s|#)/).filter(p => /stripe-webhook/.test(p) && /(Webhooks|destination)/.test(p));
   vuln(steps.length < 2, `W9 the SETUP.md steps that create the Stripe webhook were found (${steps.length}, must be 2: Part 5 step 4 and Part 15 item 3)`);
   for (const p of steps) {

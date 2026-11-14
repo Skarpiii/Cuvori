@@ -15,6 +15,7 @@
 // admin panel says "ON, but paused" and names the setting, as it does for the Stripe key.
 // Run: node tests/attack-error-text.mjs
 import fs from "node:fs";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -211,7 +212,7 @@ for (const [what, thrown, want, never] of [
 
 // ---------- P1: the admin panel's sentence when the key can't be used ----------
 {
-  const html = fs.readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const html = fs.readFileSync(path.join(process.env.TARGET ? path.resolve(process.env.TARGET) : fileURLToPath(new URL("..", import.meta.url)), "index.html"), "utf8");
   const m = html.match(/ESCROW\.keyOk===false\?`([^`]*)`/);
   const t = m ? m[1] : "";
   vuln(!/sk_live_/.test(t) || !/space or line break/.test(t) || /is not a secret key:/.test(t), `P1 the admin panel when the key can't be used -> ${shown(t.replace(/<[^>]+>/g, ""), 260)} (must name both reasons: not a secret key, or a space or line break inside it)`);
@@ -219,7 +220,7 @@ for (const [what, thrown, want, never] of [
 
 // ---------- P2: the admin panel's sentence when the database key can't be used ----------
 {
-  const html = fs.readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const html = fs.readFileSync(path.join(process.env.TARGET ? path.resolve(process.env.TARGET) : fileURLToPath(new URL("..", import.meta.url)), "index.html"), "utf8");
   const m = html.match(/ESCROW\.dbKeyOk===false\?`([^`]*)`/);
   const t = m ? m[1] : "";
   vuln(!/ON, but paused/.test(t) || !/SUPABASE_SECRET_KEY/.test(t) || !/SUPABASE_SERVICE_ROLE_KEY/.test(t) || !/space or line break/.test(t),

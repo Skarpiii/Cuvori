@@ -49,7 +49,7 @@ import crypto from "node:crypto";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.TARGET ? path.resolve(process.env.TARGET) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");   // the copy under test (TARGET), else this one
 const PGDIR = process.env.PGDIR || "/tmp/cuvori-pgtest";
 const CONN = ["-h", PGDIR, "-p", "5499", "-U", "postgres"];
 const env = { ...process.env, PGOPTIONS: "-c client_min_messages=warning" };

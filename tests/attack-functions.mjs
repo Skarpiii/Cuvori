@@ -340,7 +340,7 @@ for (const [name, fn] of [["checkout", checkout], ["release", release], ["resolv
 info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t => t.source_transaction ? "set" : "missing"))].join(",")} (missing = release draws on whatever *available* balance exists)`);
 // ---------- A23: stored XSS in the contract chat card (index.html) -> session theft -> stripe-release as the client
 {
-  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const html = fs.readFileSync(F + "../../index.html", "utf8");   // the page of the copy under test (TARGET), check of 20 November
   const pick = (re) => { const m = html.match(re); if (!m) throw new Error("not found: " + re); return m[0]; };
   const src = [pick(/function escapeHtml\(s\)\{.*\}/), pick(/const O_CARD_EVENTS=\{[\s\S]*?\};/), pick(/function money\(n,cur\)\{.*\}/), pick(/const oMoney=\(cents,cur\)=>.*;/), pick(/function fill\(str, vars\)\{.*\}/), pick(/function contractCardHtml\(m\)\{[\s\S]*?\n  \}/)].join("\n");
   const t = (k) => escapeHtmlLocal(String(k));   // unknown keys come back escaped, like the page's t()
