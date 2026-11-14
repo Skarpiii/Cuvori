@@ -6,16 +6,30 @@ import { verifyWebhook, db, orderEvent, json, bad, stripe, isAcct, WEBHOOK_SECRE
 const nz = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
 // the events Cuvori acts on (the first six from Cuvori's own Stripe account, account.updated from the freelancers' accounts)
 const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed", "account.updated"];
+// the ones about Cuvori's own account (every one but account.updated)
+const OWN_EVENTS = HANDLED.filter(t => t !== "account.updated");
 
 export default async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
   const raw = await req.text();
   const sig = req.headers.get("stripe-signature");
   const CONNECT_SECRET = CONNECT_WEBHOOK_SECRET;
-  let event = null, fromConnect = false;
+  let event = null, bySecond = false;
   try { event = verifyWebhook(raw, sig, WEBHOOK_SECRET); } catch {}
-  if (!event && CONNECT_SECRET) { try { event = verifyWebhook(raw, sig, CONNECT_SECRET); fromConnect = true; } catch {} }
+  if (!event && CONNECT_SECRET) { try { event = verifyWebhook(raw, sig, CONNECT_SECRET); bySecond = true; } catch {} }
     if (!event) return bad("Invalid signature", 400);
+  // Whose event it is comes from the event itself, not from which secret fits it: Stripe marks every event about a
+  // freelancer's own Stripe account with that account ("account"), and Cuvori's own events never carry it.
+  const fromConnect = !!event.account;
+  // Cuvori's own notice (a payment, a chargeback, a refund) that only the second secret fits: the two secrets are swapped in
+  // Netlify. Refused, never acted on, so the second secret alone never signs a notice about Cuvori's money: Stripe shows it
+  // as failed, emails, and sends it again once the two are put right. Before, it was answered "received" and dropped, and
+  // Stripe never sent it again: a chargeback or a refund made in the Stripe dashboard never reached its Order, and the hourly
+  // run could pay the freelancer money already taken back (check of 18 November; the update on pricing-v2 has it since 17 November).
+  if (bySecond && !fromConnect && OWN_EVENTS.includes(event.type)) {
+    console.error("webhook: a notice about Cuvori's own Stripe account fits only STRIPE_CONNECT_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET and STRIPE_CONNECT_WEBHOOK_SECRET look swapped in Netlify; it is refused until they are put right", event.id, event.type);
+    return bad("This notice is about Cuvori's own Stripe account, but it fits STRIPE_CONNECT_WEBHOOK_SECRET, not STRIPE_WEBHOOK_SECRET: the two webhook secrets are swapped in Netlify. Put each destination's secret in its own setting (SETUP.md, Part 5); Stripe then sends this notice again.", 400);
+  }
 
   // Cuvori reads Stripe's classic "Snapshot" events: the object the event is about travels inside it (data.object). A
   // "Thin" event (Stripe's newer format, offered when an event destination is created) carries only a reference, and an
