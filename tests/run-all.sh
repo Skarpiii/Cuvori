@@ -22,6 +22,7 @@ echo "== processing fee";   out=$(node tests/attack-fee.mjs 2>/dev/null | tail -
 echo "== roles & tampering"; out=$(node tests/attack-roles.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== Stripe accounts per mode"; out=$(node tests/attack-connect.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== webhook formats";  out=$(node tests/attack-webhook-format.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== check of 18 November (the live site's webhook: with the two webhook secrets swapped in Netlify, a notice about Cuvori's own account is refused until they are put right, never dropped)"; out=$(node tests/attack-check-nov18-live.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== error texts";      out=$(node tests/attack-error-text.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== retry keys";       out=$(node tests/attack-idempotency.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== payment races";    out=$(node tests/attack-payment-race.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1

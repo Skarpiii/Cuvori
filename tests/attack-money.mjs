@@ -6,6 +6,10 @@ import { DB, STRIPE, users, hooks, urls, req, signed, sigFor, call, mk, past, mo
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
 const info = (m) => out.push("info       " + m);
+// the second webhook secret (the freelancers' own Stripe accounts): the functions read it once, as they start, so it is set
+// before they are loaded (check of 18 November: set later, in B13, it never reached them, and B13b/B13c passed only
+// because the notice fitted neither secret)
+process.env.STRIPE_CONNECT_WEBHOOK_SECRET = "whsec_connect";
 const fx = await fns();
 const ledger = (c, kind) => DB.order_payments.filter(p => p.order_id === c.id && (!kind || p.kind === kind));
 const events = (c) => DB.order_events.filter(e => e.order_id === c.id).map(e => e.event);
@@ -215,10 +219,13 @@ const chargeOf = (pi) => STRIPE.charges[STRIPE.intents[pi].latest_charge];
   const d = await call(fx.webhook, req("POST", "x", tampered));
   const e = await call(fx.webhook, req("POST", "x", { raw: good.raw, headers: {} }));
   vuln([a, b, d, e].some(r => r.status !== 400) || c.status !== "accepted", `B13a wrong secret ${a.status}, 10-min-old ${b.status}, tampered body ${d.status}, no header ${e.status} -> status=${c.status}`);
-  process.env.STRIPE_CONNECT_WEBHOOK_SECRET = "whsec_connect";
+  // a payment notice that only the second secret fits, without Stripe's account mark: the two secrets swapped in Netlify.
+  // Refused (Stripe shows it as failed and sends it again once they are put right), never acted on.
   const f = await call(fx.webhook, req("POST", "x", signed(evt, "whsec_connect")));
-  info(`B13b a checkout event signed with the Connect secret -> ${f.status}, status=${c.status} (must stay accepted: ${c.status === "accepted"})`);
-  vuln(c.status !== "accepted", `B13c ...connect-signed checkout event funded the order`);
+  vuln(f.status !== 400 || !/STRIPE_CONNECT_WEBHOOK_SECRET/.test(JSON.stringify(f.json || "")) || c.status !== "accepted", `B13b a payment notice that fits only the second webhook secret (the two swapped in Netlify) -> ${f.status} ${JSON.stringify(f.json || "").slice(0, 90)}, status=${c.status} (must be: refused, naming the setting; the Order not funded)`);
+  // a payment notice from a freelancer's own Stripe account (Stripe's account mark on it): received, never a Cuvori payment
+  const f2 = await call(fx.webhook, req("POST", "x", signed({ ...evt, account: "acct_1EditorAAAAAAAA" }, "whsec_connect")));
+  vuln(f2.status !== 200 || c.status !== "accepted", `B13c a payment notice marked as a freelancer's own Stripe account's, with the second secret -> ${f2.status}, status=${c.status} (must be: received, the Order not funded)`);
   const g = await call(fx.webhook, req("POST", "x", signed({ type: "payment_intent.created", data: { object: { id: "pi_x" } } })));
   vuln(g.status !== 200, `B13d an event type we do not use -> ${g.status} (must be 200 so Stripe stops retrying)`);
   const h = await call(fx.webhook, req("GET", "x", {}));
