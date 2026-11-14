@@ -74,6 +74,7 @@ Money never touches Cuvori's bank account directly: Stripe holds it in Cuvori's 
    - `STRIPE_SECRET_KEY` = sk_…
    - `STRIPE_WEBHOOK_SECRET` = whsec_…
    - `STRIPE_CONNECT_WEBHOOK_SECRET` = the second destination's whsec_… (step 4, **Connected accounts**)
+     Keep each secret in its own setting. If the two are swapped, Stripe shows every notice about Cuvori's own account (payments, chargebacks, refunds) as failed, and its answer says "the two webhook secrets are swapped in Netlify": swap them back and Stripe sends those notices again.
    - `SITE_URL` = `https://cuvori.io` (where Stripe sends people back after paying or setting up payouts)
    - `SUPABASE_SERVICE_ROLE_KEY` = the service_role key (or `SUPABASE_SECRET_KEY` = Supabase's newer secret key, `sb_secret_…`; if both are set, the newer one is used). Copy it in one piece: a key with a space, a line break or an invisible character in it is never sent — every button then says payments are paused (in the person's language), and Admin panel → Payment costs says **ON, but paused** and names the setting, as it does for the Stripe key.
    - optional: `ALLOWED_ORIGINS` (more page addresses allowed to call the functions, separated by commas; the site address, https://cuvori.io and https://www.cuvori.io are always allowed, so this setting can never lock the page out)
