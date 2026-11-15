@@ -43,7 +43,7 @@ The owner reviews the code by pasting lines into the chat. This applies every ti
 
 - **The page:** `cuvori.io` is GitHub Pages serving `index.html` from `main`. An upload of the page to `main` is live within minutes (the check of 21 November found the live page byte for byte the same as `main`'s `index.html`).
 - **The payment functions** the page calls run at `main--cuvori.netlify.app`, Netlify's build of `main`. Every upload to `main` is built; its payment code is live once Netlify's list shows it **Completed** (app.netlify.com/projects/cuvori/deploys?filter=main).
-- **`production`** is Netlify's production build (`cuvori.netlify.app`), where the hourly job runs. It is deployed only on purpose, with Egidijus's approval.
+- **`production`** is Netlify's production build (`cuvori.netlify.app`), still on the code of 13 October (commit `7131dd0`). The hourly job runs there, and the other payment functions of that code answer there too (the page does not call them: it uses `main--cuvori.netlify.app`). It is deployed only on purpose, with Egidijus's approval, and it reads Netlify's settings only when it is deployed. That older code stops at startup on an address setting written in a way only today's code reads, so the admin page warns about one (`OLD_CODE_READS` in `netlify/lib/cuvori.mjs`, check of 23 November); when production has today's code, remove that check.
 - **A waiting branch** such as `pricing-v2` changes nothing live until it is merged, which needs Egidijus's approval.
 
 ## Checking another copy of Cuvori
