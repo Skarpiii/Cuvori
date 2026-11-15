@@ -70,16 +70,27 @@ export const STRIPE_MODE = !STRIPE_KEY_WHOLE ? null : /^(sk|rk)_live_/.test(STRI
 export const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 // the optional second endpoint, for events about the freelancers' own Stripe accounts: read like every other setting
 export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
+// A webhook signing secret is one word: whsec_ and then letters and digits, as Stripe shows it. One with quotes around it, a
+// line break or a space inside (a paste that wrapped), an invisible character, or another key pasted into its place (sk_…,
+// pk_…) can never check Stripe's signature: every notice to that endpoint would be refused, and nothing said why (check of
+// 22 November). The admin page now names the setting to correct, never the secret. Payments stay on: the page records a
+// payment when the client comes back from paying; what only comes as a notice waits until the setting is corrected.
+const WEBHOOK_SECRET_SHAPE = /^whsec_[A-Za-z0-9_+/=-]+$/;
+for (const [name, secret, what] of [["STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET, "about Cuvori's payments, refunds and chargebacks"], ["STRIPE_CONNECT_WEBHOOK_SECRET", CONNECT_WEBHOOK_SECRET, "about the freelancers' Stripe accounts"]])
+  if (secret && !WEBHOOK_SECRET_SHAPE.test(secret))
+    note(`${name} can't be a Stripe webhook signing secret: it must be one word that starts with whsec_, copied from Stripe without quotes, spaces or line breaks. Until it is corrected, Stripe's notices ${what} are refused. ${WHERE}`);
 // Where Stripe sends people back (after paying, after setting up payouts). Not set: Netlify's own address (URL), and the
 // admin page says so, since that address may serve an older copy of the page. Set but not a web address: Cuvori's own
 // address, never Netlify's.
 export const SITE_URL = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
-// SITE_URL set to a website other than cuvori.io (a typo such as cuvori.co, a password pasted into the wrong field, an
-// address with a folder, whose folder is dropped): used as it is, since that may be on purpose, but the admin page says so.
-// Which website it is stays unsaid, like everything read from a setting.
-const CUVORI_HOSTS = ["cuvori.io", "www.cuvori.io"];
-if (env("SITE_URL") && ![...CUVORI_HOSTS, ...LOCAL_HOSTS].includes(new URL(SITE_URL).hostname))
-  note(`SITE_URL leads to a website other than cuvori.io, so Stripe sends clients there after paying, and freelancers after setting up payouts. If that is not on purpose, correct it in Netlify under Project configuration → Environment variables.`);
+// SITE_URL set to anything but Cuvori's own address, https://cuvori.io or https://www.cuvori.io: a typo such as cuvori.co, a
+// password pasted into the wrong field, an address with a folder, whose folder is dropped, and since the check of 22 November
+// also a test address on a computer (localhost) or cuvori.io with a port number, where Stripe would send people to a page that
+// does not open. Used as it is, since that may be on purpose, but the admin page says so. Which address it is stays unsaid,
+// like everything read from a setting.
+const CUVORI_ORIGINS = [CUVORI_SITE, "https://www.cuvori.io"];
+if (env("SITE_URL") && !CUVORI_ORIGINS.includes(SITE_URL))
+  note(`SITE_URL is not Cuvori's own address (https://cuvori.io or https://www.cuvori.io): it leads to another website, a test address or another port, so Stripe sends clients there after paying, and freelancers after setting up payouts. If that is not on purpose, correct it in Netlify under Project configuration → Environment variables.`);
 if (!env("SITE_URL")) note(SITE_URL === CUVORI_SITE ? `SITE_URL is not set; Cuvori uses ${CUVORI_SITE}. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`
   : `SITE_URL is not set, so Stripe sends clients back to ${SITE_URL} after paying, which may show an older copy of the page. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`);
 // the page may live on another host (GitHub Pages) and call these functions across origins. The page's own addresses
