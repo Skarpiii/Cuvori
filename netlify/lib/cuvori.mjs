@@ -40,12 +40,32 @@ function originOf(value) {
 }
 const note = (text) => { SETTINGS_NOTES.push(text); console.error("Netlify setting:", text); };
 const WHERE = "Correct it in Netlify under Project configuration → Environment variables.";
+// Production (cuvori.netlify.app) still runs the code of 13 October, which reads these three settings strictly: each address
+// in full (https://, or http:// for a computer's own address) with nothing after it but one "/", several in ALLOWED_ORIGINS
+// separated by commas only, at least one. Any other way of writing them stops every payment function there at startup, the
+// hourly payouts with them. Netlify gives production a changed setting only when it is deployed again (SETUP.md, Part 3,
+// item 7), so a setting this code reads without trouble (semicolons between the addresses, "//" at the end, a list with no
+// address in it) stopped production at that deploy, and nothing said so (check of 23 November). Now the admin page says so,
+// naming only the setting. OLD_CODE_READS is production's own rule, copied from its configuredOrigin; once production has
+// this code, these lines and their note can go.
+const OLD_CODE_READS = (value) => { let url; try { url = new URL(value); } catch { return false; }
+  const local = LOCAL_HOSTS.includes(url.hostname);
+  return !((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash); };
+const OLD_CODE_READS_LIST = (value) => { const list = value.split(",").map(s => s.trim()).filter(Boolean); return list.length > 0 && list.every(OLD_CODE_READS); };
+const oldCodeNote = (name, list) => note(`${name} is written in a way production's older code (13 October, cuvori.netlify.app) can't read: if production is deployed again before it has this code, all its payment functions and the hourly payouts stop at startup. Write it in full in Netlify under Project configuration → Environment variables: https:// and the address, nothing after it${list ? ", several separated by commas only" : ""}.`);
 function addressSetting(name, value, fallback, kind = null) {
   if (!value) return fallback;
+  const oldReads = OLD_CODE_READS(value);
+  const used = readAddress(name, value, fallback, kind, oldReads);
+  if (!oldReads) oldCodeNote(name, false);
+  return used;
+}
+function readAddress(name, value, fallback, kind, oldReads) {
   const o = originOf(value);
   if (!o) { note(`${name} is not a web address, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
   if (kind && !kind.ok(o.origin)) { note(`${name} is not ${kind.what}, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
-  if (o.corrected) note(`${name} is not written as a full web address; Cuvori corrected it. Check it in Netlify under Project configuration → Environment variables.`);
+  // written the short way: when production's code can't read it, the note about that already says to write it in full
+  if (o.corrected && oldReads) note(`${name} is not written as a full web address; Cuvori corrected it. Check it in Netlify under Project configuration → Environment variables.`);
   return o.origin;
 }
 const CUVORI_SITE = "https://cuvori.io";
@@ -95,11 +115,13 @@ if (!env("SITE_URL")) note(SITE_URL === CUVORI_SITE ? `SITE_URL is not set; Cuvo
   : `SITE_URL is not set, so Stripe sends clients back to ${SITE_URL} after paying, which may show an older copy of the page. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`);
 // the page may live on another host (GitHub Pages) and call these functions across origins. The page's own addresses
 // (SITE_URL, cuvori.io, www.cuvori.io) are always allowed, so no setting can lock the page out of its payment functions;
-// ALLOWED_ORIGINS adds more, separated by commas or semicolons. An entry that is not one web address — "*" for every
-// website, or one with a space or line break inside it from a paste that wrapped — is left out, never split into pieces.
+// ALLOWED_ORIGINS adds more, separated by commas (semicolons are read too, but production's older code stops on them, so the
+// admin page says so: OLD_CODE_READS above). An entry that is not one web address — "*" for every website, or one with a
+// space or line break inside it from a paste that wrapped — is left out, never split into pieces.
 const DEFAULT_ORIGINS = [...new Set([SITE_URL, "https://cuvori.io", "https://www.cuvori.io"])];
 function originsSetting(value) {
   if (!value) return DEFAULT_ORIGINS;
+  const oldReads = OLD_CODE_READS_LIST(value);
   const list = [];
   let left = 0, fixed = 0;
   for (const entry of value.split(/[,;]+/).map(e => e.trim()).filter(Boolean)) {
@@ -109,7 +131,8 @@ function originsSetting(value) {
     list.push(o.origin);
   }
   if (left) note(`ALLOWED_ORIGINS has ${left} ${left === 1 ? "entry" : "entries"} that ${left === 1 ? "is" : "are"} not one web address ("*" for every website is never allowed); ${left === 1 ? "it is" : "they are"} left out. Cuvori's own addresses stay allowed. ${WHERE}`);
-  if (fixed) note(`ALLOWED_ORIGINS has ${fixed} ${fixed === 1 ? "entry" : "entries"} not written as a full web address; Cuvori corrected ${fixed === 1 ? "it" : "them"}. Check it in Netlify under Project configuration → Environment variables.`);
+  if (fixed && oldReads) note(`ALLOWED_ORIGINS has ${fixed} ${fixed === 1 ? "entry" : "entries"} not written as a full web address; Cuvori corrected ${fixed === 1 ? "it" : "them"}. Check it in Netlify under Project configuration → Environment variables.`);
+  if (!oldReads) oldCodeNote("ALLOWED_ORIGINS", true);
   return [...new Set([...DEFAULT_ORIGINS, ...list])];
 }
 export const ALLOWED_ORIGINS = originsSetting(env("ALLOWED_ORIGINS"));
