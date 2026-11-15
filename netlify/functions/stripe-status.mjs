@@ -6,7 +6,9 @@
 // SUPABASE_SERVICE_ROLE_KEY): whether it can be used, never the key. Both stay in the answer anyone gets: without a working
 // database key nobody can be told apart as an admin, and that is exactly when the admin panel must say so.
 // settingsNotes: a web-address setting in Netlify that had to be read loosely or replaced (SITE_URL, ALLOWED_ORIGINS,
-// SUPABASE_URL), for the admin panel. Only the setting's name and the address Cuvori uses, never what was typed. Only an
+// SUPABASE_URL), SITE_URL that is not Cuvori's own address, or a webhook signing secret that can't be one
+// (STRIPE_WEBHOOK_SECRET, STRIPE_CONNECT_WEBHOOK_SECRET; check of 22 November), for the admin panel. Only the setting's name
+// and the address Cuvori uses, never what was typed. Only an
 // admin (the request carries their sign-in) gets them: anyone can call this, and how Cuvori's settings are set up is
 // nobody else's business. A sign-in that can't be checked right now never stops the answer: the notes are then left out.
 // heldApart: whether money is held apart at Stripe (STRIPE_FUNDS_SEGREGATION), where it is asked for (STRIPE_FS_WHERE: on
