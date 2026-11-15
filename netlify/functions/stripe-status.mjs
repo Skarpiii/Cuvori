@@ -6,7 +6,8 @@
 // SUPABASE_SERVICE_ROLE_KEY): whether it can be used, never the key. Both stay in the answer anyone gets: without a working
 // database key nobody can be told apart as an admin, and that is exactly when the admin panel must say so.
 // settingsNotes: a web-address setting in Netlify that had to be read loosely or replaced (SITE_URL, ALLOWED_ORIGINS,
-// SUPABASE_URL), SITE_URL that is not Cuvori's own address, or a webhook signing secret that can't be one
+// SUPABASE_URL) or that production's older code can't read (check of 23 November), SITE_URL that is not Cuvori's own
+// address, or a webhook signing secret that can't be one
 // (STRIPE_WEBHOOK_SECRET, STRIPE_CONNECT_WEBHOOK_SECRET; check of 22 November), for the admin panel. Only the setting's name
 // and the address Cuvori uses, never what was typed. Only an
 // admin (the request carries their sign-in) gets them: anyone can call this, and how Cuvori's settings are set up is
