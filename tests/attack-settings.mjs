@@ -30,6 +30,9 @@
 // now the admin page names the setting, never the secret. A17 SITE_URL anything but https://cuvori.io or
 // https://www.cuvori.io, also a test address on a computer (localhost) or cuvori.io with a port number, where Stripe would
 // send clients after paying to a page that does not open: used, and the admin page says so, never which address.
+// Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
+// between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
+// function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
 // Run: node tests/attack-settings.mjs
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -157,7 +160,7 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   const r = load({ SITE_URL: "www.cuvori.io/", ALLOWED_ORIGINS: "main--cuvori.netlify.app", SUPABASE_URL: "tnxujwlfatcvxzevllfr.supabase.co" });
   const shown = JSON.stringify(r.notes || []) + (r.body || "");
   vuln(!works(r) || r.site !== "https://www.cuvori.io" || !noted(r, "SITE_URL") || !noted(r, "ALLOWED_ORIGINS") || !noted(r, "SUPABASE_URL") || /www\.cuvori\.io|main--cuvori|tnxujwlfatcvxzevllfr/.test(shown),
-    `A11 three settings written the short way -> ${said(r)}; notes: ${JSON.stringify(r.notes).slice(0, 200)} (must name the three settings, and none of the addresses read from them)`);
+    `A11 three settings written the short way -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 200) : "none"} (must name the three settings, and none of the addresses read from them)`);
 }
 { // A12 an "@" inside an address: "cuvori.io@evil.com" is the website evil.com, so it is never used
   for (const [name, v] of [["SITE_URL", "cuvori.io@evil.com"], ["SITE_URL", "https://cuvori.io@evil.com"], ["ALLOWED_ORIGINS", "cuvori.io@evil.com"], ["SUPABASE_URL", "x@other-project.supabase.co"]]) {
@@ -233,6 +236,80 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     const r = load({ SITE_URL: v });
     vuln(r.error || (r.notes || []).some(n => SAYS.test(n)), `A17b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no such note)`);
   }
+}
+{ // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
+  // (cuvori.netlify.app) still runs the code of 13 October, which reads SITE_URL, SUPABASE_URL and ALLOWED_ORIGINS strictly and
+  // stops at startup on any other way of writing them: every payment function there, and the hourly payouts with them. Netlify
+  // gives production a changed setting only when it is deployed again, and SETUP.md (Part 3, item 7) says to do just that after
+  // changing one; so a setting this code reads without a word stopped production at that deploy: semicolons between the
+  // addresses in ALLOWED_ORIGINS (which a comment here said were fine), two slashes at the end of an address, a list with no
+  // address in it. Now the admin page says so, naming only the setting, and this code still reads it as before.
+  // OLD_ONE and OLD: production's own rule, copied from netlify/lib/cuvori.mjs at commit 7131dd0 (configuredOrigin, and the
+  // line that splits ALLOWED_ORIGINS): true when that code loads with the setting.
+  const OLD_ONE = (value) => { let url; try { url = new URL(value); } catch { return false; }
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    return !((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash); };
+  const OLD = (name, value) => { const v = value.trim(); if (name !== "ALLOWED_ORIGINS") return OLD_ONE(v);
+    const list = v.split(",").map(s => s.trim()).filter(Boolean); return list.length > 0 && list.every(OLD_ONE); };
+  const prodNotes = (notes, name) => (notes || []).filter(n => n.startsWith(name + " ") && /production/.test(n));
+  const P = "https://tnxujwlfatcvxzevllfr.supabase.co", OWN = ["https://cuvori.io", "https://www.cuvori.io"], MAIN = [...OWN, "https://main--cuvori.netlify.app"];
+  const texts = {};
+  // a: production stops on these; this code must load, read them as before, and tell the admin, once, naming the setting only
+  for (const [name, v, want] of [
+    ["ALLOWED_ORIGINS", "https://cuvori.io;https://main--cuvori.netlify.app", MAIN], ["ALLOWED_ORIGINS", "https://cuvori.io; https://main--cuvori.netlify.app", MAIN],
+    ["ALLOWED_ORIGINS", "https://main--cuvori.netlify.app//", MAIN], ["ALLOWED_ORIGINS", ",", OWN], ["ALLOWED_ORIGINS", ";;", OWN],
+    ["SITE_URL", "https://cuvori.io//", "https://cuvori.io"], ["SITE_URL", "HTTPS://WWW.CUVORI.IO///", "https://www.cuvori.io"], ["SUPABASE_URL", P + "//", P],
+    ["SITE_URL", "cuvori.io", "https://cuvori.io"], ["ALLOWED_ORIGINS", "*", OWN], ["SUPABASE_URL", "my supabase", P], ["ALLOWED_ORIGINS", "cuvori.io;main--cuvori.netlify.app/", MAIN]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const read = name === "SITE_URL" ? r.site : name === "SUPABASE_URL" ? r.supabase : r.origins;
+    const mine = prodNotes(r.notes, name), all = (r.notes || []).filter(n => n.startsWith(name + " "));
+    for (const n of mine) (texts[name] = texts[name] || new Set()).add(n);
+    const told = mine.length === 1 && (r.body || "").includes(JSON.stringify(mine[0]).slice(1, -1)) && mine[0].length <= 400 && (name !== "ALLOWED_ORIGINS" || /commas/.test(mine[0]));
+    const twice = all.filter(n => /full/.test(n)).length > 1;   // "write it in full", "not written as a full web address"
+    vuln(OLD(name, v) || !works(r) || JSON.stringify(read) !== JSON.stringify(want) || !told || twice,
+      `A18 ${name} = ${JSON.stringify(v)} (production's code: ${OLD(name, v) ? "loads" : "stops"}) -> ${said(r)}; the admin told production can't read it: ${told ? "yes" : "no"}${twice ? " (and told twice to write it in full)" : ""}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 220) : "none"} (must load and read it as before, and say so once, in at most 400 characters, the page's limit)`);
+  }
+  for (const [name, set] of Object.entries(texts))   // one text per setting: nothing typed in the setting gets into the note
+    vuln(set.size !== 1, `A18 the note for ${name} is the same whatever was typed: ${set.size === 1 ? "yes" : "no, " + set.size + " texts"} (must be one text, so nothing typed is repeated)`);
+  // b: the ways production's code reads: no such note
+  for (const [name, v] of [["SITE_URL", "https://cuvori.io"], ["SITE_URL", "https://cuvori.io/"], ["SITE_URL", "HTTPS://CUVORI.IO"], ["SITE_URL", "https://www.cuvori.io/"], ["SITE_URL", null],
+    ["ALLOWED_ORIGINS", "https://cuvori.io,https://www.cuvori.io"], ["ALLOWED_ORIGINS", " https://cuvori.io , https://main--cuvori.netlify.app/ ,"], ["ALLOWED_ORIGINS", "http://localhost:8888,https://cuvori.io"],
+    ["SUPABASE_URL", P], ["SUPABASE_URL", P + "/"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const any = ["SITE_URL", "URL", "SUPABASE_URL", "ALLOWED_ORIGINS"].flatMap(k => prodNotes(r.notes, k));
+    vuln(!works(r) || any.length, `A18b ${name} = ${JSON.stringify(v)} -> ${said(r)}; notes ${JSON.stringify(r.notes)} (normal: no note about production)`);
+  }
+  // c: the note comes exactly when production's code would stop: 633 ways of writing the three settings, each loaded on its own
+  const SWEEP = `
+    const { pathToFileURL } = await import("node:url"), cases = JSON.parse(process.env.T_CASES), res = [], quiet = console.error;
+    const base = { URL: "https://cuvori.netlify.app", SITE_URL: "https://cuvori.io", STRIPE_SECRET_KEY: "sk_test_abc123", SUPABASE_SERVICE_ROLE_KEY: "eyJ.a.b", STRIPE_WEBHOOK_SECRET: "whsec_x" };
+    console.error = () => {};
+    for (let i = 0; i < cases.length; i++) {
+      for (const k of ["SITE_URL", "SUPABASE_URL", "ALLOWED_ORIGINS"]) delete process.env[k];
+      Object.assign(process.env, base, { [cases[i][0]]: cases[i][1] });
+      try { res.push({ notes: (await import(pathToFileURL(process.env.T_ROOT + "/netlify/lib/cuvori.mjs").href + "?case=" + i)).SETTINGS_NOTES }); }
+      catch (e) { res.push({ error: String(e && e.message) }); }
+    }
+    console.error = quiet; console.log("RESULT " + JSON.stringify(res));`;
+  const cases = [];
+  for (const p of ["https://", "HTTPS://", "Https://", "https:", "https:/", "https:///", "//", "", "http://"])
+    for (const s of ["", "/", "//", "///", "/.", "/./", "/x", "?", "/?", "#", "/#", "?a=1", ":443", ":8443", "\\", "/\\", ".", "/%2e", ":", "/;", ";"])
+      cases.push(["SITE_URL", p + "cuvori.io" + s], ["SUPABASE_URL", p + "tnxujwlfatcvxzevllfr.supabase.co" + s], ["ALLOWED_ORIGINS", p + "main--cuvori.netlify.app" + s]);
+  for (const sep of [",", ", ", " ,", ";", "; ", " ; ", ",,", ";,", ",;", "\n", "\r\n", " ", "\t", "|", "\uff0c", "\uff1b", " and "])
+    for (const [a, b] of [["https://cuvori.io", "https://www.cuvori.io"], ["https://cuvori.io", "https://main--cuvori.netlify.app"], ["http://localhost:8888", "https://cuvori.io"]])
+      cases.push(["ALLOWED_ORIGINS", a + sep + b]);
+  for (const v of [",", ";", ",,", ", ,", ";;", " , ; ", "https://cuvori.io,", ",https://cuvori.io", "https://cuvori.io;", ";https://cuvori.io", "https://cuvori.io,,https://www.cuvori.io", "https://cuvori.io, ,https://www.cuvori.io", "*", "https://*.cuvori.io", "null"])
+    cases.push(["ALLOWED_ORIGINS", v]);
+  const sw = spawnSync(process.execPath, ["--input-type=module", "-e", SWEEP], { env: { PATH: process.env.PATH, HOME: process.env.HOME, T_ROOT: root, T_CASES: JSON.stringify(cases) }, encoding: "utf8", timeout: 120000, maxBuffer: 64 << 20 });
+  const res = JSON.parse(((sw.stdout || "").split("\n").find(l => l.startsWith("RESULT ")) || "RESULT []").slice(7));
+  const wrong = cases.map(([name, v], i) => ({ name, v, stops: !OLD(name, v), r: res[i] || { error: "no answer" } }))
+    .filter(c => c.r.error || (prodNotes(c.r.notes, c.name).length === 1) !== c.stops || prodNotes(c.r.notes, c.name).length > 1);
+  const stopsN = cases.filter(([name, v]) => !OLD(name, v)).length;
+  vuln(res.length !== cases.length || wrong.length, `A18c ${cases.length} ways of writing the three settings (production's code stops on ${stopsN}) -> ${res.length} loaded; told wrongly: ${wrong.length}${wrong.length ? ", e.g. " + wrong.slice(0, 4).map(c => `${c.name}=${JSON.stringify(c.v)} (production ${c.stops ? "stops" : "loads"}; ${c.r.error ? "this code stops: " + c.r.error : "notes " + JSON.stringify(c.r.notes).slice(0, 90)})`).join("; ") : ""} (must be told exactly when production's code stops, and this code never stops)`);
+  // d: everything wrong at once: every note still reaches the admin page whole (it shows at most 10, each up to 400 characters)
+  const r = load({ SITE_URL: "cuvori io", SUPABASE_URL: "my supabase", ALLOWED_ORIGINS: "*;cuvori.io", STRIPE_WEBHOOK_SECRET: '"whsec_x"', STRIPE_CONNECT_WEBHOOK_SECRET: "sk_live_x" });
+  vuln(!works(r) || !r.notes || r.notes.length > 10 || r.notes.some(n => n.length > 400) || ["SITE_URL", "SUPABASE_URL", "ALLOWED_ORIGINS"].some(k => prodNotes(r.notes, k).length !== 1),
+    `A18d five settings wrong at once -> ${said(r)}; ${r.notes ? r.notes.length : 0} notes, the longest ${r.notes ? Math.max(0, ...r.notes.map(n => n.length)) : 0} characters (must be at most 10, each at most 400, with the production note for each address setting)`);
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;
