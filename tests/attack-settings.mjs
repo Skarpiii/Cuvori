@@ -26,6 +26,11 @@
 // anyone can register), so it counts as not an address. A14 SITE_URL that leads somewhere other than cuvori.io (a typo, a
 // password-like value, an address with a folder, whose folder is dropped): it is used, and the admin page says Stripe sends
 // clients and freelancers to another website — without repeating it. A15 the notes go only to a signed-in admin.
+// Check of 22 November: A16 a webhook signing secret that can't be one (quotes around it, a line break, space or invisible
+// character inside, another key pasted in its place): every notice from Stripe would be refused and nothing would say why;
+// now the admin page names the setting, never the secret. A17 SITE_URL anything but https://cuvori.io or
+// https://www.cuvori.io, also a test address on a computer (localhost) or cuvori.io with a port number, where Stripe would
+// send clients after paying to a page that does not open: used, and the admin page says so, never which address.
 // Run: node tests/attack-settings.mjs
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -183,17 +188,17 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   }
 }
 { // A14 SITE_URL leads to a website other than cuvori.io: used, and the admin page says so without repeating it
-  const OTHER = "a website other than cuvori.io";
+  const OTHER = /a website other than cuvori\.io|is not Cuvori's own address/;   // the note before and since 22 November
   for (const [v, site] of [["cuvori.co", "https://cuvori.co"], ["MySECRETdoNotShow0.Secret", "https://mysecretdonotshow0.secret"], ["https://egidijus.github.io/cuvori/", "https://egidijus.github.io"], ["https://xn--cuvri-lye.io", "https://xn--cuvri-lye.io"]]) {
     const r = load({ SITE_URL: v });
     const shown = JSON.stringify(r.notes || []) + (r.body || "") + r.log;
     const repeated = /cuvori\.co[^a-z]|secretdonotshow|github|cuvri/i.test(shown);
-    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => n.includes(OTHER)) || repeated,
+    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => OTHER.test(n)) || repeated,
       `A14 SITE_URL = ${JSON.stringify(v)} -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 160) : "none"}; repeated: ${repeated ? "YES" : "no"} (must say Stripe sends people to ${OTHER}, never which one)`);
   }
-  for (const v of ["cuvori.io", "https://www.cuvori.io", "https://cuvori.io/#home", "localhost:8888", "http://127.0.0.1:8888"]) {
+  for (const v of ["cuvori.io", "https://www.cuvori.io", "https://cuvori.io/#home"]) {      // a test address on a computer: A17
     const r = load({ SITE_URL: v });
-    vuln(r.error || (r.notes || []).some(n => n.includes(OTHER)), `A14b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no "other website" note)`);
+    vuln(r.error || (r.notes || []).some(n => OTHER.test(n)), `A14b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no "other website" note)`);
   }
 }
 { // A15 the settings notes go to a signed-in admin only: the answer anyone gets says what the page needs, never the notes
@@ -201,6 +206,47 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   let pub = {}; try { pub = JSON.parse(r.publicBody || "{}"); } catch {}
   vuln(!works(r) || !noted(r, "SITE_URL") || /SITE_URL|ALLOWED_ORIGINS|settingsNotes/.test(r.publicBody || "") || pub.escrow !== true || pub.autoReleaseDays !== 7 || pub.stripeKeyOk !== true || pub.databaseKeyOk !== true,
     `A15 two settings to correct -> the admin is told: ${noted(r, "SITE_URL") ? "yes" : "no"}; anyone else gets ${r.publicBody} (must be only escrow, the two key checks and the days, no notes)`);
+}
+{ // A16 (check of 22 November) a webhook signing secret that can't be one: every notice from Stripe would be refused, and
+  // nothing would say why. The admin page names the setting; the secret is never shown or written to the log; payments stay on.
+  const GOOD = "whsec_" + "Ab1".repeat(11), CLI = "whsec_" + "0123456789abcdef".repeat(4), SIGNS = "whsec_Ab1+Cd2/Ef3_Gh4-Ij5=";
+  const WH = /STRIPE_(CONNECT_)?WEBHOOK_SECRET/;
+  for (const [label, sec] of [["as Stripe's dashboard shows them", GOOD], ["from the Stripe CLI", CLI], ["with spaces and a line break at the ends", `  ${GOOD} \n`], ["with the signs a base64 secret may hold (+ / = _ -)", SIGNS]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", STRIPE_WEBHOOK_SECRET: sec, STRIPE_CONNECT_WEBHOOK_SECRET: sec });
+    vuln(!works(r) || (r.notes || []).some(n => WH.test(n)), `A16a both webhook secrets ${label} -> notes ${JSON.stringify(r.notes)} (normal: no note)`);
+  }
+  for (const [name, label, sec] of [
+    ["STRIPE_WEBHOOK_SECRET", "with quotes around it", '"whsec_SECRETdoNotShow00000000000"'],
+    ["STRIPE_WEBHOOK_SECRET", "wrapped onto two lines", "whsec_SECRETdoNot\nShow00000000000"],
+    ["STRIPE_WEBHOOK_SECRET", "with a space inside", "whsec_SECRETdoNot Show00000000000"],
+    ["STRIPE_WEBHOOK_SECRET", "with an invisible character inside", "whsec_SECRETdoNot\u200bShow0000000000"],
+    ["STRIPE_WEBHOOK_SECRET", "with the Stripe secret key pasted in its place", "sk_live_51SECRETdoNotShow0000"],
+    ["STRIPE_CONNECT_WEBHOOK_SECRET", "with quotes around it", "'whsec_SECRETdoNotShow00000000000'"],
+    ["STRIPE_CONNECT_WEBHOOK_SECRET", "with the publishable key pasted in its place", "pk_live_51SECRETdoNotShow0000"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", STRIPE_WEBHOOK_SECRET: GOOD, STRIPE_CONNECT_WEBHOOK_SECRET: GOOD, [name]: sec });
+    const other = name === "STRIPE_WEBHOOK_SECRET" ? "STRIPE_CONNECT_WEBHOOK_SECRET" : "STRIPE_WEBHOOK_SECRET";
+    const named = (r.notes || []).some(n => n.startsWith(name + " ")) && (r.body || "").includes(name);
+    const wrongOne = (r.notes || []).some(n => n.startsWith(other + " "));
+    const leaked = /SECRETdoNot|secretdonot|Show0000/i.test(r.log + (r.body || "") + (r.publicBody || "") + JSON.stringify(r.notes || ""));
+    const on = /"escrow":true/.test(r.body || "");
+    vuln(!works(r) || !named || wrongOne || leaked || !on,
+      `A16 ${name} ${label} -> the admin is told which setting: ${named ? "yes" : "no"}${wrongOne ? " (and the other one too)" : ""}; the secret shown or logged: ${leaked ? "YES" : "no"}; payments on: ${on ? "yes" : "no"} (must name it, never show it)`);
+  }
+}
+{ // A17 (check of 22 November) SITE_URL anything but Cuvori's own address, also a test address on a computer or cuvori.io with a
+  // port number: Stripe would send clients there after paying, to a page that does not open. Used, and the admin page says so.
+  const SAYS = /is not Cuvori's own address|a website other than cuvori\.io/;
+  for (const [v, site] of [["http://localhost:8888", "http://localhost:8888"], ["localhost:8888", "http://localhost:8888"], ["http://127.0.0.1:8888", "http://127.0.0.1:8888"],
+                           ["https://cuvori.io:8443", "https://cuvori.io:8443"], ["https://www.cuvori.io:8443", "https://www.cuvori.io:8443"]]) {
+    const r = load({ SITE_URL: v });
+    const repeated = /8888|8443|localhost|127\.0\.0\.1/.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
+    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => SAYS.test(n)) || repeated,
+      `A17 SITE_URL = ${JSON.stringify(v)} -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 160) : "none"}; repeated: ${repeated ? "YES" : "no"} (must be used, and the admin told it is not Cuvori's own address, never which one)`);
+  }
+  for (const v of ["https://cuvori.io", "https://www.cuvori.io", "cuvori.io", "https://cuvori.io:443", "http://www.cuvori.io:80"]) {
+    const r = load({ SITE_URL: v });
+    vuln(r.error || (r.notes || []).some(n => SAYS.test(n)), `A17b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no such note)`);
+  }
 }
 console.log(out.join("\n"));
 const badN = out.filter(l => l.startsWith("VULNERABLE")).length;
