@@ -4,7 +4,8 @@
 // "ON, but paused" when it is not. databaseKeyOk: the same for the database key (SUPABASE_SECRET_KEY or the older
 // SUPABASE_SERVICE_ROLE_KEY): whether it can be used, never the key.
 // settingsNotes: a web-address setting in Netlify that had to be read loosely or replaced (SITE_URL, ALLOWED_ORIGINS,
-// SUPABASE_URL), SITE_URL that is not Cuvori's own address, or a webhook signing secret that can't be one
+// SUPABASE_URL) or that production's older code can't read (check of 23 November), SITE_URL that is not Cuvori's own
+// address, or a webhook signing secret that can't be one
 // (STRIPE_WEBHOOK_SECRET, STRIPE_CONNECT_WEBHOOK_SECRET; check of 22 November), for the admin panel. Only the setting's name
 // and the address Cuvori uses, never what was typed.
 import { escrowEnabled, STRIPE_MODE, SERVICE_KEY_OK, AUTO_RELEASE_DAYS, SETTINGS_NOTES, json, safe } from "../lib/cuvori.mjs";
