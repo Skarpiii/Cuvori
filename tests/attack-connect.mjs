@@ -14,6 +14,8 @@
 // K5–K6: the database's "ready" mark (the page's Fund button) follows every check, under the one rule all four places use;
 // two overlapping checks of the same Order never wipe out or replace what the other just found.
 // K7: a broken answer from the database (not JSON, cut off, a row without its yes/no) stops a payment, never passes for "not banned".
+// C10 (check of 25 November): one error answer from Stripe while a freelancer's Stripe account is made no longer makes
+// "Set up payouts with Stripe" fail on every click for a day; a lost answer, and two clicks at once, still make one account.
 // The test-mode part runs here; the file then runs itself again with live keys for the live-mode part.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -90,14 +92,16 @@ if (!LIVE) {
     const p = await connect("POST");
     reset();
     const made = row().stripe_account_id, keys = [...STRIPE.idem.keys()].filter(k => k.startsWith("acct3_"));
-    vuln(p.status !== 200 || !made || made === ORIGINAL || !keys.includes(`acct3_test_${users.ed.id}_${ORIGINAL}`),
-      `C5 then "Set up payouts with Stripe" -> ${p.status}; new account ${made} (not the old one), retry key names the replaced account: ${keys.includes(`acct3_test_${users.ed.id}_${ORIGINAL}`)}`);
+    // (a key named after the account it replaces: that name, or that name followed by the request's own part, check of 25 November)
+    const named = (list, name) => list.some(k => k === name || k.startsWith(name + ":"));
+    vuln(p.status !== 200 || !made || made === ORIGINAL || !named(keys, `acct3_test_${users.ed.id}_${ORIGINAL}`),
+      `C5 then "Set up payouts with Stripe" -> ${p.status}; new account ${made} (not the old one), retry key names the replaced account: ${named(keys, `acct3_test_${users.ed.id}_${ORIGINAL}`)}`);
     // a 404 "no such account" is the other answer that proves it: the new account disappears too, and gets replaced again with a new key
     delete STRIPE.accounts[made];
     await connect("GET"); const p2 = await connect("POST");
     const h2 = row().stripe_account_history || [];
-    vuln(p2.status !== 200 || h2.length !== 2 || h2[1].id !== made || row().stripe_account_id === made || ![...STRIPE.idem.keys()].includes(`acct3_test_${users.ed.id}_${made}`),
-      `C5 a second account confirmed gone (404) -> ${p2.status}; history ${JSON.stringify(h2.map(x => x.id))}, a third account with its own retry key: ${[...STRIPE.idem.keys()].includes(`acct3_test_${users.ed.id}_${made}`)}`);
+    vuln(p2.status !== 200 || h2.length !== 2 || h2[1].id !== made || row().stripe_account_id === made || !named([...STRIPE.idem.keys()], `acct3_test_${users.ed.id}_${made}`),
+      `C5 a second account confirmed gone (404) -> ${p2.status}; history ${JSON.stringify(h2.map(x => x.id))}, a third account with its own retry key: ${named([...STRIPE.idem.keys()], `acct3_test_${users.ed.id}_${made}`)}`);
   }
   // ---------- C6: retry keys: a retry gets the same account back, never a second one ----------
   {
@@ -145,6 +149,62 @@ if (!LIVE) {
     setMode("test");
     const ok = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: mk().id } }));
     vuln(ok.status !== 200, `C9 back to test mode, Fund works again -> ${ok.status} ${ok.json && ok.json.error || ""}`);
+  }
+
+  // ---------- C10: one error answer from Stripe while the account is made, then Stripe is fine (check of 25 November) ----------
+  // Stripe keeps the first answer it gave for a retry key, errors and 500s included, and hands it back for that key for at
+  // least 24 hours (docs.stripe.com/api/idempotent_requests). The key was the same text on every click, so one such answer
+  // made "Set up payouts with Stripe" fail on every click for a day, also once Stripe was fine again. Now the next click is a
+  // fresh try; a retry after a lost answer still gets the same account back (never a second one), and so do two clicks at once.
+  {
+    // each case starts with nothing saved, after a different account set aside, so each is a new attempt of its own
+    const start = (tag) => { row().stripe_account_id = null; row().stripe_payouts_enabled = false; row().stripe_account_history = [{ id: `acct_1Case${tag}XXXXXXXXXXX`, mode: "test", why: "not found at Stripe", at: "2026-01-01T00:00:00Z" }]; return Object.keys(STRIPE.accounts).length; };
+    const made = (n0) => Object.keys(STRIPE.accounts).length - n0;
+    const err500 = [500, { error: { type: "api_error", message: "An unknown error occurred" } }];
+    let asked = 0, failOnce = false, lose = 0;      // lose: the next answers to "make an account" lost on the way back (Stripe made them and keeps its answer)
+    const failFirst = (path, method) => { if (path === "/accounts" && method === "POST") { asked++; if (failOnce) { failOnce = false; return err500; } } return null; };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => { const r = await realFetch(url, init); if (lose > 0 && /\/v1\/accounts$/.test(String(url)) && (init.method || "GET") === "POST") { lose--; throw new TypeError("fetch failed"); } return r; };
+    try {
+      // a) Stripe answers with an error once (a 500, which Stripe keeps for the key), then is fine
+      let n0 = start("A"); asked = 0; failOnce = true; hooks.stripe = failFirst;
+      const a1 = await connect("POST"), a2 = await connect("POST");
+      reset();
+      vuln(a1.status === 200 || a2.status !== 200 || !(a2.json && a2.json.url) || made(n0) !== 1 || !row().stripe_account_id || asked !== 2,
+        `C10a one error from Stripe while the account is made, then Stripe is fine -> first click ${a1.status}, second ${a2.status}; Stripe really asked ${asked} times, accounts made ${made(n0)}, saved: ${!!row().stripe_account_id} (the second click must ask Stripe afresh and make one account)`);
+      // b) Stripe made the account, but its answer was lost on the way: the next click gets that same account back
+      n0 = start("B"); lose = 1;
+      const b1 = await connect("POST"), b2 = await connect("POST");
+      vuln(b1.status === 200 || b2.status !== 200 || made(n0) !== 1 || !row().stripe_account_id,
+        `C10b Stripe made the account, its answer was lost -> first click ${b1.status}, second ${b2.status}; accounts made ${made(n0)}, saved: ${!!row().stripe_account_id} (must be exactly 1, the same one)`);
+      // c) the try whose answer was lost had failed at Stripe (a 500): Stripe hands that failure back for the kept key
+      n0 = start("C"); lose = 1; asked = 0; failOnce = true; hooks.stripe = failFirst;
+      const c1 = await connect("POST"), c2 = await connect("POST"), c3 = await connect("POST");
+      reset();
+      vuln(c2.status !== 200 || made(n0) !== 1 || !row().stripe_account_id,
+        `C10c a lost answer whose try had failed at Stripe -> clicks ${c1.status}, ${c2.status}, ${c3.status}; Stripe really asked ${asked} times, accounts made ${made(n0)} (the second click must make the account, once)`);
+      // d) two clicks at the same moment (two tabs), Stripe a little slow in making the account: the second click's request
+      //    comes while the first is still running at Stripe (Stripe answers it "still running"); one account, both get the link
+      n0 = start("D"); let slow = true;
+      hooks.stripe = async (path, method) => { if (path === "/accounts" && method === "POST" && slow) { slow = false; await new Promise(r => setTimeout(r, 300)); } return null; };
+      const [d1, d2] = await Promise.all([connect("POST"), connect("POST")]);
+      reset();
+      vuln(d1.status !== 200 || d2.status !== 200 || made(n0) !== 1 || !row().stripe_account_id,
+        `C10d two clicks at the same moment -> ${d1.status} and ${d2.status}; accounts made ${made(n0)} (must be 200 both, one account)`);
+      // e) should Stripe ever say the kept key belongs to a different request (its answer to the first try was lost): the
+      //    click is not refused for a day either, one fresh try is made (the first try's account, if Stripe made one, stays unused)
+      n0 = start("E"); lose = 1;
+      const e1 = await connect("POST");
+      const kept = DB.money_keys.find(k => k.scope.startsWith(`acct3_test_${users.ed.id}_acct_1CaseEXXXXXXXXXXX:`));
+      if (kept && STRIPE.idem.has(kept.key)) STRIPE.idem.set(kept.key, { ...STRIPE.idem.get(kept.key), body: "email=someone-else%40t.com" });
+      const e2 = await connect("POST");
+      vuln(!kept || e2.status !== 200 || !row().stripe_account_id || made(n0) > 2,
+        `C10e Stripe says the kept key belongs to a different request -> first click ${e1.status}, second ${e2.status}; key kept in the database: ${!!kept}, saved: ${!!row().stripe_account_id}, accounts made ${made(n0)} (the second click must work)`);
+    } finally {
+      globalThis.fetch = realFetch; lose = 0; reset();
+      // the freelancer's own account again, for the checks that follow
+      row().stripe_account_id = ORIGINAL; row().stripe_account_history = []; row().stripe_payouts_enabled = true;
+    }
   }
 
   // ---------- K1: Fund: the right reason for the right person ----------
@@ -457,7 +517,7 @@ if (!LIVE) {
   {
     const p = await connect("POST");
     const live = row().stripe_live_account_id;
-    vuln(p.status !== 200 || !live || live === ORIGINAL || testBefore() !== tb || ![...STRIPE.idem.keys()].includes(`acct3_live_${users.ed.id}_first`),
+    vuln(p.status !== 200 || !live || live === ORIGINAL || testBefore() !== tb || ![...STRIPE.idem.keys()].some(k => k === `acct3_live_${users.ed.id}_first` || k.startsWith(`acct3_live_${users.ed.id}_first:`)),
       `L2 "Set up payouts with Stripe" with live keys -> ${p.status}; live account ${live}; test account untouched: ${testBefore() === tb}`);
     Object.assign(STRIPE.accounts[live], { payouts_enabled: true, charges_enabled: true, capabilities: { transfers: "active" }, requirements: { currently_due: [] } });
     const g = await connect("GET");
