@@ -3,10 +3,33 @@
 // other one is never read, changed or removed, so switching the keys (on launch day, or by mistake and back) loses
 // nothing. The only thing that ever sets a saved account aside is Stripe confirming it is gone, and only in test mode;
 // it then moves to the history, never deleted. A live account is never replaced automatically.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, refuse, SITE_URL, safe, isAcct, acctCols, lookupAccount, limitTries, accountReady } from "../lib/cuvori.mjs";
+import { escrowEnabled, stripe, db, userFromRequest, json, bad, refuse, SITE_URL, safe, isAcct, acctCols, lookupAccount, limitTries, accountReady, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint } from "../lib/cuvori.mjs";
 
 const BROKEN = "Stripe connection is broken, contact support";
 const CHANGED = "Your Stripe setup changed a moment ago. Reload the page and try again.";
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Makes the freelancer's Stripe account under a retry key kept in the database (moneyPost), the way a payment page is made
+// (stripe-checkout.mjs). The key's name says the account it replaces and the exact request, so a retry after Stripe's answer
+// was lost gets the same account back, never a second one. After a definite answer from Stripe (an error, a 500 included)
+// the key goes, so the next click is a fresh try. Before (check of 25 November) the key was the same text on every click:
+// Stripe keeps the first answer for a key, errors and 500s included, and hands it back for at least 24 hours, so one error
+// from Stripe made "Set up payouts with Stripe" fail on every click for a day, also once Stripe was fine again.
+// - Two clicks at the same moment: Stripe is still making the first click's account and tells the second to wait. The second
+//   waits a moment and asks again with the same key, and gets that very account (for up to about 4 seconds).
+// - A failure Stripe hands back from its memory of the key (the key was kept after a lost answer, and that try had failed),
+//   or Stripe saying the key belongs to a different request: that key is dropped (only that one) and one fresh try is made.
+async function makeAccount(scope, params) {
+  let waits = 0, fresh = false;
+  for (;;) {
+    try { return await moneyPost(scope, "/accounts", params); }
+    catch (e) {
+      if (idemBusy(e) && waits < 10) { waits++; await sleep(400); continue; }
+      if (!fresh && (idemMismatch(e) || (e && e.replayed && e.status >= 400))) { fresh = true; await dropKeyIf(scope, e.idemKey); continue; }
+      throw e;
+    }
+  }
+}
 
 export default safe(async (req) => {
   if (!["GET", "POST"].includes(req.method)) return bad("Method not allowed", 405);
@@ -50,10 +73,13 @@ export default safe(async (req) => {
   }
   if (!acct) {
     // A new account. Its retry key names the account it replaces (or "first"): a retry of this attempt gets the same
-    // account back, and a later, genuinely new attempt gets a new one, never the old account replayed.
+    // account back, and a later, genuinely new attempt gets a new one, never the old account replayed. The key is kept in
+    // the database and goes after a definite answer from Stripe (makeAccount). (Its name has no Order id after its first
+    // ":", so the database's check of Orders at the new prices, schema v56, never takes it for an Order's money step.)
     const replaces = history.filter(h => h && h.mode === col.mode && isAcct(h.id)).map(h => h.id).pop() || "first";
-    acct = await stripe("POST", "/accounts", { type: "express", email: me.email, capabilities: { transfers: { requested: true } },
-      business_type: "individual", metadata: { cuvori_user: me.id }, settings: { payouts: { schedule: { interval: "daily" } } } }, { idempotency: `acct3_${col.mode}_${me.id}_${replaces}` });
+    const params = { type: "express", email: me.email, capabilities: { transfers: { requested: true } },
+      business_type: "individual", metadata: { cuvori_user: me.id }, settings: { payouts: { schedule: { interval: "daily" } } } };
+    acct = await makeAccount(`acct3_${col.mode}_${me.id}_${replaces}:${stripeFingerprint("/accounts", params)}`, params);
     // saved only where no account of this mode is saved yet: a request running at the same time can neither overwrite it nor be overwritten
     const rows = payout
       ? await db.update("payout_details", `id=eq.${me.id}&${col.id}=is.null`, { [col.id]: acct.id, [col.ready]: false })
