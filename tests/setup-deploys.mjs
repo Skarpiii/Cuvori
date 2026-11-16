@@ -119,5 +119,19 @@ check(/in full[^.]*until production|until production[^.]*in full/.test(vars), "P
 // Part 13: the rows the floor leaves alone are named rightly (the payout-fee row is quoted, as its own line)
 check(!/Rows the checkout never quotes with/.test(text) && /never decide the card fee/.test(text), "Part 13: the rows the card-fee floor leaves alone are described rightly");
 
+// Production kept back (check of 25 November): its 13 October hourly job clears an Order's whole note when it pays an Order
+// or a part out automatically, not only when it finishes a step that had stopped; it lets go (or sends back) a price
+// increase paid just before such a payout and not recorded yet, as that code doesn't know the payout-fee line; and it does
+// not wait for the bank's inquiry, a note pricing-v2's own hourly run waits for. SETUP.md says all of it where it says what
+// that hourly job does not do (Part 3, item 7), in the v55 paragraph, and where pricing-v2 goes live without production.
+const kept = steps.find(p => /^7\.\s+\*\*Netlify: two branches, and credits/.test(p)) || "";
+check(/pays an Order or a part of it out automatically[^.]*whole note/.test(kept), "Part 3, item 7: production's older hourly job clears the whole note when it pays an Order or a part out automatically");
+check(/price increase[^.]*paid[^.]*before[^.]*(let go|sent back)[^.]*payout fee/i.test(kept), "Part 3, item 7: a price increase paid just before production's automatic payout is let go or sent back (that code doesn't know the payout fee)");
+check(/does not wait for the bank's (question|inquiry)/.test(kept), "Part 3, item 7: production's older hourly job pays out during the bank's inquiry");
+const v55 = steps.find(p => /^7\.\s+Run `supabase\/schema_v5\.sql`/.test(p)) || "";
+check(/or pays an Order or a part of it out automatically, it clears the Order's whole note/.test(v55), "the v55 paragraph: production's hourly job also clears the whole note on an automatic payout, not only when it finishes a stopped step");
+const goLive = steps.find(p => /^5\.\s+Then put the page of this update live/.test(p));
+check(!goLive || /until production has (it|this code)[^.]*(note|notes)[^.]*Part 3, item 7/i.test(goLive), "Part 20, step 5: pricing-v2's protections kept in an Order's note don't stop production's older hourly job until production has the code");
+
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);
