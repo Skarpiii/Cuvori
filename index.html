@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-buJehQiSNRtm7mnnxOh2vy4+jUzMTavAW/saXATqcw8=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-UXxDxGXEP8BunjBjOkeY+VlDnj8Is2XUKDXFeorr+s8=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -721,7 +721,7 @@
     .car-track.grabbing{cursor:grabbing;scroll-behavior:auto}
     .car-item{scroll-snap-align:start;flex:0 0 auto;min-width:0}
     .car-one .car-track{gap:0}
-    .car-one .car-item{flex:0 0 100%;width:100%;scroll-snap-stop:always}   /* one swipe, one video: however quick the swipe, it stops at the next video (tests/phone-swipe.js) */
+    .car-one .car-item{flex:0 0 100%;width:100%;scroll-snap-stop:always}   /* one swipe, one video: however quick the swipe, it stops at the next video; makeCarousel holds it there too, as browsers don't always stop (tests/phone-swipe.js) */
     .car-many .car-item{flex:0 0 250px;width:250px}
     .car-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:4;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(11,18,32,.72);color:#fff;font-size:22px;line-height:1;display:grid;place-items:center;padding:0 0 3px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:.15s}
     .car-arrow:hover{background:var(--accent);border-color:var(--accent)}
@@ -3611,6 +3611,29 @@
     const end=()=>{ if(!down) return; down=false; track.classList.remove("grabbing"); track.style.scrollSnapType=""; if(dragged && perView==="one") goTo(currentIndex()); setTimeout(()=>dragged=false,0); };
     track.addEventListener("pointerup",end); track.addEventListener("pointercancel",end); track.addEventListener("mouseleave",end);
     track.addEventListener("click",e=>{ if(dragged){ e.stopPropagation(); e.preventDefault(); } },true);
+    // One swipe, one video (check of 24 November). "scroll-snap-stop: always" in the CSS asks the browser to stop a swipe at
+    // the next video, but the browser doesn't always: in Chrome 153 a quick flick on a phone about 390 pixels wide went on to
+    // the video after it, so a client skipped a video without seeing it. So a gallery that shows one video at a time holds a
+    // swipe there itself: a swipe that started at video r never goes past video r - 1 or r + 1, however fast it is and
+    // whatever the browser does. A swipe starts when a finger touches the gallery (at the video most in view, also during a
+    // glide, so two quick swipes move two videos); a scroll that starts any other way (inside an embedded video, a trackpad)
+    // starts at the current video, and it ends once the gallery has been still for a moment with no finger on it. The page
+    // still scrolls up and down as before, embedded videos and their controls work as before, and the arrows, the keyboard
+    // and a mouse drag (goTo) are never held.
+    if(perView==="one"){
+      let from=null, touching=false, still=0;
+      track.addEventListener("touchstart",()=>{ touching=true; from=Math.round(track.scrollLeft/Math.max(1,track.clientWidth)); },{passive:true});
+      const lift=()=>{ touching=false; };
+      track.addEventListener("touchend",lift,{passive:true}); track.addEventListener("touchcancel",lift,{passive:true});
+      track.addEventListener("scroll",()=>{
+        if(down || Date.now()<quiet) return;
+        const w=Math.max(1,track.clientWidth);
+        if(from===null) from=index;
+        const lo=Math.max(0,from-1)*w, hi=Math.min(n-1,from+1)*w;
+        if(track.scrollLeft>hi+1) track.scrollLeft=hi; else if(track.scrollLeft<lo-1) track.scrollLeft=lo;
+        clearTimeout(still); still=setTimeout(()=>{ if(!touching) from=null; },200);
+      },{passive:true});
+    }
     if(start) goTo(start,false); else update();
     requestAnimationFrame(update);
     return {goTo, update, get index(){return target;}, track, car};
