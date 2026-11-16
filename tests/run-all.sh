@@ -73,7 +73,7 @@ echo "== jobs trust";       page jobstest.js
 echo "== post a job";       node tests/post-job.js | tail -1 || r=1
 echo "== reviews";          node tests/reviews.js | tail -1 || r=1
 echo "== galleries";        page galtest.js
-echo "== check of 21 November (on a phone, one swipe moves one video)"; page tests/phone-swipe.js
+echo "== checks of 21 and 24 November (one swipe moves one video: on a phone, also where the browser would go on, and on a trackpad)"; page tests/phone-swipe.js
 echo "== auth";             page authtest.js
 echo "== oauth return";     page tests/oauth-return.js
 echo "== the new prices on the page"; page pricing-page.js
