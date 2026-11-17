@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart, outsideRefundsCounted } from "../lib/cuvori.mjs";
+import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart, outsideRefundsCounted, payoutWaits } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -36,7 +36,7 @@ async function sortOut(rows, editorOf, hold, aside, into, bannedLast = false) {
   for (const r of rows) {
     const no = cannot.get(editorOf(r));
     const why = (await hold(r)) || (no === "freelancer banned" && !bannedLast ? no : null);
-    if (why) { aside(r, why); continue; }
+    if (why) { await aside(r, why); continue; }
     (no ? into.later : into.ready).push(r);
   }
 }
@@ -69,7 +69,8 @@ async function owing(c) {
 
 // Netlify stops a scheduled function after 30 seconds. The run stops starting new work in time, so it never stops in the
 // middle of a step, and each part of it gets its turn every hour: what is left waits for the next run (oldest first).
-const LIMITS = { orders: 12e3, parts: 17e3, chargebacks: 20e3, repairs: 25e3 };
+// The notes on payouts that wait come last: they never take the payouts' time.
+const LIMITS = { orders: 12e3, parts: 17e3, chargebacks: 20e3, repairs: 25e3, notes: 26e3 };
 
 export default async () => {
   const t0 = performance.now(), over = (part) => performance.now() - t0 > LIMITS[part];
@@ -87,11 +88,19 @@ export default async () => {
   const now = new Date().toISOString();
   const done = [], failed = [], skipped = [];
   const aside = (r, why) => (why === "freelancer banned" ? failed : skipped).push({ id: r.id, why });
+  // An automatic payout that can't go through says so on its Order, under "Needs a hand" (payoutWaits): the freelancer is
+  // banned, or their Stripe setup isn't finished (check of 26 November: it was skipped every hour without a word, and the
+  // Order kept promising the payout on a date gone by). One set aside while the lists are read (a banned freelancer's) is
+  // noted at the end of the run, in the time left (check of 27 November: written while the lists were read, before the
+  // run looked at the clock, the notes of 40 such Orders at slow answers left no time for any payout at all).
+  const waits = async (c, what, why) => { await payoutWaits(c, what, why === "freelancer banned" ? "banned" : "not_ready").catch(e => console.error("payout note not saved", c && c.id, e && e.message)); };
+  const notes = [], noteLater = (c, what, why) => notes.push({ c, what, why });
   // due: delivered, the review window over. Not while a chargeback or the bank's inquiry is open on the Order's payment,
   // and not while a price increase both sides accepted is not paid in: closing the Order then would drop the increase
   // for good (the client pays it, or the admin decides). The client's own approval and the admin's decision still work.
   const due = await batchOf("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&order=auto_release_at.asc`, c => c.editor,
-    async c => chargebackOpen(c) ? "chargeback open" : inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : owedCents(c) >= MIN_TOPUP_CENTS ? owing(c) : null, aside);
+    async c => chargebackOpen(c) ? "chargeback open" : inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : owedCents(c) >= MIN_TOPUP_CENTS ? owing(c) : null,
+    async (c, why) => { aside(c, why); if (why === "freelancer banned") noteLater(c, "automatic payout", why); });
   // stuck: a release or a decision whose money move failed earlier; not one that started a moment ago. Oldest first; one
   // that still has to pay a freelancer who can't be paid goes last (it may only need its transfer at Stripe counted).
   // Cuvori's decision is carried out only once it is on record (its history line): one whose record could not be saved
@@ -110,9 +119,9 @@ export default async () => {
         // through): the Order goes into a dispute as when its notice comes, and is not paid out (check of 15 November)
         if ((await outsideRefundsCounted(c)).status !== "delivered") { skipped.push({ id: c.id, why: "a refund made in the Stripe dashboard was counted first; the Order is in a dispute" }); continue; }
         if (!cents) throw new Error("amount missing");
-        if (await isBanned(c.editor)) { failed.push({ id: c.id, why: "freelancer banned" }); continue; }
+        if (await isBanned(c.editor)) { await waits(c, "automatic payout", "freelancer banned"); failed.push({ id: c.id, why: "freelancer banned" }); continue; }
         const acct = await orderPayoutAccount(c);
-        if (!accountReady(acct)) { failed.push({ id: c.id, why: "freelancer account not ready" }); continue; }
+        if (!accountReady(acct)) { await waits(c, "automatic payout", "freelancer account not ready"); failed.push({ id: c.id, why: "freelancer account not ready" }); continue; }
         // Nothing can be paid into the Order once it is closed: its Stripe payment page is closed first. (An accepted price
         // increase not paid in yet keeps the Order out of the list above: closing it would drop the increase for good.)
         if ((await closeCheckout(c)) === "paid") { skipped.push({ id: c.id, why: "a payment has just come in; released on the next run" }); continue; }
@@ -136,7 +145,15 @@ export default async () => {
   // has a transfer, and those filled the list for good (audit of 31 October). Oldest first, set aside like the Orders above.
   // (a part the Order no longer holds enough for, after a chargeback the bank decided for the client, is set aside: it can't
   // be paid now, and tried every hour it took a place from the others; check of 2 November)
-  const open = (await db.select("contracts", `payment_mode=eq.escrow&status=in.(funded,delivered)&select=id,editor,status,chargeback_status,money_error,amount_cents,funded_cents,released_cents,refunded_cents&order=id.asc&limit=2000`)) || [];
+  // (every protected Order still open, page by page until none is left: one answer holds at most what Supabase's "Max rows"
+  // allows, 1,000 unless changed, so an answer shorter than asked for is not taken for the last one. Check of 27 November:
+  // 2,000 were read in one answer, and the parts of every Order after them were never paid)
+  const open = [];
+  for (let from = 0, p = 0; p < 50; p++) {
+    const page = (await db.select("contracts", `payment_mode=eq.escrow&status=in.(funded,delivered)&select=id,editor,status,chargeback_status,money_error,amount_cents,funded_cents,released_cents,refunded_cents&order=id.asc&limit=1000&offset=${from}`)) || [];
+    if (!page.length) break;
+    open.push(...page); from += page.length;
+  }
   const orderOf = new Map(open.map(c => [c.id, c]));
   const msDue = [], msOwed = [];
   for (let i = 0; i < open.length; i += 100) {
@@ -150,7 +167,7 @@ export default async () => {
   // (such a part is said on its Order once, so a person decides it: check of 6 November, it waited without a word)
   const msHold = async m => { const c = orderOf.get(m.order_id); return chargebackOpen(c) ? "chargeback open" : m.amount_cents > heldCents(c) ? (await noteShortPart(c, m).catch(() => {}), SHORT) : m.status === "submitted" && inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : null; };
   const msEditor = m => (orderOf.get(m.order_id) || {}).editor;
-  await sortOut(msDue.sort(byTime), msEditor, msHold, aside, msInto);
+  await sortOut(msDue.sort(byTime), msEditor, msHold, async (m, why) => { aside(m, why); if (why === "freelancer banned") noteLater(orderOf.get(m.order_id) || { id: m.order_id }, `milestone ${m.id}`, why); }, msInto);
   // (a part the client approved is tried after the others also when its freelancer is banned: its payout may be at Stripe
   // already, its answer lost, and is then counted; no new payout is made while the ban lasts. Check of 7 November)
   await sortOut(msOwed.sort(byTime), msEditor, msHold, aside, msInto, true);
@@ -165,9 +182,9 @@ export default async () => {
       // it). Checked first here, while banned, it stayed uncounted, and a decision then recorded amounts that never moved
       // (check of 7 November)
       if (m.status !== "approved") {
-        if (await isBanned(c.editor)) { failed.push({ id: m.id, why: "freelancer banned" }); continue; }
+        if (await isBanned(c.editor)) { await waits(c, `milestone ${m.id}`, "freelancer banned"); failed.push({ id: m.id, why: "freelancer banned" }); continue; }
         const acct = await orderPayoutAccount(c);
-        if (!accountReady(acct)) { failed.push({ id: m.id, why: "freelancer account not ready" }); continue; }
+        if (!accountReady(acct)) { await waits(c, `milestone ${m.id}`, "freelancer account not ready"); failed.push({ id: m.id, why: "freelancer account not ready" }); continue; }
       }
       await releaseMilestone(c, m, null, m.status === "approved" ? "approve" : "auto_release");
       done.push(m.id);
@@ -279,6 +296,12 @@ export default async () => {
   // money Stripe still holds apart for closed Orders (funds segregation; nothing to do for an Order never paid that way)
   const heldApart = await repair("money held apart", () => sweepHeldApart(() => over("repairs")));
   if (heldApart) waiting += heldApart.waiting || 0;
+  // last, the notes on the payouts set aside above (oldest first): one already there costs nothing, and those left when
+  // the time is up are written the next hour
+  for (const n of notes) {
+    if (over("notes")) { waiting++; continue; }
+    await waits(n.c, n.what, n.why);
+  }
   return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled: feesSettled + feesSettled2, linesAdded, lateRefunded, waiting,
     ...(heldApart && heldApart.done ? { heldApartReleased: heldApart.done } : {}) });
 };
