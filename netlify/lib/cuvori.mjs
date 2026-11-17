@@ -431,7 +431,8 @@ export const db = {
   milestone: (id) => { if (!isUuid(id)) throw fail("Bad milestone id", 400, "milestone_changed"); return db.one("order_milestones", `id=eq.${id}&select=*`); },
   // compare-and-set: only moves the row if it is still in one of `from`; returns the new row or null
   claim: async (id, from, patch) => { if (!isUuid(id)) throw fail("Bad order id", 400, "not_your_order"); const rows = await db.update("contracts", `id=eq.${id}&status=in.(${from.map(q).join(",")})`, patch); return rows && rows[0] || null; },
-  claimMilestone: async (id, from, patch) => { if (!isUuid(id)) throw fail("Bad milestone id", 400, "milestone_changed"); const rows = await db.update("order_milestones", `id=eq.${id}&status=in.(${from.map(q).join(",")})`, patch); return rows && rows[0] || null; },
+  // also: one more condition the part must still meet (an automatic payout: its review period still over)
+  claimMilestone: async (id, from, patch, also = "") => { if (!isUuid(id)) throw fail("Bad milestone id", 400, "milestone_changed"); const rows = await db.update("order_milestones", `id=eq.${id}&status=in.(${from.map(q).join(",")})${also ? "&" + also : ""}`, patch); return rows && rows[0] || null; },
 };
 // the Order behind a Stripe payment: the first payment is on the row, top-ups are in the ledger
 export async function contractByPi(pi) {
@@ -937,9 +938,23 @@ const stepHead = (what) => `${STEP_NOTE} (${what}): `;
 const OLD_STEP = new Set([SETTLING, NOT_READY, CHARGEBACK, REFUND_SETTLING, PROVIDER_DOWN, BANNED]);
 const oldStepNote = (n) => OLD_STEP.has(n) || /^[^:]+ \(Netlify log ref [0-9a-f]{8}\)$/.test(n);
 const isStepNote = (n) => n.startsWith(STEP_NOTE + " (") || oldStepNote(n);
+const stepText = (what, said) => (stepHead(what) + said).slice(0, 300);
 async function stepStopped(c, what, e) {
-  const text = (stepHead(what) + failNote(e, `${what} of order ${c.id}`)).slice(0, 300);   // the ref is logged in any case
+  const text = stepText(what, failNote(e, `${what} of order ${c.id}`));   // the ref is logged in any case
   await putNote(c.id, n => addNote(n, text, p => p.startsWith(stepHead(what)) || oldStepNote(p)));   // replaces an older stop of this step
+}
+// An automatic payout the hourly run can't make now: the freelancer is banned, or their Stripe setup isn't finished. Said
+// on the Order under the step's own heading ("automatic payout", or the part's), in the same words a payout that stopped at
+// Stripe uses, so the admin panel shows it under "Needs a hand" and the log names the Order. Written once: an Order whose
+// note (as the run read it) says so already costs no call to the database. It goes when the payout goes through (settle,
+// releaseMilestone) or a decision settles the Order, and comes back the next hour if it is marked as handled while the
+// payout still can't be made. (check of 26 November: such a payout was skipped every hour without a word, and the Order
+// kept promising it on a date gone by; check of 27 November: written again every hour, one database call per Order)
+export async function payoutWaits(c, what, why) {
+  const e = why === "banned" ? fail(BANNED, 409, "under_review") : fail(NOT_READY, 409, "freelancer_not_ready");
+  console.error("automatic payout waits", what, "order", c && c.id, why);
+  if (c && typeof c.money_error === "string" && hasNote(c.money_error, n => n === stepText(what, e.message))) return;
+  await stepStopped(c, what, e);
 }
 // head: this step's own heading, or STEP_NOTE + " (" for every stopped step's note. Only while the note still reads
 // what this step read: a note written since stays.
@@ -1161,7 +1176,12 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
   if (!["funded", "delivered"].includes(c.status)) throw fail("Nothing to release right now", 409, "nothing_to_release");
   if (chargebackOpen(c)) throw fail(CHARGEBACK, 409, "chargeback_open");
   if (m.amount_cents > heldCents(c)) throw fail("Not enough money is held for this milestone", 409, "not_enough_held");
-  const claimed = await db.claimMilestone(m.id, ["submitted", "approved"], { status: "approved", approved_at: m.approved_at || new Date().toISOString(), auto_release_at: null });
+  // an automatic payout (the hourly run, nobody approving) takes only a part that is still handed in with its review period
+  // over at this very moment: the part may have been sent back and handed in again since the run read its list (a new
+  // period then runs; check of 26 November). A part the client approved, or one whose payout stopped earlier, is taken as it is.
+  const auto = ev === "auto_release" && !actor;
+  const claimed = await db.claimMilestone(m.id, auto ? ["submitted"] : ["submitted", "approved"], { status: "approved", approved_at: m.approved_at || new Date().toISOString(), auto_release_at: null },
+    auto ? `auto_release_at=lte.${encodeURIComponent(new Date().toISOString())}` : "");
   if (!claimed) throw fail("This milestone was just changed, reload", 409, "milestone_changed");
   let transferId;
   try { transferId = await releaseToEditor(c, m.amount_cents, m.id); }
@@ -1189,6 +1209,112 @@ async function releaseMilestoneLocked(c0, m, actor, ev) {
     if (done) { await orderEvent(done, "completed", {}, actor); await contractEvent(done, "complete", actor || c.client); }
   }
   return transferId;
+}
+
+// ---- Cuvori's decision, told to both sides once ----
+// The admin's decision on an Order is told in the chat (the written reason) and, when the Order was in a dispute, by the
+// "lost a dispute" mark on the side that lost it: once, after its money has moved, by whichever step carries it out (the
+// admin's request, the admin's try again, or the hourly run when its money step stopped at Stripe). A decision that can't
+// be carried out (its freelancer is banned, say) is told to nobody. (check of 26 November: when the payout stopped and the
+// hourly run finished it, neither side was ever told; check of 27 November: told before its money moved, it was told
+// and the client marked also when the payout could never be made, and the admin could not take it back)
+// Each decision is on record before the Order is claimed for it (a key per decision, named by its claim time: who decided,
+// whose claim it is, what, the written reason), so a decision that can't be saved changes nothing. The key that says
+// "told" is written last, after each part was looked up and written once, so a try whose answer was lost is finished by
+// the next one and nothing is told twice.
+const DECIDED = "decision:", TOLD = "decision_told:";
+// the claim time as one text, however the database writes it ("…Z" or "…+00:00")
+const stamp = (t) => { const ms = Date.parse(String(t || "")); return Number.isFinite(ms) ? new Date(ms).toISOString() : ""; };
+const decisionKeys = (id, attempt) => ({ rec: `${DECIDED}${id}:${attempt}`, told: `${TOLD}${id}:${attempt}` });
+// row: the Order's id, its decision (resolution) and the claim time (resolved_at). who: actor, who the chat message and the
+// mark come from (the admin); by, whose claim the Order holds (resolved_by: the admin, or the freelancer whose cancel the
+// admin finishes). underWay: the Order was claimed before this request (a try again, or a freelancer's cancel that
+// stopped): its step is finished by the hourly job in any case. True when written now, false when an earlier try saved it.
+export async function recordDecision(row, who, note, disputed, underWay = false) {
+  const { rec } = decisionKeys(row.id, stamp(row.resolved_at));
+  try { await db.insert("money_keys", { scope: rec, key: JSON.stringify({ actor: who.actor, by: who.by, decision: row.resolution, note: note || "", disputed: !!disputed }) }); }
+  catch (e) {
+    if (e && e.status === 409) return false;                                       // on record already (an earlier try)
+    console.error("the decision could not be recorded", row.id, e && e.message);
+    throw fail(underWay
+      ? "Your decision could not be saved yet, so this try moved nothing and told nobody. The refund or payout already under way for this Order is still finished by the hourly job, without your note: try again in a minute so both sides get it."
+      : "Your decision could not be saved yet, so the Order was not claimed for it and nothing has moved. Please try again in a minute.", 503, "provider_down");
+  }
+  return true;
+}
+// A decision whose claim did not go through (the Order changed meanwhile): its record goes.
+export const dropDecision = (id, attempt) => dropKey(decisionKeys(id, stamp(attempt)).rec);
+// c: the Order with the decision's claim time (resolved_at) as it was claimed. True once told (now or before); false when
+// the decision is not on record (one made before this check: its own request told it) or the database did not answer.
+export async function announceDecision(c) {
+  const attempt = stamp(c && c.resolved_at);
+  if (!c || !attempt || !isUuid(c.id)) return false;
+  const k = decisionKeys(c.id, attempt);
+  if (await db.one("money_keys", `scope=eq.${q(k.told)}&select=scope`)) { await dropKey(k.rec); return true; }
+  const r = await db.one("money_keys", `scope=eq.${q(k.rec)}&select=key`);
+  let d = null; try { d = r && JSON.parse(r.key); } catch {}
+  if (!d || !isUuid(d.actor)) return false;
+  // under the Order's lock, so the admin's try again and the hourly run never tell it at the same moment
+  const unlock = await lockOrder(c.id);
+  try {
+    if (await db.one("money_keys", `scope=eq.${q(k.told)}&select=scope`)) return true;
+    const loser = d.disputed ? (d.decision === "refund" ? c.editor : d.decision === "release" ? c.client : null) : null;
+    if (loser && !(await db.one("user_flags", `user_id=eq.${loser}&contract_id=eq.${c.id}&kind=eq.dispute_lost&select=id`)))
+      await db.insert("user_flags", { user_id: loser, kind: "dispute_lost", reason: `Lost dispute on "${cut(c.title, 200)}"${d.note ? ": " + d.note : ""}`, contract_id: c.id, created_by: d.actor });
+    const body = `Cuvori decision: ${d.note}`;
+    // looked up by its start, never with the whole reason in the address: a long one (2,000 characters of Chinese, say)
+    // made it longer than the 16 KB the database takes, and the reason was never told (check of 27 November)
+    if (d.note && c.conversation_id) {
+      const same = (await db.select("messages", `conversation_id=eq.${c.conversation_id}&sender=eq.${d.actor}&body=like.${q("Cuvori decision:")}*&created_at=gte.${q(attempt)}&select=body`)) || [];
+      if (!same.some(m => m && m.body === body)) await db.insert("messages", { conversation_id: c.conversation_id, sender: d.actor, kind: "text", body });
+    }
+    await db.insert("money_keys", { scope: k.told, key: "told" }).catch(e => { if (!(e && e.status === 409)) throw e; });
+  } finally { await unlock(); }
+  await dropKey(k.rec);
+  return true;
+}
+// The hourly run: decisions on record but not told yet. Told once the Order shows them carried out (closed with this
+// decision, claimed by the same person); one still waiting for its money step waits; one whose Order went another way
+// (a chargeback froze it, and the Order came back to be decided again) is not told, and its record goes. Per Order only
+// its newest record can be the one carried out: an older one is a decision whose claim did not go through. All records
+// are read at once, and their Orders a hundred at a time, so those that wait take no time; stop() says when the run's
+// time is up (what is left is told the next hour). (check of 27 November: one by one, 50 at most, those that waited or
+// failed every hour could hold back the others)
+export async function tellDecisions(stop = () => false) {
+  const recs = [];
+  for (let p = 0; p < 5; p++) {
+    const page = (await db.select("money_keys", `scope=like.${q(DECIDED)}*&select=scope,key&order=scope.asc&limit=200&offset=${p * 200}`)) || [];
+    recs.push(...page);
+    if (page.length < 200) break;
+  }
+  const byOrder = new Map();
+  for (const r of recs) {
+    const m = /^decision:([0-9a-f-]{36}):(.+)$/.exec(r.scope || "");
+    if (!m || !isUuid(m[1])) continue;
+    let d = null; try { d = JSON.parse(r.key); } catch {}
+    if (!byOrder.has(m[1])) byOrder.set(m[1], []);
+    byOrder.get(m[1]).push({ scope: r.scope, attempt: m[2], d });
+  }
+  const ids = [...byOrder.keys()], orders = new Map();
+  for (let i = 0; i < ids.length; i += 100)
+    for (const c of (await db.select("contracts", `id=in.(${ids.slice(i, i + 100).join(",")})&select=id,status,resolution,resolved_at,resolved_by,editor,client,title,conversation_id`)) || []) orders.set(c.id, c);
+  let told = 0, left = 0;
+  for (const [id, list] of byOrder) {
+    list.sort((a, b) => (a.attempt < b.attempt ? -1 : a.attempt > b.attempt ? 1 : 0));
+    const c = orders.get(id), newest = list[list.length - 1];
+    for (const x of list) {
+      const st = x !== newest || !c || !x.d ? "gone"
+        : c.status === "resolving" ? (stamp(c.resolved_at) === x.attempt ? "wait" : "gone")
+        : ["completed", "refunded"].includes(c.status) && c.resolution === x.d.decision && c.resolved_by === x.d.by ? "carried" : "gone";
+      if (st === "wait") continue;
+      if (stop()) { left++; continue; }
+      try {
+        if (st === "carried") { if (await announceDecision({ ...c, resolved_at: x.attempt })) told++; }
+        else await dropKey(x.scope);
+      } catch (e) { console.error("telling a decision failed", id, e && e.message); }
+    }
+  }
+  return { told, left };
 }
 
 // ---- a paid Checkout session becomes a funded Order (webhook and reconciliation share this) ----
