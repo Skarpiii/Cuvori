@@ -1764,9 +1764,23 @@ export async function markCountedParts() {
   }
   return marked;
 }
+const stepText = (what, said) => (stepHead(what) + said).slice(0, 300);
 async function stepStopped(c, what, e) {
-  const text = (stepHead(what) + failNote(e, `${what} of order ${c.id}`)).slice(0, 300);   // the ref is logged in any case
+  const text = stepText(what, failNote(e, `${what} of order ${c.id}`));   // the ref is logged in any case
   await putNote(c.id, n => addNote(n, text, p => p.startsWith(stepHead(what)) || oldStepNote(p)));   // replaces an older stop of this step
+}
+// An automatic payout the hourly run can't make now: the freelancer is banned, or their Stripe setup isn't finished. Said
+// on the Order under the step's own heading ("automatic payout", or the part's), in the same words a payout that stopped at
+// Stripe uses, so the admin panel shows it under "Needs a hand" and the log names the Order. Written once: an Order whose
+// note (as the run read it) says so already costs no call to the database. It goes when the payout goes through (settle,
+// releaseMilestone) or a decision settles the Order, and comes back the next hour if it is marked as handled while the
+// payout still can't be made. (check of 26 November: such a payout was skipped every hour without a word, and the Order
+// kept promising it on a date gone by; check of 27 November: written again every hour, one database call per Order)
+export async function payoutWaits(c, what, why) {
+  const e = why === "banned" ? fail(BANNED, 409, "under_review") : fail(NOT_READY, 409, "freelancer_not_ready");
+  console.error("automatic payout waits", what, "order", c && c.id, why);
+  if (c && typeof c.money_error === "string" && hasNote(c.money_error, n => n === stepText(what, e.message))) return;
+  await stepStopped(c, what, e);
 }
 // head: this step's own heading, or STEP_NOTE + " (" for every stopped step's note. Only while the note still reads
 // what this step read: a note written since stays.
@@ -2559,7 +2573,9 @@ export async function announceDecision(c, at = null) {
         // never taken for it; one an older version wrote, which names nothing, counts only when written right after the
         // decision was saved, as that version did. Check of 7 November, re-check)
         const body = `Cuvori decision: ${note}`;
-        const same = note ? ((await db.select("messages", `conversation_id=eq.${c.conversation_id}&kind=eq.text&sender=eq.${ev.actor}&body=eq.${q(body)}&select=id,payload,created_at`)) || []) : [];
+        // (looked up by its start, never with the whole reason in the address: a long one, 2,000 characters of Chinese say,
+        // made it longer than the 16 KB the database takes, and the reason was never told. Check of 27 November)
+        const same = note ? ((await db.select("messages", `conversation_id=eq.${c.conversation_id}&kind=eq.text&sender=eq.${ev.actor}&body=like.${q("Cuvori decision:")}*&select=id,body,payload,created_at`)) || []).filter(m => m && m.body === body) : [];
         const told = same.some(m => m.payload && m.payload.decision_of === c.id && m.payload.attempt === attempt);
         if (note && !told) await db.insert("messages", { conversation_id: c.conversation_id, sender: ev.actor, kind: "text", body, payload: { decision_of: c.id, attempt } });
       } catch (e) { ok = false; console.error("the decision's chat message not saved yet", c.id, e && e.message); }
