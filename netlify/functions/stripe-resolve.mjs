@@ -45,7 +45,7 @@ async function recordDecision(row, actor, d) {
   const data = { attempt, decision: row.resolution, editor_cents: row.split_editor_cents, refund_cents: row.refund_cents,
     ...(Number.isFinite(d.percent) ? { editor_percent: d.percent } : {}), note: d.note || "", ...(d.replaced ? { replaced: d.replaced } : {}), tell_once: true };
   try { await db.insert("order_events", { order_id: row.id, actor, event: "decision", data }); }
-  catch (e) { console.error("the decision could not be recorded", row.id, e.message); throw fail("The decision could not be recorded yet. Nothing has moved; please try again in a minute.", 503, "provider_down"); }
+  catch (e) { console.error("the decision could not be recorded", row.id, e.message); throw fail("The decision could not be recorded yet. Nothing has moved; please try again in a minute.", 503, "decision_not_saved"); }   // its own code: with "provider_down" the page said the payment service did not answer (check of 29 November)
   await db.insert("admin_audit", { actor, action: "order.decide", target_table: "contracts", target_id: row.id, detail: data }).catch(() => {});   // (the admin log comes with schema v56)
   return true;
 }

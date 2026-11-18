@@ -302,6 +302,15 @@ export default async () => {
     if (over("notes")) { waiting++; continue; }
     await waits(n.c, n.what, n.why);
   }
+  // One line in the log when something failed or was left for the next hour (its time was up): Netlify keeps nothing a
+  // scheduled function sends back, so the answer below was read by nobody, and payouts put off hour after hour showed
+  // nowhere (check of 28 November). A payout that waits for its freelancer (banned, Stripe setup not finished) is no
+  // failure here: its Order says so, and the log names it each hour.
+  const forFreelancer = (f) => f && (f.why === "freelancer banned" || f.why === "freelancer account not ready");
+  const broke = failed.filter(f => !forFreelancer(f));
+  if (broke.length || waiting)
+    console.error(`hourly run summary: ${broke.length} failed, ${waiting} left for the next hour${waiting ? " (its time was up)" : ""}, ${done.length} done` +
+      (broke.length ? `; failed: ${broke.slice(0, 5).map(f => `${f.id || "-"} (${String(f.why || "").slice(0, 120)})`).join(", ")}${broke.length > 5 ? ` and ${broke.length - 5} more` : ""}` : ""));
   return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled: feesSettled + feesSettled2, linesAdded, lateRefunded, waiting,
     ...(heldApart && heldApart.done ? { heldApartReleased: heldApart.done } : {}) });
 };
