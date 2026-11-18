@@ -28,7 +28,21 @@
 //    in one answer, and Supabase answers at most what its "Max rows" setting allows: 1,000 unless changed, 500 here).
 // H23–H24 guards of the fix: a decision whose claim did not go through is never told; and the database writes times its
 //    own way ("…+00:00"), which must not keep a decision from being told.
+// Check of 28 November:
+// H25–H27 the hourly run says in the log when something failed or was left for the next hour: Netlify keeps nothing a
+//    scheduled function sends back, so its summary (what failed, what was left when its time was up) was read by nobody.
+//    No line when nothing is wrong, or when only freelancers' payouts wait (each of those is noted on its Order); and a
+//    won chargeback with nothing left to pay back is no failure.
+// Check of 29 November:
+// H28 what the admin reads when a decision can't be saved: the page showed its own sentence for the code "provider_down"
+//    ("The payment service didn't answer. Nothing was lost"), also when the refund under way was then finished by the
+//    hourly job without the admin's note.
+// H29 a decision carried out more than 7 days ago is never told for the first time now: once production has the new
+//    hourly job, every decision the old one finished (told to nobody) would be told on its first run, months late.
+// H30 the hourly job's telling step, run in the moment between a decision being saved and its Order being claimed,
+//    never removes it: the decision was then carried out and told to nobody.
 // Run: node tests/attack-hourly-nov26.mjs   (TARGET=<folder> checks another copy)
+import fs from "node:fs";
 const H = await import("./fn-harness.mjs");
 const { DB, STRIPE, users, hooks, mk, fns, fund, past, call, req, uuid } = H;
 const fx = await fns();
@@ -397,6 +411,98 @@ const errOf = (r) => String((r.json || {}).error || "");
   hooks.db = async (method, table, search, body) => { const r = await realLists(method, table, search, body); if (!r) return r; const rows = await r.json(); return new Response(JSON.stringify(rows.slice(0, 500)), { status: 200, headers: { "content-type": "application/json" } }); };
   await run(); await run(); hooks.db = realLists;
   vuln(!(m.status === "released" && paid(c) === 10000), `H22 2,000 other protected Orders open (their ids first), at most 500 rows an answer -> the due part of the last one is ${m.status}, paid ${paid(c) / 100} (must: paid out)`);
+}
+
+// ===== H25–H27: the hourly run's summary in the log =====
+const SUMMARY = /^hourly run summary:/;
+const runLogged = async (fn = run) => { const from = logs.length; const r = await fn(); return { r, lines: logs.slice(from).filter(l => SUMMARY.test(l)) }; };
+{ // H25 a payout that fails at Stripe
+  isolate(); ready();
+  const c = due(await funded(), 1); let fail = true;
+  hooks.stripe = async (path, method) => { if (fail && method === "POST" && path === "/transfers") { fail = false; return [500, { error: { message: "An error occurred with our connection to Stripe.", type: "api_error" } }]; } return null; };
+  const { lines } = await runLogged(); hooks.stripe = null;
+  vuln(!(lines.length === 1 && /\b1 failed\b/.test(lines[0]) && lines[0].includes(c.id)),
+    `H25 an automatic payout that failed at Stripe -> summary lines in the log: ${lines.length}${lines[0] ? " " + JSON.stringify(lines[0].slice(0, 160)) : ""} (must: one line saying 1 failed and naming the Order)`);
+}
+{ // H26 the run's time is up before every Order due is paid (every call 300 ms on the run's clock)
+  isolate(); ready();
+  for (let i = 0; i < 12; i++) due(await funded(), 1 + i);
+  let res = null; const from = logs.length;
+  await onClock(300, async () => { res = await run(); });
+  const lines = logs.slice(from).filter(l => SUMMARY.test(l)), left = res && res.waiting;
+  vuln(!(left > 0 && lines.length === 1 && new RegExp(`\\b${left} left for the next hour\\b`).test(lines[0])),
+    `H26 12 Orders due, the run's time up -> it left ${left} for the next hour; summary lines in the log: ${lines.length}${lines[0] ? " " + JSON.stringify(lines[0].slice(0, 160)) : ""} (must: one line saying how many were left)`);
+}
+{ // H27 nothing wrong: a payout that goes through; payouts that wait for their freelancer; a won chargeback with nothing to pay back
+  isolate(); ready();
+  const c = due(await funded(), 1);
+  const a = await runLogged();
+  isolate(); ready();
+  const b1 = due(await funded({ editor: users.ed2.id }), 3); ed2.prof().banned = true;
+  const b = await runLogged();
+  isolate(); ready();
+  const n1 = due(await funded({ editor: users.ed2.id }), 3); notReady();
+  const n = await runLogged(); ready();
+  isolate(); ready();
+  const w = mk({ status: "funded", amount_cents: 10000, funded_cents: 10000, chargeback_status: "won", chargeback_id: "dp_" + uuid().replace(/-/g, "").slice(0, 14), money_error: "chargeback won, re-payment failed: Stripe did not answer (Netlify log ref 0a1b2c3d)" });
+  const x = await runLogged();
+  vuln(!(c.status === "completed" && !a.lines.length && !b.lines.length && !n.lines.length && !x.lines.length),
+    `H27 a payout that went through -> summary lines ${a.lines.length}; a banned freelancer's payout -> ${b.lines.length}; a freelancer's Stripe setup not finished -> ${n.lines.length}; a won chargeback with nothing to pay back -> ${x.lines.length}${x.lines[0] ? " " + JSON.stringify(x.lines[0].slice(0, 120)) : ""} (must: none: nothing failed and nothing was left)`);
+}
+
+// ===== H28–H30: Cuvori's decisions (check of 29 November) =====
+const ROOT = process.env.TARGET || new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const lib = await import(ROOT + "/netlify/lib/cuvori.mjs");          // the same copy the functions use
+{ // H28 what the admin reads (the page's own words, in English) when the decision's record is refused
+  const page = fs.readFileSync(ROOT + "/index.html", "utf8");
+  const fnSrc = (page.match(/function fnPlain\(e,pay\)\{[\s\S]*?\n  \}/) || [""])[0];
+  const word = (k) => { const m = page.match(new RegExp(k + ':"((?:[^"\\\\]|\\\\.)*)"')); return m ? JSON.parse('"' + m[1] + '"') : "KEY:" + k; };
+  const fnPlain = new Function("t", "fill", "isAdmin", fnSrc + "\nreturn fnPlain;")(word, (x, o) => x.replace(/\{(\w+)\}/g, (_, k) => o[k]), () => true);
+  const reads = (r) => { const j = r.json || {}; const e = { status: r.status, code: typeof j.code === "string" ? j.code : null, message: j.error || "", reason: j.error || "" }; return (r.status >= 400 && fnPlain(e, false)) || e.message; };
+  // A: a fresh decision
+  isolate(); ready();
+  const a = await disputed(); hooks.db = refuseRecord();
+  const ra = await decide(a); hooks.db = realLists; const saidA = reads(ra);
+  await inAnHour();
+  // B: finishing a freelancer's cancel whose refund stopped at Stripe
+  isolate(); ready();
+  const b = await funded({ conversation_id: uuid() }); let fail = true;
+  hooks.stripe = async (path, method) => { if (fail && method === "POST" && path === "/refunds") { fail = false; return [500, { error: { message: "An error occurred with our connection to Stripe.", type: "api_error" } }]; } return null; };
+  await call(fx.cancel, req("POST", "x", { token: "tok_ed", body: { contract_id: b.id, note: "I can't do this one, sorry." } })); hooks.stripe = null;
+  hooks.db = refuseRecord();
+  const rb = await call(fx.resolve, req("POST", "x", { token: "tok_adm", body: { contract_id: b.id, decision: "refund", note: "Finishing the freelancer's cancel." } })); hooks.db = realLists;
+  const saidB = reads(rb), before = refundedOf(b); await inAnHour(); const movedB = refundedOf(b) > before;
+  const okA = ra.status < 400 || (paid(a) === 0 && !/payment service/i.test(saidA));
+  const okB = rb.status < 400 || !movedB || /hourly/i.test(saidB);
+  vuln(!(okA && okB),
+    `H28 a decision whose record is refused -> the admin reads ${JSON.stringify(ra.status < 400 ? "(went through)" : saidA.slice(0, 110))}, paid ${paid(a) / 100} after the hourly job; finishing a stopped cancel -> the admin reads ${JSON.stringify(rb.status < 400 ? "(went through)" : saidB.slice(0, 130))}, refund then made by the hourly job: ${movedB} (must: what really happened, never "the payment service didn't answer"; and when the hourly job still makes the refund, say so)`);
+}
+{ // H29 decisions carried out by a step that told nobody (the hourly job running in production today): 1 and 30 days later
+  const late = async (days) => {
+    isolate(); ready();
+    const c = await disputed(); let fail = true;
+    hooks.stripe = async (path, method) => { if (fail && method === "POST" && path === "/transfers") { fail = false; return [500, { error: { message: "An error occurred with our connection to Stripe.", type: "api_error" } }]; } return null; };
+    await decide(c); hooks.stripe = null;
+    const atFirst = told(c).msgs;
+    if (c.status === "resolving") await lib.settle({ ...c }, null, "resolved_release");      // finished without telling anyone
+    const real = Date.now; Date.now = () => real() + days * 86400e3; try { await run(); } finally { Date.now = real; }
+    return { status: c.status, paid: paid(c), atFirst, after: told(c).msgs };
+  };
+  const d1 = await late(1), d30 = await late(30);
+  vuln(!(d1.status === "completed" && d1.after === 1 && d30.status === "completed" && d30.after === d30.atFirst && d30.after <= 1),
+    `H29 a decision carried out without being told -> 1 day later the hourly job: reason in the chat ${d1.atFirst} -> ${d1.after}; 30 days later: ${d30.atFirst} -> ${d30.after} (must: told within 7 days, never for the first time after that)`);
+}
+{ // H30 the hourly job's telling step runs between the decision being saved and its Order being claimed
+  isolate(); ready();
+  const c = await disputed(); let once = true;
+  hooks.db = async (method, table, search, body) => {
+    if (once && method === "PATCH" && table === "contracts" && /"status":"resolving"/.test(body || "")) { once = false; await lib.tellDecisions(); }
+    return realLists(method, table, search);
+  };
+  const r = await decide(c); hooks.db = realLists; await inAnHour();
+  const t = told(c);
+  vuln(!(r.status === 200 && c.status === "completed" && paid(c) === 10000 && t.msgs === 1 && t.marks === 1),
+    `H30 the telling step ran between the decision's record and its claim -> decision ${r.status}, Order ${c.status}, paid ${paid(c) / 100}, reason in the chat ${t.msgs}, mark ${t.marks} (must: 1 and 1)`);
 }
 
 hooks.db = null; hooks.stripe = null; console.error = realError;
