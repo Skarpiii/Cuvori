@@ -41,6 +41,16 @@
 //    hourly job, every decision the old one finished (told to nobody) would be told on its first run, months late.
 // H30 the hourly job's telling step, run in the moment between a decision being saved and its Order being claimed,
 //    never removes it: the decision was then carried out and told to nobody.
+// Check of 30 November (how the hourly job reads its lists of Orders due and of stopped payouts):
+// H31–H31b rows of one same time are each read once: the lists were read 200 rows at a time, sorted by time alone, and
+//    Postgres gives rows of one time in no set order, another one for another page (a run gives every Order it starts
+//    the same time). On Postgres 16, 50 Orders of one time across the 200-row edge: 12 were read twice and 12 not at
+//    all, and those waited another hour.
+// H32–H32b only an empty answer ends a list: Supabase answers at most what its "Max rows" allows, and set under 200, a
+//    shorter answer was taken for the last one: the Orders after it were never read.
+// H33–H33b a profile answer without its "banned" mark decides nothing: it was taken for "banned", the payout held and the
+//    admin told the freelancer could not receive payments; the Order's own check decides (it stops on such an answer).
+// H33c what stays: a freelancer with no profile counts as banned, as everywhere else.
 // Run: node tests/attack-hourly-nov26.mjs   (TARGET=<folder> checks another copy)
 import fs from "node:fs";
 const H = await import("./fn-harness.mjs");
@@ -58,13 +68,20 @@ const NOT_READY = /not ready to receive money/, BANNED = /cannot receive payment
 // applies them, so a list of 50 is a list of 50, as on Supabase.
 const parse = (q) => { const f = []; for (const [k, v] of new URLSearchParams(q)) { if (["select", "limit", "order", "offset"].includes(k)) continue; const m = v.match(/^(eq|neq|lte|gte|lt|gt|in|is|like)\.(.*)$/); if (m) f.push({ k, op: m[1], v: m[1] === "in" ? m[2].replace(/^\(|\)$/g, "").split(",").map(decodeURIComponent) : m[2] }); } return f; };
 const match = (r, f) => f.every(x => x.op === "eq" ? String(r[x.k]) === x.v : x.op === "neq" ? String(r[x.k]) !== x.v : x.op === "in" ? x.v.includes(String(r[x.k])) : x.op === "lte" ? r[x.k] != null && r[x.k] <= x.v : x.op === "lt" ? r[x.k] != null && r[x.k] < x.v : x.op === "gt" ? r[x.k] != null && r[x.k] > x.v : x.op === "gte" ? r[x.k] != null && r[x.k] >= x.v : x.op === "like" ? new RegExp("^" + x.v.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$").test(String(r[x.k] ?? "")) : x.op === "is" ? (x.v === "null" ? r[x.k] == null : r[x.k] != null) : true);
+// Rows equal in every column of the order come from Postgres in no set order, and a page asked with another offset may
+// give them in another (check of 30 November, seen on Postgres 16). With tiesAnyOrder on, such rows come in an order of
+// their own for each offset; otherwise as they stand.
+let tiesAnyOrder = false;
+const tieKey = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
 const realLists = async (method, table, search) => {
   if (method !== "GET" || !["contracts", "order_milestones"].includes(table) || !/[?&]limit=/.test(search)) return null;
   const p = new URLSearchParams(search.slice(1));
   let rows = DB[table].filter(r => match(r, parse(search.slice(1))));
-  const ord = p.get("order");
-  if (ord) { const [col, dir] = ord.split("."); rows = [...rows].sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0) * (dir === "desc" ? -1 : 1)); }
-  const off = +(p.get("offset") || 0), lim = +(p.get("limit") || 1e9);
+  const ord = p.get("order"), off = +(p.get("offset") || 0), lim = +(p.get("limit") || 1e9);
+  if (ord) {
+    const keys = ord.split(",").map(o => { const [col, dir] = o.split("."); return { col, sign: dir === "desc" ? -1 : 1 }; });
+    rows = [...rows].sort((a, b) => { for (const { col, sign } of keys) { if (a[col] < b[col]) return -sign; if (a[col] > b[col]) return sign; } return tiesAnyOrder ? tieKey(a.id + ":" + off) - tieKey(b.id + ":" + off) : 0; });
+  }
   return new Response(JSON.stringify(rows.slice(off, off + lim)), { status: 200, headers: { "content-type": "application/json" } });
 };
 // each check sees only its own Orders: the ones before are closed
@@ -503,6 +520,82 @@ const lib = await import(ROOT + "/netlify/lib/cuvori.mjs");          // the same
   const t = told(c);
   vuln(!(r.status === 200 && c.status === "completed" && paid(c) === 10000 && t.msgs === 1 && t.marks === 1),
     `H30 the telling step ran between the decision's record and its claim -> decision ${r.status}, Order ${c.status}, paid ${paid(c) / 100}, reason in the chat ${t.msgs}, mark ${t.marks} (must: 1 and 1)`);
+}
+
+// ===== H31–H33c (check of 30 November): how the lists are read =====
+const stopped = (c, at) => Object.assign(c, { status: "releasing", resolution: "release", split_editor_cents: 10000, refund_cents: 0, resolved_by: users.cl.id, resolved_at: at });
+{ // H31 50 Orders due at one same time, across the 200-row page edge, behind 175 Orders of a banned freelancer
+  isolate(); ready();
+  for (let i = 0; i < 175; i++) mk({ editor: users.ed2.id, status: "delivered", funded_cents: 10000, auto_release_at: past(48 + i), delivered_at: past(400) });
+  const at = past(30), cs = [];
+  for (let i = 0; i < 50; i++) { const c = await funded(); c.status = "delivered"; c.delivered_at = past(200); c.auto_release_at = at; cs.push(c); }
+  ed2.prof().banned = true; tiesAnyOrder = true;
+  try { await run(); } finally { tiesAnyOrder = false; }
+  const n = cs.filter(c => c.status === "completed" && paid(c) === 10000).length;
+  vuln(n !== 50, `H31 50 Orders due at one same time across the 200-row page edge, behind 175 of a banned freelancer, the database giving rows of one time in an order of its own for each page -> after one run ${n} of 50 paid out (must: all 50, each read once)`);
+  ready();
+}
+{ // H31b 50 stopped payouts started by one run (one same time), across the page edge, behind 175 of a banned freelancer
+  isolate(); ready();
+  for (let i = 0; i < 175; i++) stopped(mk({ editor: users.ed2.id, funded_cents: 10000 }), past(10 + i));
+  const at = past(5), cs = [];
+  for (let i = 0; i < 50; i++) cs.push(stopped(await funded(), at));
+  ed2.prof().banned = true; tiesAnyOrder = true;
+  try { await run(); } finally { tiesAnyOrder = false; }
+  const n = cs.filter(c => c.status === "completed" && paid(c) === 10000).length;
+  vuln(n !== 50, `H31b 50 stopped payouts of one same time across the 200-row page edge, behind 175 of a banned freelancer, rows of one time in an order of their own for each page -> after one run ${n} of 50 finished (must: all 50)`);
+  ready();
+}
+// the database answers at most n rows (Supabase's "Max rows" set lower)
+const maxRows = (n) => async (method, table, search, body) => { const r = await realLists(method, table, search, body); if (!r) return r; const rows = await r.json(); return new Response(JSON.stringify(rows.slice(0, n)), { status: 200, headers: { "content-type": "application/json" } }); };
+{ // H32 at most 100 rows an answer (under a page of 200): 150 Orders of a banned freelancer due first, then one ready
+  isolate(); ready();
+  for (let i = 0; i < 150; i++) mk({ editor: users.ed2.id, status: "delivered", funded_cents: 10000, auto_release_at: past(48 + i), delivered_at: past(400) });
+  const good = due(await funded(), 1); ed2.prof().banned = true;
+  hooks.db = maxRows(100);
+  try { await run(); } finally { hooks.db = realLists; }
+  vuln(!(good.status === "completed" && paid(good) === 10000), `H32 at most 100 rows an answer, 150 Orders of a banned freelancer due first, then one ready -> after one run the ready Order is ${good.status}, paid ${paid(good) / 100} (must: paid out)`);
+  ready();
+}
+{ // H32b the same for stopped payouts: 150 of a banned freelancer started first, then one that can finish
+  isolate(); ready();
+  for (let i = 0; i < 150; i++) stopped(mk({ editor: users.ed2.id, funded_cents: 10000 }), past(10 + i));
+  const good = stopped(await funded(), past(1)); ed2.prof().banned = true;
+  hooks.db = maxRows(100);
+  try { await run(); } finally { hooks.db = realLists; }
+  vuln(!(good.status === "completed" && paid(good) === 10000), `H32b at most 100 rows an answer, 150 stopped payouts of a banned freelancer first, then one that can finish -> after one run it is ${good.status}, paid ${paid(good) / 100} (must: finished)`);
+  ready();
+}
+// profile answers without their "banned" mark: only the hourly job's list of freelancers ("list"), or every one ("all")
+const noBannedMark = (which) => async (method, table, search, body) => {
+  if (method === "GET" && table === "profiles" && /[?&]select=(id,)?banned(&|$)/.test(search) && (which === "all" || /[?&]id=in\./.test(search))) {
+    const rows = DB.profiles.filter(r => match(r, parse(search.slice(1)))).map(r => ({ id: r.id }));
+    return new Response(JSON.stringify(rows), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  return realLists(method, table, search, body);
+};
+const noteOf = (c) => (c.money_error ? JSON.stringify(c.money_error.slice(0, 70)) : "none");
+{ // H33 the hourly job's list of freelancers comes back without the "banned" mark; the freelancer is not banned
+  isolate(); ready();
+  const c = due(await funded(), 3);
+  hooks.db = noBannedMark("list");
+  try { await run(); } finally { hooks.db = realLists; }
+  vuln(!(c.status === "completed" && paid(c) === 10000 && !BANNED.test(c.money_error || "")), `H33 the list of freelancers answered without the "banned" mark, the freelancer not banned -> Order ${c.status}, paid ${paid(c) / 100}, note ${noteOf(c)} (must: paid out, as the Order's own check finds; never a note that the freelancer can't receive payments)`);
+}
+{ // H33b every answer about the "banned" mark comes back without it
+  isolate(); ready();
+  const c = due(await funded(), 3), from = logs.length;
+  hooks.db = noBannedMark("all");
+  try { await run(); } finally { hooks.db = realLists; }
+  const summary = logs.slice(from).find(l => l.startsWith("hourly run summary:")) || "";
+  vuln(!(c.status === "delivered" && paid(c) === 0 && !BANNED.test(c.money_error || "") && summary.includes(c.id)), `H33b every answer about the "banned" mark without it -> Order ${c.status}, paid ${paid(c) / 100}, note ${noteOf(c)}, the log's summary ${summary.includes(c.id) ? "names it" : "does NOT name it"} (must: nothing paid, no note that the freelancer can't receive payments, the failure in the log)`);
+}
+{ // H33c a freelancer with no profile counts as banned: set aside with its note; a ready Order after it is paid
+  isolate(); ready();
+  const gone = mk({ editor: uuid(), status: "delivered", funded_cents: 10000, auto_release_at: past(48), delivered_at: past(400) });
+  const good = due(await funded(), 1);
+  await run();
+  vuln(!(paid(gone) === 0 && BANNED.test(gone.money_error || "") && good.status === "completed" && paid(good) === 10000), `H33c a freelancer with no profile -> paid ${paid(gone) / 100}, note ${noteOf(gone)}; the ready Order after it ${good.status} (must: nothing paid, the note that the freelancer can't receive payments, the ready one paid)`);
 }
 
 hooks.db = null; hooks.stripe = null; console.error = realError;
