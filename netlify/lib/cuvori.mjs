@@ -1236,9 +1236,10 @@ export async function recordDecision(row, who, note, disputed, underWay = false)
   catch (e) {
     if (e && e.status === 409) return false;                                       // on record already (an earlier try)
     console.error("the decision could not be recorded", row.id, e && e.message);
-    throw fail(underWay
-      ? "Your decision could not be saved yet, so this try moved nothing and told nobody. The refund or payout already under way for this Order is still finished by the hourly job, without your note: try again in a minute so both sides get it."
-      : "Your decision could not be saved yet, so the Order was not claimed for it and nothing has moved. Please try again in a minute.", 503, "provider_down");
+    // each with its own code, so the page says it in these words: with "provider_down" it said the payment service did
+    // not answer and nothing was lost, also when the refund under way was then made by the hourly job (check of 29 November)
+    if (underWay) throw fail("Your decision could not be saved yet, so this try moved nothing and told nobody. The refund or payout already under way for this Order is still finished by the hourly job, without your note: try again in a minute so both sides get it.", 503, "decision_under_way");
+    throw fail("Your decision could not be saved yet, so nothing has moved. Please try again in a minute.", 503, "decision_not_saved");
   }
   return true;
 }
@@ -1280,10 +1281,16 @@ export async function announceDecision(c) {
 // are read at once, and their Orders a hundred at a time, so those that wait take no time; stop() says when the run's
 // time is up (what is left is told the next hour). (check of 27 November: one by one, 50 at most, those that waited or
 // failed every hour could hold back the others)
+// An Order with a record saved less than 10 minutes ago is left alone: its decision is being made right now, and its
+// claim may not be in yet (check of 29 November: taken for one whose Order went another way, its record went, and the
+// decision was carried out a moment later and told to nobody). One carried out more than 7 days ago is not told any more,
+// and its record goes: the hourly job running in production before this one told nobody, and its first run would tell
+// every decision it had finished, months late (check of 29 November; pricing-v2 tells within 7 days too).
+const DECISION_FRESH_MS = 10 * 60e3, TELL_WITHIN_MS = 7 * 86400e3;
 export async function tellDecisions(stop = () => false) {
   const recs = [];
   for (let p = 0; p < 5; p++) {
-    const page = (await db.select("money_keys", `scope=like.${q(DECIDED)}*&select=scope,key&order=scope.asc&limit=200&offset=${p * 200}`)) || [];
+    const page = (await db.select("money_keys", `scope=like.${q(DECIDED)}*&select=scope,key,created_at&order=scope.asc&limit=200&offset=${p * 200}`)) || [];
     recs.push(...page);
     if (page.length < 200) break;
   }
@@ -1293,19 +1300,21 @@ export async function tellDecisions(stop = () => false) {
     if (!m || !isUuid(m[1])) continue;
     let d = null; try { d = JSON.parse(r.key); } catch {}
     if (!byOrder.has(m[1])) byOrder.set(m[1], []);
-    byOrder.get(m[1]).push({ scope: r.scope, attempt: m[2], d });
+    byOrder.get(m[1]).push({ scope: r.scope, attempt: m[2], d, at: Date.parse(String(r.created_at || "")) });
   }
   const ids = [...byOrder.keys()], orders = new Map();
   for (let i = 0; i < ids.length; i += 100)
-    for (const c of (await db.select("contracts", `id=in.(${ids.slice(i, i + 100).join(",")})&select=id,status,resolution,resolved_at,resolved_by,editor,client,title,conversation_id`)) || []) orders.set(c.id, c);
+    for (const c of (await db.select("contracts", `id=in.(${ids.slice(i, i + 100).join(",")})&select=id,status,resolution,resolved_at,resolved_by,closed_at,editor,client,title,conversation_id`)) || []) orders.set(c.id, c);
   let told = 0, left = 0;
   for (const [id, list] of byOrder) {
+    if (list.some(x => Number.isFinite(x.at) && Date.now() - x.at < DECISION_FRESH_MS)) continue;        // being decided now
     list.sort((a, b) => (a.attempt < b.attempt ? -1 : a.attempt > b.attempt ? 1 : 0));
     const c = orders.get(id), newest = list[list.length - 1];
+    const closed = c ? Date.parse(String(c.closed_at || "")) : NaN, recent = !Number.isFinite(closed) || Date.now() - closed <= TELL_WITHIN_MS;
     for (const x of list) {
       const st = x !== newest || !c || !x.d ? "gone"
         : c.status === "resolving" ? (stamp(c.resolved_at) === x.attempt ? "wait" : "gone")
-        : ["completed", "refunded"].includes(c.status) && c.resolution === x.d.decision && c.resolved_by === x.d.by ? "carried" : "gone";
+        : ["completed", "refunded"].includes(c.status) && c.resolution === x.d.decision && c.resolved_by === x.d.by ? (recent ? "carried" : "gone") : "gone";
       if (st === "wait") continue;
       if (stop()) { left++; continue; }
       try {
