@@ -2389,7 +2389,11 @@ export async function reverseTransfers(c, cents, why) {
 // again once that is settled; a note saying nobody is owed goes.
 // Every closed Order's mark is reached: the marks are read in pages, the Orders they name are read 100 at a time and only
 // the closed ones are worked on (an Order still open keeps its mark for as long as it holds money: reading only the 200
-// oldest marks never reached a newer closed Order); one whose money Stripe would not move before goes last.
+// oldest marks never reached a newer closed Order); one whose money Stripe would not move before goes last. Each page
+// starts where the one before ended, and only an empty answer ends the list: one answer holds at most what Supabase's
+// "Max rows" allows, and set under a page, the first answer was taken for the last one; marks of one same time are in the
+// order of their scope, as Postgres gives rows of one time in another order for another page, and some were read twice
+// and others not at all (check of 30 November).
 export const HELD_APART_NOTE = "money held apart at Stripe: ";
 const heldNoteOf = (charge) => (n) => n.startsWith(`${HELD_APART_NOTE}${charge} `);
 const anyHeldNote = (n) => n.startsWith(HELD_APART_NOTE);
@@ -2398,10 +2402,11 @@ const FS_PAGE = 1000, FS_PAGES = 20;
 export async function sweepHeldApart(over = () => false) {
   let done = 0, waiting = 0; const failed = [];
   const ids = new Set();
-  for (let p = 0; p < FS_PAGES; p++) {
-    const marks = (await db.select("money_keys", `scope=like.${q("fs:")}*&select=scope&order=created_at.asc&limit=${FS_PAGE}&offset=${p * FS_PAGE}`)) || [];
+  for (let p = 0, from = 0; p < FS_PAGES; p++) {
+    const marks = (await db.select("money_keys", `scope=like.${q("fs:")}*&select=scope&order=created_at.asc,scope.asc&limit=${FS_PAGE}&offset=${from}`)) || [];
+    if (!marks.length) break;
+    from += marks.length;
     for (const { scope } of marks) { const id = String(scope).slice(3); if (isUuid(id)) ids.add(id); }
-    if (marks.length < FS_PAGE) break;
   }
   const all = [...ids], closed = [];
   for (let i = 0; i < all.length; i += 100) {
