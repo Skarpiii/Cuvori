@@ -6,10 +6,16 @@ import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCou
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
+// Each list (Orders due, stuck payouts and decisions) is read at most PAGES pages of PAGE rows a run: up to its 1,000
+// oldest, from which the hour's batch of 50 is taken.
 const BATCH = 50, PAGE = 200, PAGES = 5;
-// The freelancers among `ids` who can't be paid right now, from the database alone (no Stripe call): banned, or their
-// Stripe setup not finished by the "ready" mark that every account check and Stripe's account notice keep in line with
-// Stripe. id -> why. The mark is only read when these keys' mode can be told (otherwise nobody is set aside for it).
+// The freelancers among `ids` who can't be paid right now, from the database alone (no Stripe call): banned (no profile
+// counts as banned, as everywhere), or their Stripe setup not finished by the "ready" mark that every account check and
+// Stripe's account notice keep in line with Stripe. id -> why. The mark is only read when these keys' mode can be told
+// (otherwise nobody is set aside for it). A profile answer without a clear yes or no for "banned" decides nothing here:
+// that freelancer goes after the others, and the Order's own check (isBanned, which stops on such an answer) decides
+// (check of 30 November: it was taken for "banned", the payout held and the admin told the freelancer could not receive
+// payments).
 async function unpayable(ids) {
   const out = new Map(), all = [...new Set(ids)];
   let col = null; try { col = acctCols(); } catch {}
@@ -19,7 +25,8 @@ async function unpayable(ids) {
     const ready = col ? ((await db.select("payout_details", `id=in.(${list})&select=id,${col.ready}`)) || []) : null;
     for (const id of part) {
       const p = profiles.find(x => x.id === id);
-      if (!p || p.banned !== false) out.set(id, "freelancer banned");
+      if (!p || p.banned === true) out.set(id, "freelancer banned");
+      else if (p.banned !== false) out.set(id, "banned mark unclear");
       else if (ready && !(ready.find(x => x.id === id) || {})[col.ready]) out.set(id, "freelancer account not ready");
     }
   }
@@ -41,13 +48,20 @@ async function sortOut(rows, editorOf, hold, aside, into, bannedLast = false) {
   }
 }
 const batch = (into) => [...into.ready, ...into.later].slice(0, BATCH);
-// a list read page by page, oldest first, until the hour's batch is full of rows that can be worked on
+// a list read page by page, oldest first, until the hour's batch is full of rows that can be worked on. Each page starts
+// where the one before ended, and only an empty page is the end: one answer holds at most what Supabase's "Max rows"
+// allows (1,000 unless changed), and set under a page, a shorter answer was taken for the last one, so the rows after it
+// were never read (check of 30 November). The list's order ends with the id (`oldestFirst`): Postgres gives rows of one
+// same time in no set order, another one for another page, and a row was then read twice and another not at all (a run
+// gives every Order it starts the same time).
+const oldestFirst = (col) => `order=${col}.asc,id.asc`;
 async function batchOf(table, query, editorOf, hold, aside, bannedLast = false) {
   const into = { ready: [], later: [] }, seen = new Set();
-  for (let p = 0; p < PAGES && into.ready.length < BATCH; p++) {
-    const rows = ((await db.select(table, `${query}&limit=${PAGE}&offset=${p * PAGE}`)) || []).filter(r => !seen.has(r.id) && seen.add(r.id));
-    await sortOut(rows, editorOf, hold, aside, into, bannedLast);
-    if (rows.length < PAGE) break;
+  for (let p = 0, from = 0; p < PAGES && into.ready.length < BATCH; p++) {
+    const page = (await db.select(table, `${query}&limit=${PAGE}&offset=${from}`)) || [];
+    if (!page.length) break;
+    from += page.length;
+    await sortOut(page.filter(r => !seen.has(r.id) && seen.add(r.id)), editorOf, hold, aside, into, bannedLast);
   }
   return batch(into);
 }
@@ -98,14 +112,14 @@ export default async () => {
   // due: delivered, the review window over. Not while a chargeback or the bank's inquiry is open on the Order's payment,
   // and not while a price increase both sides accepted is not paid in: closing the Order then would drop the increase
   // for good (the client pays it, or the admin decides). The client's own approval and the admin's decision still work.
-  const due = await batchOf("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&order=auto_release_at.asc`, c => c.editor,
+  const due = await batchOf("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&${oldestFirst("auto_release_at")}`, c => c.editor,
     async c => chargebackOpen(c) ? "chargeback open" : inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : owedCents(c) >= MIN_TOPUP_CENTS ? owing(c) : null,
     async (c, why) => { aside(c, why); if (why === "freelancer banned") noteLater(c, "automatic payout", why); });
   // stuck: a release or a decision whose money move failed earlier; not one that started a moment ago. Oldest first; one
   // that still has to pay a freelancer who can't be paid goes last (it may only need its transfer at Stripe counted).
   // Cuvori's decision is carried out only once it is on record (its history line): one whose record could not be saved
   // waits for the admin, and the Order's note says so (decisionMissing; check of 2 November: it was carried out anyway)
-  const stuck = await batchOf("contracts", `status=in.(releasing,resolving)&payment_mode=eq.escrow&resolved_at=lte.${encodeURIComponent(ago(10))}&select=*&order=resolved_at.asc`,
+  const stuck = await batchOf("contracts", `status=in.(releasing,resolving)&payment_mode=eq.escrow&resolved_at=lte.${encodeURIComponent(ago(10))}&select=*&${oldestFirst("resolved_at")}`,
     c => (Number.isInteger(c.split_editor_cents) && c.split_editor_cents > 0 && !c.stripe_transfer_id ? c.editor : null),
     async c => chargebackOpen(c) ? "chargeback open" : await decisionMissing(c) ? UNRECORDED : c.status === "releasing" && !c.resolved_by && inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : null, aside, true);
   for (const c of [...due, ...stuck]) {
