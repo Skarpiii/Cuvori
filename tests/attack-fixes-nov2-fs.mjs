@@ -15,7 +15,10 @@
 //       not allowing it). S3c a closed Order whose refund failed at Stripe (it holds the client's money again): swept.
 //   S4  the note "money held apart … ask Stripe support" never went once Stripe support had released the money.
 //   S5  the sweep read only the 200 oldest marks: with 200 open Orders marked before it, a closed Order's money stayed held
-//       apart for good.
+//       apart for good. Check of 30 November: S5b with Supabase's "Max rows" under a page (1,000), the first answer was
+//       taken for the last one, and a closed Order marked after it kept its money held apart; S5c marks of one same time
+//       across the page edge (sorted by time alone, Postgres gives them in another order for another page): some were read
+//       twice and others not at all.
 //   S6  a payout in parts stopped part-way, then a refund in the Stripe dashboard on the second payment: "exists with a
 //       different amount" every hour, the client's approval answered 500, the admin's decision "order changed". S6b a
 //       milestone's payout is never paid with a smaller amount (a milestone counts as paid out only when whole).
@@ -367,6 +370,50 @@ await guard("S5", async () => {
   const moved = evs(c, "held_apart_released").map(e => e.data.amount_cents);
   vuln(heldOf(ch) !== 0 || moved.length !== 1 || moved[0] !== 300 || marked(c),
     `S5 200 open Orders marked before it, a closed Order with 3.00 still held apart -> one hourly run: moved ${JSON.stringify(moved)} (must be [300]), still held apart ${heldOf(ch)}, mark gone ${!marked(c)}`);
+});
+
+// ---------- S5b–S5c how the sweep reads its marks (check of 30 November) ----------
+// The database's answer to the sweep's list of marks, as Postgres and Supabase give it: at most `max` rows an answer
+// (Supabase's "Max rows"), and rows equal in every column of the order in an order of their own for each offset (Postgres
+// gives them in no set order). `asked` gathers every Order the sweep then looks up.
+const tieKey = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
+const marksAsPostgres = (max, asked) => async (method, table, search) => {
+  if (method !== "GET") return null;
+  const p = new URLSearchParams(search.slice(1));
+  if (table === "contracts" && asked) { const m = /^in\.\((.*)\)$/.exec(p.get("id") || ""); if (m) for (const id of m[1].split(",")) asked.add(id); return null; }
+  if (table !== "money_keys" || !/^like\.fs:/.test(p.get("scope") || "") || !p.get("limit")) return null;
+  const keys = (p.get("order") || "").split(",").filter(Boolean).map(o => o.split(".")[0]), off = +(p.get("offset") || 0);
+  const rows = DB.money_keys.filter(k => k.scope.startsWith("fs:")).sort((a, b) => {
+    for (const k of keys) { if (a[k] < b[k]) return -1; if (a[k] > b[k]) return 1; }
+    return tieKey(a.scope + ":" + off) - tieKey(b.scope + ":" + off);
+  });
+  const lim = Math.min(+p.get("limit"), max);
+  return new Response(JSON.stringify(rows.slice(off, off + lim).map(r => ({ scope: r.scope }))), { status: 200, headers: { "content-type": "application/json" } });
+};
+await guard("S5b", async () => {
+  ON(); fsReset(); DBQ.paging = true;
+  for (const k of DB.money_keys.filter(k => k.scope.startsWith("fs:"))) DB.money_keys.splice(DB.money_keys.indexOf(k), 1);   // the marks of the checks before
+  const t0 = new Date(Date.now() - 10 * 86400e3).getTime();
+  for (let i = 0; i < 150; i++) { const o = mk2({ amount_cents: 10000, status: "funded", funded_cents: 10000 }); DB.money_keys.push({ id: uuid(), scope: `fs:${o.id}`, key: "fs:old" + i, created_at: new Date(t0 + i * 1000).toISOString() }); }
+  const c = mk2({ amount_cents: 10000 }); const f = await fund2(c); const ch = chargeOf(f.session.payment_intent); c.status = "delivered"; await approve(c);
+  ch.allocated_funds.balance.available += 300;
+  later(61); hooks.db = marksAsPostgres(100); await hourly(); hooks.db = null;
+  const moved = evs(c, "held_apart_released").map(e => e.data.amount_cents);
+  vuln(heldOf(ch) !== 0 || moved.length !== 1 || moved[0] !== 300 || marked(c),
+    `S5b at most 100 rows an answer, 150 open Orders marked before it, a closed Order with 3.00 still held apart -> one hourly run: moved ${JSON.stringify(moved)} (must be [300]), still held apart ${heldOf(ch)}, mark gone ${!marked(c)}`);
+});
+await guard("S5c", async () => {
+  ON(); fsReset(); DBQ.paging = true;
+  for (const k of DB.money_keys.filter(k => k.scope.startsWith("fs:"))) DB.money_keys.splice(DB.money_keys.indexOf(k), 1);
+  const t0 = new Date(Date.now() - 10 * 86400e3).getTime(), one = new Date(t0 + 2000 * 1000).toISOString(), ids = [];
+  for (let i = 0; i < 1025; i++) {   // 975 marks one after the other, then 50 of one same time across the 1,000-row edge
+    const o = mk2({ amount_cents: 10000, status: "funded", funded_cents: 10000 }); ids.push(o.id);
+    DB.money_keys.push({ id: uuid(), scope: `fs:${o.id}`, key: "fs:t" + i, created_at: i < 975 ? new Date(t0 + i * 1000).toISOString() : one });
+  }
+  const asked = new Set(); hooks.db = marksAsPostgres(1000, asked);
+  await lib.sweepHeldApart(); hooks.db = null;
+  const missed = ids.filter(id => !asked.has(id)).length;
+  vuln(missed !== 0, `S5c 1,025 marked Orders, 50 marks of one same time across the 1,000-row edge -> the sweep looked up ${ids.length - missed} of 1025, ${missed} never (must: every one)`);
 });
 
 console.error = realError;
