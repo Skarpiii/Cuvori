@@ -1287,12 +1287,17 @@ export async function announceDecision(c) {
 // and its record goes: the hourly job running in production before this one told nobody, and its first run would tell
 // every decision it had finished, months late (check of 29 November; pricing-v2 tells within 7 days too).
 const DECISION_FRESH_MS = 10 * 60e3, TELL_WITHIN_MS = 7 * 86400e3;
+// The records are read 200 at a time, each page from where the one before ended, and only an empty answer ends the list:
+// one answer holds at most what Supabase's "Max rows" allows (1,000 unless changed), and set under 200, the first answer
+// was taken for the last one, so a decision whose record came after it was never told (check of 30 November). The order
+// is the table's key, so a record has one place; one read twice still counts once.
 export async function tellDecisions(stop = () => false) {
-  const recs = [];
-  for (let p = 0; p < 5; p++) {
-    const page = (await db.select("money_keys", `scope=like.${q(DECIDED)}*&select=scope,key,created_at&order=scope.asc&limit=200&offset=${p * 200}`)) || [];
-    recs.push(...page);
-    if (page.length < 200) break;
+  const recs = [], seen = new Set();
+  for (let p = 0, from = 0; p < 5; p++) {
+    const page = (await db.select("money_keys", `scope=like.${q(DECIDED)}*&select=scope,key,created_at&order=scope.asc&limit=200&offset=${from}`)) || [];
+    if (!page.length) break;
+    from += page.length;
+    for (const r of page) if (!seen.has(r.scope)) { seen.add(r.scope); recs.push(r); }
   }
   const byOrder = new Map();
   for (const r of recs) {
