@@ -51,6 +51,11 @@
 // H33–H33b a profile answer without its "banned" mark decides nothing: it was taken for "banned", the payout held and the
 //    admin told the freelancer could not receive payments; the Order's own check decides (it stops on such an answer).
 // H33c what stays: a freelancer with no profile counts as banned, as everywhere else.
+// H34 the same for the decisions the hourly job tells (main reads them from their records, 200 at a time; pricing-v2 from
+//    the Order history): with Supabase's "Max rows" under 200, the first answer was taken for the last one, and a decision
+//    whose record came after it was never told. H34b a decision saved while the list is read moves the rest one place on,
+//    and the next page gives again the last record of the one before: read twice, that record was taken for an old one
+//    and removed, and its decision, still being carried out, would then never be told.
 // Run: node tests/attack-hourly-nov26.mjs   (TARGET=<folder> checks another copy)
 import fs from "node:fs";
 const H = await import("./fn-harness.mjs");
@@ -74,7 +79,7 @@ const match = (r, f) => f.every(x => x.op === "eq" ? String(r[x.k]) === x.v : x.
 let tiesAnyOrder = false;
 const tieKey = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
 const realLists = async (method, table, search) => {
-  if (method !== "GET" || !["contracts", "order_milestones"].includes(table) || !/[?&]limit=/.test(search)) return null;
+  if (method !== "GET" || !["contracts", "order_milestones", "money_keys"].includes(table) || !/[?&]limit=/.test(search)) return null;
   const p = new URLSearchParams(search.slice(1));
   let rows = DB[table].filter(r => match(r, parse(search.slice(1))));
   const ord = p.get("order"), off = +(p.get("offset") || 0), lim = +(p.get("limit") || 1e9);
@@ -596,6 +601,50 @@ const noteOf = (c) => (c.money_error ? JSON.stringify(c.money_error.slice(0, 70)
   const good = due(await funded(), 1);
   await run();
   vuln(!(paid(gone) === 0 && BANNED.test(gone.money_error || "") && good.status === "completed" && paid(good) === 10000), `H33c a freelancer with no profile -> paid ${paid(gone) / 100}, note ${noteOf(gone)}; the ready Order after it ${good.status} (must: nothing paid, the note that the freelancer can't receive payments, the ready one paid)`);
+}
+{ // H34 a decision carried out but not told yet (its chat message refused, as in H12b), behind 150 decisions still being
+  // carried out whose records come first; the database answers at most 100 rows. The telling step, 11 minutes later.
+  isolate(); ready();
+  const T = past(2), waiting = [];
+  for (let i = 0; i < 150; i++) {
+    const o = mk({ id: "0" + uuid().slice(1), status: "resolving", resolution: "release", split_editor_cents: 10000, refund_cents: 0, resolved_by: users.adm.id, resolved_at: T });
+    waiting.push({ id: uuid(), scope: `decision:${o.id}:${T}`, key: JSON.stringify({ decision: "release", by: users.adm.id }), created_at: T });
+  }
+  DB.money_keys.push(...waiting);
+  const c = await funded({ id: "ffffffff-ffff-4fff-bfff-fffffffffff1", conversation_id: uuid() });
+  c.status = "disputed"; c.disputed_at = past(2); c.dispute_by = users.cl.id; c.dispute_reason = "not what we agreed";
+  DB.order_events.push({ id: uuid(), order_id: c.id, actor: users.cl.id, event: "disputed", data: {}, created_at: past(2) });
+  hooks.db = async (method, table, search, body) => {
+    if (method === "POST" && table === "messages" && String(body || "").includes(REASON)) return new Response(JSON.stringify({ message: "temporarily unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    return realLists(method, table, search, body);
+  };
+  const r = await decide(c); const t0 = told(c);
+  hooks.db = maxRows(100);
+  const real = Date.now; Date.now = () => real() + 11 * 60e3;
+  try { await lib.tellDecisions(); } finally { Date.now = real; hooks.db = realLists; }
+  const t = told(c);
+  for (const w of waiting) DB.money_keys.splice(DB.money_keys.indexOf(w), 1);
+  vuln(!(r.status === 200 && c.status === "completed" && paid(c) === 10000 && t0.msgs === 0 && t.msgs === 1 && t.marks === 1), `H34 a decision carried out (answer ${r.status}, Order ${c.status}, paid ${paid(c) / 100}) but not told yet (reason in the chat ${t0.msgs}), behind 150 still being carried out, at most 100 rows an answer -> the telling step: reason in the chat ${t.msgs}, mark ${t.marks} (must: 1 and 1)`);
+}
+{ // H34b 250 decisions still being carried out; a new one is saved while the telling step reads their records
+  isolate(); ready();
+  const T = past(2), waiting = [];
+  for (let i = 0; i < 250; i++) {
+    const o = mk({ id: "1" + uuid().slice(1), status: "resolving", resolution: "release", split_editor_cents: 10000, refund_cents: 0, resolved_by: users.adm.id, resolved_at: T });
+    waiting.push({ id: uuid(), scope: `decision:${o.id}:${T}`, key: JSON.stringify({ decision: "release", by: users.adm.id }), created_at: T });
+  }
+  DB.money_keys.push(...waiting);
+  const fresh = { id: uuid(), scope: `decision:00000000-0000-4000-8000-000000000000:${new Date().toISOString()}`, key: JSON.stringify({ decision: "refund", by: users.adm.id }), created_at: new Date().toISOString() };
+  let saved = false;
+  hooks.db = async (method, table, search, body) => {
+    const r = await realLists(method, table, search, body);
+    if (r && !saved && table === "money_keys" && /scope=like\.decision/.test(search)) { saved = true; DB.money_keys.push(fresh); }   // saved right after the first page was read
+    return r;
+  };
+  try { await lib.tellDecisions(); } finally { hooks.db = realLists; }
+  const kept = waiting.filter(w => DB.money_keys.includes(w)).length;
+  for (const w of [...waiting, fresh]) { const i = DB.money_keys.indexOf(w); if (i >= 0) DB.money_keys.splice(i, 1); }
+  vuln(kept !== 250, `H34b 250 decisions still being carried out, a new one saved while their records are read -> records kept ${kept} of 250 (must: every one, so each is told once carried out)`);
 }
 
 hooks.db = null; hooks.stripe = null; console.error = realError;
