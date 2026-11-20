@@ -14,7 +14,8 @@
 // ALLOWED_ORIGINS is split only at commas and semicolons, and the page's own addresses (SITE_URL, cuvori.io,
 // www.cuvori.io) are always allowed, so no setting can lock the page out of its payment functions. SUPABASE_URL takes only a
 // Supabase project address (….supabase.co, or a local one for testing): anything else would receive the secret database key.
-// The notes name the setting, never the address read from it (stripe-status is public).
+// The notes name the setting, never the address read from it (stripe-status can be asked by anyone; since 1 November only
+// a signed-in admin is given the notes).
 // A1 the usual ways of writing an address, A2 not an address at all, A3 a key pasted into the wrong field, A4 ALLOWED_ORIGINS
 // written loosely, A5 "*" and nonsense in ALLOWED_ORIGINS, A6 SUPABASE_URL, A7 what stays as it was (normal), A8 a line
 // break or tab inside an address, A9 SITE_URL not set, A10 ALLOWED_ORIGINS can't lock the page out, A11 notes name the
@@ -24,7 +25,8 @@
 // another website (cuvori.io + an invisible space + evil.com is cuvori.ioevil.com; a Cyrillic "о" in cuvori.io is a domain
 // anyone can register), so it counts as not an address. A14 SITE_URL that leads somewhere other than cuvori.io (a typo, a
 // password-like value, an address with a folder, whose folder is dropped): it is used, and the admin page says Stripe sends
-// clients and freelancers to another website — without repeating it.
+// clients and freelancers to another website — without repeating it. A15 the notes go only to a signed-in admin; A15b not
+// to someone signed in who is not an admin, nor to an admin who is banned (check of 1 December).
 // Check of 22 November: A16 a webhook signing secret that can't be one (quotes around it, a line break, space or invisible
 // character inside, another key pasted in its place): every notice from Stripe would be refused and nothing would say why;
 // now the admin page names the setting, never the secret. A17 SITE_URL anything but https://cuvori.io or
@@ -41,16 +43,27 @@ import { fileURLToPath } from "node:url";
 const root = process.env.TARGET ? path.resolve(process.env.TARGET) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");   // the copy under test (TARGET), else this one
 const out = [];
 const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
-// Loads the payment functions with these settings in a fresh process, asks stripe-status (as the page on cuvori.io does)
-// and sends the webhook an unsigned event, and returns what they answered plus everything they wrote to the log.
+// Loads the payment functions with these settings in a fresh process, asks stripe-status (as the page on cuvori.io does:
+// for anyone, and for a signed-in admin, who alone is given the settings notes since 1 November) and sends the webhook an
+// unsigned event, and returns what they answered plus everything they wrote to the log. body: the admin's answer;
+// publicBody: the answer anyone gets. The admin's sign-in is checked by a small stand-in for Supabase in the child.
 const CHILD = `
   const root = process.env.T_ROOT, out = {};
   try {
+    // who each sign-in is: an admin, a client (not an admin), an admin who is banned (check of 1 December)
+    const ADMIN = "00000000-0000-4000-8000-0000000000ad", WHO = { admin_token: { is_admin: true, banned: false }, client_token: { is_admin: false, banned: false }, banned_admin_token: { is_admin: true, banned: true } };
+    let token = null;
+    globalThis.fetch = async (u, init = {}) => { const p = new URL(String(u)).pathname, ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { "content-type": "application/json" } });
+      if (p === "/auth/v1/user") { token = String(new Headers(init.headers || {}).get("authorization") || "").replace(/^Bearer +/i, "")   /* (a plain space: this code is text inside a template, where a backslash is dropped) */; return WHO[token] ? ok({ id: ADMIN }) : new Response(JSON.stringify({ error_code: "bad_jwt" }), { status: 401, headers: { "content-type": "application/json" } }); }
+      if (p === "/rest/v1/profiles") return ok([{ id: ADMIN, email: "a@t.com", first_name: "a", role: "client", ...WHO[token] }]);
+      throw new TypeError("fetch failed"); };
     const lib = await import(root + "/netlify/lib/cuvori.mjs");
     Object.assign(out, { site: lib.SITE_URL, origins: lib.ALLOWED_ORIGINS, supabase: lib.SUPABASE_URL, notes: lib.SETTINGS_NOTES ?? null });
     const st = (await import(root + "/netlify/functions/stripe-status.mjs")).default;
     const r = await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io" } }));
-    Object.assign(out, { status: r.status, cors: r.headers.get("access-control-allow-origin"), body: await r.text() });
+    Object.assign(out, { status: r.status, cors: r.headers.get("access-control-allow-origin"), publicBody: await r.text() });
+    const as = async (t) => (await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io", authorization: "Bearer " + t } }))).text();
+    out.body = await as("admin_token"); out.clientBody = await as("client_token"); out.bannedBody = await as("banned_admin_token");
     // the same call from a stranger's website: no allow-origin, so the browser never lets that site read the answer
     out.corsStranger = (await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://evil.example" } }))).headers.get("access-control-allow-origin");
     const wh = (await import(root + "/netlify/functions/stripe-webhook.mjs")).default;
@@ -88,7 +101,7 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
                            ["ALLOWED_ORIGINS", "https://cuvori.io,whsec_SECRETdoNotShow"], ["SUPABASE_URL", "sb_secret_SECRETdoNotShow"],
                            ["SITE_URL", "MySECRETdoNotShow0.Secret"], ["ALLOWED_ORIGINS", "https://cuvori.io,MySECRETdoNotShow0.Secret"], ["SUPABASE_URL", "MySECRETdoNotShow0.supabase.co"]]) {
     const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
-    const leaked = /SECRETdoNotShow|secretdonotshow/i.test(r.log + (r.body || "") + JSON.stringify(r.notes || ""));
+    const leaked = /SECRETdoNotShow|secretdonotshow/i.test(r.log + (r.body || "") + (r.publicBody || "") + JSON.stringify(r.notes || ""));
     vuln(!works(r) || leaked || !noted(r, name), `A3 a key pasted into ${name} -> ${said(r)}; repeated anywhere: ${leaked ? "YES" : "no"}; admin note names ${name}: ${noted(r, name) ? "yes" : "no"} (must load, never repeat the key, name the setting)`);
   }
 }
@@ -195,6 +208,15 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     const r = load({ SITE_URL: v });
     vuln(r.error || (r.notes || []).some(n => OTHER.test(n)), `A14b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no "other website" note)`);
   }
+}
+{ // A15 the settings notes go to a signed-in admin only: the answer anyone gets says what the page needs, never the notes
+  const r = load({ SITE_URL: "cuvori.co", ALLOWED_ORIGINS: "*" });
+  let pub = {}; try { pub = JSON.parse(r.publicBody || "{}"); } catch {}
+  vuln(!works(r) || !noted(r, "SITE_URL") || /SITE_URL|ALLOWED_ORIGINS|settingsNotes/.test(r.publicBody || "") || pub.escrow !== true || pub.autoReleaseDays !== 7 || pub.stripeKeyOk !== true || pub.databaseKeyOk !== true,
+    `A15 two settings to correct -> the admin is told: ${noted(r, "SITE_URL") ? "yes" : "no"}; anyone else gets ${r.publicBody} (must be only escrow, the two key checks and the days, no notes)`);
+  const told = (b) => /SITE_URL|ALLOWED_ORIGINS|settingsNotes/.test(b || "");
+  vuln(!works(r) || !noted(r, "SITE_URL") || told(r.clientBody) || told(r.bannedBody),
+    `A15b the same, asked with a sign-in -> a client (not an admin) is told: ${told(r.clientBody) ? "YES" : "no"}; a banned admin is told: ${told(r.bannedBody) ? "YES" : "no"}; the admin: ${noted(r, "SITE_URL") ? "yes" : "no"} (must be the admin only)`);
 }
 { // A16 (check of 22 November) a webhook signing secret that can't be one: every notice from Stripe would be refused, and
   // nothing would say why. The admin page names the setting; the secret is never shown or written to the log; payments stay on.
