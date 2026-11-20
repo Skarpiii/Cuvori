@@ -25,7 +25,8 @@
 // another website (cuvori.io + an invisible space + evil.com is cuvori.ioevil.com; a Cyrillic "о" in cuvori.io is a domain
 // anyone can register), so it counts as not an address. A14 SITE_URL that leads somewhere other than cuvori.io (a typo, a
 // password-like value, an address with a folder, whose folder is dropped): it is used, and the admin page says Stripe sends
-// clients and freelancers to another website — without repeating it. A15 the notes go only to a signed-in admin.
+// clients and freelancers to another website — without repeating it. A15 the notes go only to a signed-in admin; A15b not
+// to someone signed in who is not an admin, nor to an admin who is banned (check of 1 December).
 // Check of 22 November: A16 a webhook signing secret that can't be one (quotes around it, a line break, space or invisible
 // character inside, another key pasted in its place): every notice from Stripe would be refused and nothing would say why;
 // now the admin page names the setting, never the secret. A17 SITE_URL anything but https://cuvori.io or
@@ -49,16 +50,20 @@ const vuln = (cond, m) => out.push((cond ? "VULNERABLE " : "safe       ") + m);
 const CHILD = `
   const root = process.env.T_ROOT, out = {};
   try {
-    const ADMIN = "00000000-0000-4000-8000-0000000000ad";
-    globalThis.fetch = async (u) => { const p = new URL(String(u)).pathname, ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { "content-type": "application/json" } });
-      if (p === "/auth/v1/user") return ok({ id: ADMIN }); if (p === "/rest/v1/profiles") return ok([{ id: ADMIN, email: "a@t.com", first_name: "a", role: "client", is_admin: true, banned: false }]);
+    // who each sign-in is: an admin, a client (not an admin), an admin who is banned (check of 1 December)
+    const ADMIN = "00000000-0000-4000-8000-0000000000ad", WHO = { admin_token: { is_admin: true, banned: false }, client_token: { is_admin: false, banned: false }, banned_admin_token: { is_admin: true, banned: true } };
+    let token = null;
+    globalThis.fetch = async (u, init = {}) => { const p = new URL(String(u)).pathname, ok = (d) => new Response(JSON.stringify(d), { status: 200, headers: { "content-type": "application/json" } });
+      if (p === "/auth/v1/user") { token = String(new Headers(init.headers || {}).get("authorization") || "").replace(/^Bearer +/i, "")   /* (a plain space: this code is text inside a template, where a backslash is dropped) */; return WHO[token] ? ok({ id: ADMIN }) : new Response(JSON.stringify({ error_code: "bad_jwt" }), { status: 401, headers: { "content-type": "application/json" } }); }
+      if (p === "/rest/v1/profiles") return ok([{ id: ADMIN, email: "a@t.com", first_name: "a", role: "client", ...WHO[token] }]);
       throw new TypeError("fetch failed"); };
     const lib = await import(root + "/netlify/lib/cuvori.mjs");
     Object.assign(out, { site: lib.SITE_URL, origins: lib.ALLOWED_ORIGINS, supabase: lib.SUPABASE_URL, notes: lib.SETTINGS_NOTES ?? null });
     const st = (await import(root + "/netlify/functions/stripe-status.mjs")).default;
     const r = await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io" } }));
     Object.assign(out, { status: r.status, cors: r.headers.get("access-control-allow-origin"), publicBody: await r.text() });
-    out.body = await (await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io", authorization: "Bearer admin_token" } }))).text();
+    const as = async (t) => (await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io", authorization: "Bearer " + t } }))).text();
+    out.body = await as("admin_token"); out.clientBody = await as("client_token"); out.bannedBody = await as("banned_admin_token");
     // the same call from a stranger's website: no allow-origin, so the browser never lets that site read the answer
     out.corsStranger = (await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://evil.example" } }))).headers.get("access-control-allow-origin");
     const wh = (await import(root + "/netlify/functions/stripe-webhook.mjs")).default;
@@ -209,6 +214,9 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   let pub = {}; try { pub = JSON.parse(r.publicBody || "{}"); } catch {}
   vuln(!works(r) || !noted(r, "SITE_URL") || /SITE_URL|ALLOWED_ORIGINS|settingsNotes/.test(r.publicBody || "") || pub.escrow !== true || pub.autoReleaseDays !== 7 || pub.stripeKeyOk !== true || pub.databaseKeyOk !== true,
     `A15 two settings to correct -> the admin is told: ${noted(r, "SITE_URL") ? "yes" : "no"}; anyone else gets ${r.publicBody} (must be only escrow, the two key checks and the days, no notes)`);
+  const told = (b) => /SITE_URL|ALLOWED_ORIGINS|settingsNotes/.test(b || "");
+  vuln(!works(r) || !noted(r, "SITE_URL") || told(r.clientBody) || told(r.bannedBody),
+    `A15b the same, asked with a sign-in -> a client (not an admin) is told: ${told(r.clientBody) ? "YES" : "no"}; a banned admin is told: ${told(r.bannedBody) ? "YES" : "no"}; the admin: ${noted(r, "SITE_URL") ? "yes" : "no"} (must be the admin only)`);
 }
 { // A16 (check of 22 November) a webhook signing secret that can't be one: every notice from Stripe would be refused, and
   // nothing would say why. The admin page names the setting; the secret is never shown or written to the log; payments stay on.
