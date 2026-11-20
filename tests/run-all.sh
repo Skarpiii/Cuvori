@@ -78,5 +78,6 @@ echo "== checks of 21 and 24 November (one swipe moves one video: on a phone, al
 echo "== auth";             page authtest.js
 echo "== oauth return";     page tests/oauth-return.js
 echo "== the new prices on the page"; page pricing-page.js
+echo "== check of 2 December (what the Order says about its money: a payout that waits for the freelancer's Stripe setup or for Cuvori, payout and chargeback times, one copy of the texts)"; page tests/money-notes.js
 [ $r = 0 ] && echo "ALL CHECKS PASSED" || echo "SOMETHING FAILED"
 exit $r

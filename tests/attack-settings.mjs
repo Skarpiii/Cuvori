@@ -24,14 +24,16 @@
 // pasted along, a look-alike letter from another alphabet, a full-width dot): the address reader would quietly turn it into
 // another website (cuvori.io + an invisible space + evil.com is cuvori.ioevil.com; a Cyrillic "о" in cuvori.io is a domain
 // anyone can register), so it counts as not an address. A14 SITE_URL that leads somewhere other than cuvori.io (a typo, a
-// password-like value, an address with a folder, whose folder is dropped): it is used, and the admin page says Stripe sends
-// clients and freelancers to another website — without repeating it. A15 the notes go only to a signed-in admin; A15b not
+// password-like value, another website, cuvori.io with another port): since the check of 3 December it is not used, Cuvori's
+// own address is, and the admin page says so without repeating it (it was used: a typo such as cuvori.co sent a client who had
+// just paid to whoever owns that address, and a password with a dot in it went to Stripe and into every client's address bar). A15 the notes go only to a signed-in admin; A15b not
 // to someone signed in who is not an admin, nor to an admin who is banned (check of 1 December).
 // Check of 22 November: A16 a webhook signing secret that can't be one (quotes around it, a line break, space or invisible
 // character inside, another key pasted in its place): every notice from Stripe would be refused and nothing would say why;
-// now the admin page names the setting, never the secret. A17 SITE_URL anything but https://cuvori.io or
-// https://www.cuvori.io, also a test address on a computer (localhost) or cuvori.io with a port number, where Stripe would
-// send clients after paying to a page that does not open: used, and the admin page says so, never which address.
+// now the admin page names the setting, never the secret. A17 SITE_URL a test address on a computer (localhost), where Stripe
+// would send clients after paying to a page that only opens there: used, for testing, and the admin page says so, never which
+// address (cuvori.io with a port number was used too; since the check of 3 December it is A14). A19 (check of 3 December) the
+// addresses Stripe sends people back to come from SITE_URL only.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -195,14 +197,17 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
       `A13 ${name} = ${JSON.stringify(v)} -> ${said(r)}${name === "SUPABASE_URL" ? ", database " + r.supabase : ""}; note: ${r.notes ? JSON.stringify(r.notes).slice(0, 110) : "none"} (must count as not a web address: ${name === "ALLOWED_ORIGINS" ? "left out" : "Cuvori's own address used"}, with a note)`);
   }
 }
-{ // A14 SITE_URL leads to a website other than cuvori.io: used, and the admin page says so without repeating it
-  const OTHER = /a website other than cuvori\.io|is not Cuvori's own address/;   // the note before and since 22 November
-  for (const [v, site] of [["cuvori.co", "https://cuvori.co"], ["MySECRETdoNotShow0.Secret", "https://mysecretdonotshow0.secret"], ["https://egidijus.github.io/cuvori/", "https://egidijus.github.io"], ["https://xn--cuvri-lye.io", "https://xn--cuvri-lye.io"]]) {
+{ // A14 SITE_URL leads to a website other than cuvori.io, or to cuvori.io with another port: not used (check of 3 December),
+  // Cuvori's own address is, and the admin page says so without repeating what was typed
+  const OTHER = /is not Cuvori's own address/, INSTEAD = /uses https:\/\/cuvori\.io instead/;
+  for (const v of ["cuvori.co", "cuvory.io", "MySECRETdoNotShow0.Secret", "Summer.Garden", "https://egidijus.github.io/cuvori/", "https://xn--cuvri-lye.io", "https:\\\\evil.example",
+                   "cuvori.io:80", "https://cuvori.io:8443", "https://www.cuvori.io:8443"]) {
     const r = load({ SITE_URL: v });
     const shown = JSON.stringify(r.notes || []) + (r.body || "") + r.log;
-    const repeated = /cuvori\.co[^a-z]|secretdonotshow|github|cuvri/i.test(shown);
-    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => OTHER.test(n)) || repeated,
-      `A14 SITE_URL = ${JSON.stringify(v)} -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 160) : "none"}; repeated: ${repeated ? "YES" : "no"} (must say Stripe sends people to ${OTHER}, never which one)`);
+    const repeated = /cuvori\.co[^a-z]|cuvory|secretdonotshow|summer|garden|github|cuvri|evil|8443|:80\b/i.test(shown);
+    const own = JSON.stringify(r.origins) === JSON.stringify(["https://cuvori.io", "https://www.cuvori.io"]);
+    vuln(!works(r) || r.site !== "https://cuvori.io" || !own || !noted(r, "SITE_URL") || !r.notes.some(n => OTHER.test(n) && INSTEAD.test(n)) || repeated,
+      `A14 SITE_URL = ${JSON.stringify(v)} -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 200) : "none"}; repeated: ${repeated ? "YES" : "no"} (must use https://cuvori.io, allow only Cuvori's own addresses, and say SITE_URL is not Cuvori's own address, never which one)`);
   }
   for (const v of ["cuvori.io", "https://www.cuvori.io", "https://cuvori.io/#home"]) {      // a test address on a computer: A17
     const r = load({ SITE_URL: v });
@@ -244,20 +249,33 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
       `A16 ${name} ${label} -> the admin is told which setting: ${named ? "yes" : "no"}${wrongOne ? " (and the other one too)" : ""}; the secret shown or logged: ${leaked ? "YES" : "no"}; payments on: ${on ? "yes" : "no"} (must name it, never show it)`);
   }
 }
-{ // A17 (check of 22 November) SITE_URL anything but Cuvori's own address, also a test address on a computer or cuvori.io with a
-  // port number: Stripe would send clients there after paying, to a page that does not open. Used, and the admin page says so.
+{ // A17 (check of 22 November) SITE_URL a test address on a computer: Stripe would send clients there after paying, to a page
+  // that only opens there. Used, for testing, and the admin page says so (cuvori.io with a port number: A14 since 3 December).
   const SAYS = /is not Cuvori's own address|a website other than cuvori\.io/;
   for (const [v, site] of [["http://localhost:8888", "http://localhost:8888"], ["localhost:8888", "http://localhost:8888"], ["http://127.0.0.1:8888", "http://127.0.0.1:8888"],
-                           ["https://cuvori.io:8443", "https://cuvori.io:8443"], ["https://www.cuvori.io:8443", "https://www.cuvori.io:8443"]]) {
+                           ["http://[::1]:8888", "http://[::1]:8888"]]) {
     const r = load({ SITE_URL: v });
-    const repeated = /8888|8443|localhost|127\.0\.0\.1/.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
-    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => SAYS.test(n)) || repeated,
+    const repeated = /8888|8443|localhost|127\.0\.0\.1|::1/.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
+    vuln(!works(r) || r.site !== site || !noted(r, "SITE_URL") || !r.notes.some(n => SAYS.test(n) && /test address on a computer/.test(n)) || repeated,
       `A17 SITE_URL = ${JSON.stringify(v)} -> ${said(r)}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 160) : "none"}; repeated: ${repeated ? "YES" : "no"} (must be used, and the admin told it is not Cuvori's own address, never which one)`);
   }
   for (const v of ["https://cuvori.io", "https://www.cuvori.io", "cuvori.io", "https://cuvori.io:443", "http://www.cuvori.io:80"]) {
     const r = load({ SITE_URL: v });
     vuln(r.error || (r.notes || []).some(n => SAYS.test(n)), `A17b SITE_URL = ${JSON.stringify(v)} -> ${r.error || r.site}; notes ${JSON.stringify(r.notes)} (normal: no such note)`);
   }
+}
+{ // A19 (check of 3 December) the addresses Stripe sends people back to (after paying, after setting up payouts) come from
+  // SITE_URL only, so no other setting or address can send a client who has just paid to another website
+  const fs = await import("node:fs");
+  const found = [];
+  for (const f of fs.readdirSync(root + "/netlify/functions").filter(f => f.endsWith(".mjs"))) {
+    const src = fs.readFileSync(root + "/netlify/functions/" + f, "utf8");
+    for (const m of src.matchAll(/\b(success_url|cancel_url|refresh_url|return_url)\s*:\s*(`[^`]*`|[^,\n]+)/g)) found.push([f, m[1], m[2].trim()]);
+  }
+  const names = found.map(([f, k]) => f.replace(".mjs", "") + " " + k).sort().join(", ");
+  const bad = found.filter(([, , v]) => !v.startsWith("`${SITE_URL}/"));
+  vuln(names !== "stripe-checkout cancel_url, stripe-checkout success_url, stripe-connect refresh_url, stripe-connect return_url" || bad.length,
+    `A19 the addresses Stripe sends people back to: ${names}; not built from SITE_URL: ${bad.length ? bad.map(b => b.join(" ")).join("; ") : "none"} (must be these four, each starting with SITE_URL)`);
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
   // (cuvori.netlify.app) still runs the code of 13 October, which reads SITE_URL, SUPABASE_URL and ALLOWED_ORIGINS strictly and
