@@ -9,7 +9,8 @@ const env = (name) => String(process.env[name] || "").trim();
 // once: it is left out (ALLOWED_ORIGINS) or replaced by Cuvori's own address, and the admin page says which setting to
 // correct (SETTINGS_NOTES, which stripe-status gives a signed-in admin). What was typed, and the address read from it, is
 // never written to the log or shown anywhere: a key or password pasted into the wrong field must not travel further. Only
-// the setting's name is, and Cuvori's own address when that is used instead.
+// the setting's name is, and Cuvori's own address when that is used instead. That is also why SITE_URL, where Stripe sends
+// people back, is used only when it is Cuvori's own address or a test address on a computer (check of 3 December).
 export const SETTINGS_NOTES = [];
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 // a real host name: letters, digits and hyphens, at most 63 to a part and 253 in all, ending in a name (com, io, xn--…).
@@ -102,15 +103,21 @@ for (const [name, secret, what] of [["STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET, "a
 // Where Stripe sends people back (after paying, after setting up payouts). Not set: Netlify's own address (URL), and the
 // admin page says so, since that address may serve an older copy of the page. Set but not a web address: Cuvori's own
 // address, never Netlify's.
-export const SITE_URL = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
+const siteRead = env("SITE_URL") ? addressSetting("SITE_URL", env("SITE_URL"), CUVORI_SITE) : addressSetting("URL", env("URL"), CUVORI_SITE);
 // SITE_URL set to anything but Cuvori's own address, https://cuvori.io or https://www.cuvori.io: a typo such as cuvori.co, a
-// password pasted into the wrong field, an address with a folder, whose folder is dropped, and since the check of 22 November
-// also a test address on a computer (localhost) or cuvori.io with a port number, where Stripe would send people to a page that
-// does not open. Used as it is, since that may be on purpose, but the admin page says so. Which address it is stays unsaid,
-// like everything read from a setting.
+// password pasted into the wrong field, another website, cuvori.io with a port number. It was used as it was, with a note on
+// the admin page: a client who had just paid was sent to whoever owns that address (who could ask for their card again), and
+// a password with a dot in it went to Stripe and into every client's address bar (check of 3 December). Now it is never used:
+// Cuvori's own address is, and the admin page says so. A test address on a computer (localhost) is still used, for testing,
+// and the admin page says so too. Which address was typed stays unsaid, like everything read from a setting.
 const CUVORI_ORIGINS = [CUVORI_SITE, "https://www.cuvori.io"];
-if (env("SITE_URL") && !CUVORI_ORIGINS.includes(SITE_URL))
-  note(`SITE_URL is not Cuvori's own address (https://cuvori.io or https://www.cuvori.io): it leads to another website, a test address or another port, so Stripe sends clients there after paying, and freelancers after setting up payouts. If that is not on purpose, correct it in Netlify under Project configuration → Environment variables.`);
+const siteLocal = LOCAL_HOSTS.includes(new URL(siteRead).hostname);
+const siteElsewhere = !!env("SITE_URL") && !CUVORI_ORIGINS.includes(siteRead) && !siteLocal;
+export const SITE_URL = siteElsewhere ? CUVORI_SITE : siteRead;
+if (siteElsewhere)
+  note(`SITE_URL is not Cuvori's own address (https://cuvori.io or https://www.cuvori.io): it leads to another website or another port, so Cuvori uses ${CUVORI_SITE} instead, and Stripe sends clients and freelancers there. ${WHERE}`);
+else if (env("SITE_URL") && siteLocal)
+  note(`SITE_URL is not Cuvori's own address (https://cuvori.io or https://www.cuvori.io): it is a test address on a computer, so Stripe sends clients there after paying, and freelancers after setting up payouts, to a page that opens only on that computer. If that is not on purpose, correct it in Netlify under Project configuration → Environment variables.`);
 if (!env("SITE_URL")) note(SITE_URL === CUVORI_SITE ? `SITE_URL is not set; Cuvori uses ${CUVORI_SITE}. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`
   : `SITE_URL is not set, so Stripe sends clients back to ${SITE_URL} after paying, which may show an older copy of the page. Add SITE_URL = ${CUVORI_SITE} in Netlify under Project configuration → Environment variables.`);
 // the page may live on another host (GitHub Pages) and call these functions across origins. The page's own addresses
