@@ -870,6 +870,12 @@ const mock=fs.readFileSync((process.env.TARGET?require('path').resolve(process.e
   await p.evaluate(()=>{ window.__mockSettingsNotes=[]; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
   ok(!(await p.textContent('#adminBody')).includes('Netlify setting:'),'settings in order: no note');
+  // only an admin is given the settings notes, and only when the request carries their sign-in (check of 1 December: the
+  // payment status gave them to anyone who asked): the Payment costs tab asks for them itself, with the admin's sign-in
+  await p.evaluate(()=>{ window.__mockSettingsNotes=['ALLOWED_ORIGINS has 1 entry that is not one web address ("*" for every website is never allowed); it is left out. Cuvori\'s own addresses stay allowed. Correct it in Netlify under Project configuration → Environment variables.']; });
+  await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
+  ok((await p.textContent('#adminBody')).includes('Netlify setting: ALLOWED_ORIGINS has 1 entry'),'the Payment costs tab asks for the settings notes itself, with the admin\'s sign-in');
+  await p.evaluate(()=>{ window.__mockSettingsNotes=[]; }); await p.evaluate(()=>window.__reloadEscrow()); await p.waitForTimeout(300);
   await p.click('.admin-tab[data-atab="users"]'); await p.waitForTimeout(200); await p.click('.admin-tab[data-atab="fees"]'); await p.waitForTimeout(500);
   { const tx=await p.textContent('#adminBody'); ok(tx.includes('ON — clients fund Orders through Stripe') && !tx.includes('ON, but paused'),'a real secret key: the admin panel says plain "ON" again'); }
   // money held apart at Stripe (SETUP.md, Part 22): the admin panel says whether it is on, where it is asked for and with which
