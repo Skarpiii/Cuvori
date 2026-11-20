@@ -114,5 +114,6 @@ echo "== auth";             page authtest.js
 echo "== oauth return";     page tests/oauth-return.js
 echo "== the new prices on the page"; page pricing-page.js
 echo "== Orders at the new prices on the page (Order screen, admin panel)"; page tests/plan2-page.js
+echo "== check of 2 December (what the Order says about its money: a payout that waits for the freelancer's Stripe setup or for Cuvori, payout and chargeback times, one copy of the texts)"; page tests/money-notes.js
 [ $r = 0 ] && echo "ALL CHECKS PASSED" || echo "SOMETHING FAILED"
 exit $r
