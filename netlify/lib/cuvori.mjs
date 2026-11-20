@@ -7,7 +7,7 @@ const env = (name) => String(process.env[name] || "").trim();
 // https://cuvori.io (http stays only for local testing). One that is not a web address at all never stops the payment
 // functions — before, it made this file throw as it loaded, so every function, the webhook and the hourly job stopped at
 // once: it is left out (ALLOWED_ORIGINS) or replaced by Cuvori's own address, and the admin page says which setting to
-// correct (SETTINGS_NOTES, sent by stripe-status, which anyone can read). What was typed, and the address read from it, is
+// correct (SETTINGS_NOTES, which stripe-status gives a signed-in admin). What was typed, and the address read from it, is
 // never written to the log or shown anywhere: a key or password pasted into the wrong field must not travel further. Only
 // the setting's name is, and Cuvori's own address when that is used instead.
 export const SETTINGS_NOTES = [];
