@@ -601,7 +601,9 @@
     const res=(status,data)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});
     const me=uid()?db.profiles.find(p=>p.id===uid()):null;
     if(name==="stripe-status"){ if(window.__mockStatusDown) throw new TypeError("Failed to fetch");   // the payment functions can't be reached
-      return res(200,{escrow:window.__mockEscrow,stripeKeyOk:window.__mockStripeKeyOk!==false,databaseKeyOk:window.__mockDbKeyOk!==false,autoReleaseDays:window.__mockAutoDays||7,settingsNotes:window.__mockSettingsNotes||[]}); }
+      // like stripe-status: the settings notes only for a request that carries a signed-in admin's sign-in (check of 1 December)
+      const adminAsks=/^Bearer\s+\S+/i.test(new Headers(init.headers||{}).get("authorization")||"") && !!me && me.is_admin===true && me.banned!==true;
+      return res(200,{escrow:window.__mockEscrow,stripeKeyOk:window.__mockStripeKeyOk!==false,databaseKeyOk:window.__mockDbKeyOk!==false,autoReleaseDays:window.__mockAutoDays||7,...(adminAsks?{settingsNotes:window.__mockSettingsNotes||[]}:{})}); }
     if(!window.__mockEscrow) return res(503,{error:"Escrow payments are not configured yet"});
     if(!me) return res(401,{error:"Sign in first"});
     const forced=window.__mockFnFail&&window.__mockFnFail[name]; if(forced==="down") throw new TypeError("Failed to fetch");   // no readable answer at all

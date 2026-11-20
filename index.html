@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-DbrT/1CLncvQebFU0GWsw2MC5w5lekbUtKmtRWRnkck=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-p80SHDv2/Nvmnrn75F4/oKKojAM4c4FgjCYZ2m7lixY=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -6195,7 +6195,7 @@
       else if(ADMIN.tab==="contracts"){ const { data, error } = await sb.rpc("admin_list_contracts"); if(error) throw error; ADMIN.contracts=data||[]; renderAdminContracts(); }
       else if(ADMIN.tab==="reports"){ const { data, error } = await sb.rpc("admin_list_reports",{ p_status:ADMIN.repStatus }); if(error) throw error; ADMIN.reports=data||[]; renderAdminReports(); }
       else if(ADMIN.tab==="professions"){ await adminLoadProfessions(); renderAdminProfessions(); }
-      else if(ADMIN.tab==="fees"){ const { data, error } = await sb.rpc("admin_fee_schedules"); if(error) throw error; ADMIN.fees=data||[]; renderAdminFees(); }
+      else if(ADMIN.tab==="fees"){ const { data, error } = await sb.rpc("admin_fee_schedules"); if(error) throw error; ADMIN.fees=data||[]; await loadEscrowStatus(); renderAdminFees(); }
       else if(ADMIN.tab==="jobs"){ const { data, error } = await sb.rpc("admin_job_queue"); if(error) throw error; ADMIN.jobQueue=data||[]; const r=await sb.rpc("setting",{ p_key:"posting_rules" }); ADMIN.rules=(r.data&&typeof r.data==="object")?r.data:{}; renderAdminJobs(); }
       else { const { data, error } = await sb.rpc("admin_list_order_reviews", { p_status:null }); if(error) throw error; ADMIN.reviews=data||[]; renderAdminReviews(); }
     }catch(e){ console.error(e); host.innerHTML=`<div class="notice danger">${escapeHtml(e.message||"Error")}</div>`; }
@@ -6441,7 +6441,9 @@
   async function loadEscrowStatus(){
     if(!REAL) return;
     ESCROW.reachable=false;
-    try{ const r=await fetch(FN_BASE+"/.netlify/functions/stripe-status",{cache:"no-store", ...(typeof AbortSignal!=="undefined"&&AbortSignal.timeout?{signal:AbortSignal.timeout(10000)}:{})}); if(r.ok){ const j=await r.json(); if(typeof j.escrow==="boolean"){ ESCROW.reachable=true; ESCROW.enabled=!!j.escrow; ESCROW.keyOk=j.stripeKeyOk!==false; ESCROW.dbKeyOk=j.databaseKeyOk!==false; ESCROW.days=j.autoReleaseDays??7; ESCROW.notes=Array.isArray(j.settingsNotes)?j.settingsNotes.filter(x=>typeof x==="string").slice(0,10).map(x=>x.slice(0,400)):[]; } } }catch(e){}
+    // an admin's sign-in goes with it: only an admin is given the settings notes (stripe-status); everyone else asks without one
+    let auth={}; try{ if(isAdmin()){ const { data:{ session } } = await sb.auth.getSession(); if(session) auth={ authorization:"Bearer "+session.access_token }; } }catch(e){}
+    try{ const r=await fetch(FN_BASE+"/.netlify/functions/stripe-status",{cache:"no-store", headers:auth, ...(typeof AbortSignal!=="undefined"&&AbortSignal.timeout?{signal:AbortSignal.timeout(10000)}:{})}); if(r.ok){ const j=await r.json(); if(typeof j.escrow==="boolean"){ ESCROW.reachable=true; ESCROW.enabled=!!j.escrow; ESCROW.keyOk=j.stripeKeyOk!==false; ESCROW.dbKeyOk=j.databaseKeyOk!==false; ESCROW.days=j.autoReleaseDays??7; ESCROW.notes=Array.isArray(j.settingsNotes)?j.settingsNotes.filter(x=>typeof x==="string").slice(0,10).map(x=>x.slice(0,400)):[]; } } }catch(e){}
     ESCROW.checked=true; renderStripeBox();
   }
   // A new Order's payment mode is fixed when it is made, so whether protected payments are on must really be known first:
