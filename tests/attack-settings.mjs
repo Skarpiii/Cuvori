@@ -39,6 +39,8 @@
 // reader decodes it, so it became the look-alike website the rule against such letters keeps out; now it is not an address.
 // A21 SUPABASE_URL only Cuvori's own project address (or a test address on a computer): any ….supabase.co address was taken,
 // so a typo in the project code, or another project's address, would have received the secret database key.
+// Check of 5 December: A22 SUPABASE_URL a test address on a computer: used, for testing, but on Netlify every payment function
+// then fails to reach the database, and nothing said why; now the admin page says so (as for SITE_URL), never which address.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -316,6 +318,20 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   for (const [v, want] of [[P, P], [P + "/", P], ["tnxujwlfatcvxzevllfr.supabase.co", P], ["HTTPS://TNXUJWLFATCVXZEVLLFR.SUPABASE.CO/rest/v1/", P], ["http://localhost:54321", "http://localhost:54321"], ["http://127.0.0.1:54321", "http://127.0.0.1:54321"]]) {
     const r = load({ SITE_URL: "https://cuvori.io", SUPABASE_URL: v });
     vuln(!works(r) || r.supabase !== want || (r.notes || []).some(n => OWNP.test(n)), `A21b SUPABASE_URL = ${JSON.stringify(v)} -> ${r.supabase}; notes ${JSON.stringify(r.notes)} (normal: ${want}, no "not Cuvori's own project" note)`);
+  }
+}
+{ // A22 (check of 5 December) SUPABASE_URL a test address on a computer: still used (testing with a local Supabase), and the
+  // admin page says the payment functions reach the database only on that computer, without repeating the address
+  const SAYS = /^SUPABASE_URL is a test address on a computer/;
+  for (const [v, want] of [["http://localhost:54321", "http://localhost:54321"], ["127.0.0.1:54321", "http://127.0.0.1:54321"], ["http://[::1]:54321", "http://[::1]:54321"], ["HTTP://LOCALHOST:54321/rest/v1/", "http://localhost:54321"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", SUPABASE_URL: v });
+    const repeated = /54321|localhost|127\.0\.0\.1|::1/i.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
+    vuln(!works(r) || r.supabase !== want || !noted(r, "SUPABASE_URL") || !(r.notes || []).some(n => SAYS.test(n)) || repeated,
+      `A22 SUPABASE_URL = ${JSON.stringify(v)} -> ${r.supabase}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 220) : "none"}; repeated: ${repeated ? "YES" : "no"} (must stay ${want}, and the admin told it is a test address on a computer, never which one)`);
+  }
+  for (const v of ["https://tnxujwlfatcvxzevllfr.supabase.co", "tnxujwlfatcvxzevllfr.supabase.co", null, "https://other-project.supabase.co", "my supabase"]) {
+    const r = load({ SITE_URL: "https://cuvori.io", SUPABASE_URL: v });
+    vuln(!works(r) || (r.notes || []).some(n => SAYS.test(n)), `A22b SUPABASE_URL = ${JSON.stringify(v)} -> ${r.supabase}; notes ${JSON.stringify(r.notes)} (normal: no "test address on a computer" note)`);
   }
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
