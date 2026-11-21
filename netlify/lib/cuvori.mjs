@@ -82,6 +82,11 @@ const CUVORI_SITE = "https://cuvori.io";
 const CUVORI_SUPABASE = "https://tnxujwlfatcvxzevllfr.supabase.co";
 const SUPABASE_PROJECT = { what: `Cuvori's own Supabase project address (${CUVORI_SUPABASE})`, ok: (o) => o === CUVORI_SUPABASE || LOCAL_HOSTS.includes(new URL(o).hostname) };
 export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), CUVORI_SUPABASE, SUPABASE_PROJECT);
+// SUPABASE_URL a test address on a computer (localhost): used, for testing with a local Supabase, but on Netlify every payment
+// function then fails to reach the database (paying, payouts, the hourly job) and nothing said why. The admin page says so now,
+// as for SITE_URL; which address stays unsaid (check of 5 December).
+if (env("SUPABASE_URL") && LOCAL_HOSTS.includes(new URL(SUPABASE_URL).hostname))
+  note(`SUPABASE_URL is a test address on a computer, so the payment functions reach the database only when they run on that computer: on Netlify, paying, payouts and the hourly job fail. If that is not on purpose, correct it in Netlify under Project configuration → Environment variables.`);
 // Legacy service-role keys are JWTs; new secret keys use only the apikey header. When both are set, the new secret key
 // is used: Supabase is phasing the old keys out, and an old key switched off in Supabase must never shadow a working new one.
 export const SERVICE_KEY = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
