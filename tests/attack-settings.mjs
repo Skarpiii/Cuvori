@@ -41,6 +41,9 @@
 // so a typo in the project code, or another project's address, would have received the secret database key.
 // Check of 5 December: A22 SUPABASE_URL a test address on a computer: used, for testing, but on Netlify every payment function
 // then fails to reach the database, and nothing said why; now the admin page says so (as for SITE_URL), never which address.
+// Check of 10 December: A23 the address reader's first steps (an "@", slashes before the address, https written without its
+// colon, another kind of address, HTTP in capitals), checked where falling back to Cuvori's own address can't hide a mistake:
+// with three of those steps broken, every other check here still passed, as A1's answers are the fallback's too.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -332,6 +335,20 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   for (const v of ["https://tnxujwlfatcvxzevllfr.supabase.co", "tnxujwlfatcvxzevllfr.supabase.co", null, "https://other-project.supabase.co", "my supabase"]) {
     const r = load({ SITE_URL: "https://cuvori.io", SUPABASE_URL: v });
     vuln(!works(r) || (r.notes || []).some(n => SAYS.test(n)), `A22b SUPABASE_URL = ${JSON.stringify(v)} -> ${r.supabase}; notes ${JSON.stringify(r.notes)} (normal: no "test address on a computer" note)`);
+  }
+}
+{ // A23 (check of 10 December) the address reader's first steps, in ALLOWED_ORIGINS: it adds to Cuvori's own addresses, so a
+  // mistake in reading can't hide behind the fallback, as it does in A1 (a broken reading of "https//cuvori.io" falls back to
+  // https://cuvori.io, the answer A1 wants). Each entry must be read, or left out, exactly so.
+  const OWN = ["https://cuvori.io", "https://www.cuvori.io"], MAIN = "https://main--cuvori.netlify.app";
+  for (const [v, want, why] of [
+    ["https//main--cuvori.netlify.app", [...OWN, MAIN], "https written without its colon: still read"],
+    ["/https://main--cuvori.netlify.app", [...OWN, MAIN], "a slash before the address: still read"],
+    ["evil.com://main--cuvori.netlify.app", OWN, "another kind of address: left out, never read as evil.com"],
+    ["HTTP://localhost:8888", [...OWN, "http://localhost:8888"], "HTTP in capitals: read in small letters, as a browser sends it"],
+    ["cuvori.io@main--cuvori.netlify.app", OWN, "an @: left out"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: v });
+    vuln(!works(r) || JSON.stringify(r.origins) !== JSON.stringify(want), `A23 ALLOWED_ORIGINS = ${JSON.stringify(v)} (${why}) -> allowed ${JSON.stringify(r.origins)} (must be ${JSON.stringify(want)})`);
   }
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
