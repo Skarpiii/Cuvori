@@ -32,6 +32,10 @@ function originOf(value) {
   if (m) { scheme = m[1].toLowerCase(); rest = m[2]; }
   else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rest)) return null;                 // another kind of address (ftp://, file://)
   if (!rest) return null;
+  // a %-code in the address itself (cuv%D0%BEri.io): the reader decodes it, so a look-alike letter written that way (a Russian
+  // "о") became the other website the rule above keeps out, and a sign became part of the name. Not an address, like the
+  // letter itself (check of 4 December). After the address (a folder, ?x=…) a %-code changes nothing: that part is dropped.
+  if (rest.replace(/^[\/\\]+/, "").split(/[\/\\?#]/)[0].includes("%")) return null;
   let url; try { url = new URL("https://" + rest); } catch { return null; }
   const local = LOCAL_HOSTS.includes(url.hostname);
   if (!local && !HOST_OK(url.hostname)) return null;
@@ -71,10 +75,13 @@ function readAddress(name, value, fallback, kind, oldReads) {
 }
 const CUVORI_SITE = "https://cuvori.io";
 // The project address is public (it is in the page too); a missing or broken setting must not take every payment function
-// down. Only a Supabase project address (….supabase.co, or a local one for testing) is used: every call to it carries the
-// secret database key, so the Supabase dashboard's own address pasted in by mistake, or any other website, never gets it.
-const SUPABASE_PROJECT = { what: "a Supabase project address (….supabase.co)", ok: (o) => { const h = new URL(o).hostname; return h.endsWith(".supabase.co") || LOCAL_HOSTS.includes(h); } };
-export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), "https://tnxujwlfatcvxzevllfr.supabase.co", SUPABASE_PROJECT);
+// down. Only Cuvori's own project address (or a local one for testing) is used: every call to it carries the secret database
+// key, so the Supabase dashboard's own address pasted in by mistake, another project's address, a typo in the project code
+// or any other website never gets it (check of 4 December: any ….supabase.co address was taken, so a typo in the project
+// code sent the key there). Moving Cuvori to another Supabase project means changing CUVORI_SUPABASE here.
+const CUVORI_SUPABASE = "https://tnxujwlfatcvxzevllfr.supabase.co";
+const SUPABASE_PROJECT = { what: `Cuvori's own Supabase project address (${CUVORI_SUPABASE})`, ok: (o) => o === CUVORI_SUPABASE || LOCAL_HOSTS.includes(new URL(o).hostname) };
+export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), CUVORI_SUPABASE, SUPABASE_PROJECT);
 // Legacy service-role keys are JWTs; new secret keys use only the apikey header. When both are set, the new secret key
 // is used: Supabase is phasing the old keys out, and an old key switched off in Supabase must never shadow a working new one.
 export const SERVICE_KEY = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
