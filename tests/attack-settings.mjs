@@ -13,7 +13,8 @@
 // the admin page says so, since Stripe then sends clients back to Netlify's own address, which may show an older page.
 // ALLOWED_ORIGINS is split only at commas and semicolons, and the page's own addresses (SITE_URL, cuvori.io,
 // www.cuvori.io) are always allowed, so no setting can lock the page out of its payment functions. SUPABASE_URL takes only a
-// Supabase project address (….supabase.co, or a local one for testing): anything else would receive the secret database key.
+// Supabase project address: since the check of 4 December only Cuvori's own (or a local one for testing), as anything else would
+// receive the secret database key.
 // The notes name the setting, never the address read from it (stripe-status can be asked by anyone; since 1 November only
 // a signed-in admin is given the notes).
 // A1 the usual ways of writing an address, A2 not an address at all, A3 a key pasted into the wrong field, A4 ALLOWED_ORIGINS
@@ -34,6 +35,10 @@
 // would send clients after paying to a page that only opens there: used, for testing, and the admin page says so, never which
 // address (cuvori.io with a port number was used too; since the check of 3 December it is A14). A19 (check of 3 December) the
 // addresses Stripe sends people back to come from SITE_URL only.
+// Check of 4 December: A20 a %-code in the address itself (cuv%D0%BEri.io, a Russian "о" written as %-codes): the address
+// reader decodes it, so it became the look-alike website the rule against such letters keeps out; now it is not an address.
+// A21 SUPABASE_URL only Cuvori's own project address (or a test address on a computer): any ….supabase.co address was taken,
+// so a typo in the project code, or another project's address, would have received the secret database key.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -276,6 +281,42 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
   const bad = found.filter(([, , v]) => !v.startsWith("`${SITE_URL}/"));
   vuln(names !== "stripe-checkout cancel_url, stripe-checkout success_url, stripe-connect refresh_url, stripe-connect return_url" || bad.length,
     `A19 the addresses Stripe sends people back to: ${names}; not built from SITE_URL: ${bad.length ? bad.map(b => b.join(" ")).join("; ") : "none"} (must be these four, each starting with SITE_URL)`);
+}
+{ // A20 (check of 4 December) a %-code in the address itself: the address reader decodes it, so a look-alike letter written
+  // that way became another website, and a sign became part of the name. Not an address, like the letter itself; nothing typed
+  // is repeated. After the address (a folder) it is dropped as before.
+  const P = "https://tnxujwlfatcvxzevllfr.supabase.co", OWN = ["https://cuvori.io", "https://www.cuvori.io"];
+  const NOT = (name) => (n) => n.startsWith(name + " is not a web address") || (name === "ALLOWED_ORIGINS" && /^ALLOWED_ORIGINS has 1 entry that is not one web address/.test(n));
+  for (const [name, v, want] of [
+    ["SITE_URL", "cuv%D0%BEri.io", "https://cuvori.io"], ["SITE_URL", "https://cuvori%2Eio", "https://cuvori.io"], ["SITE_URL", "https:\\\\cuv%D0%BEri.io", "https://cuvori.io"],
+    ["SUPABASE_URL", "x%D0%BE.supabase.co", P], ["SUPABASE_URL", "tnxujwlfatcvxzevllf%72.supabase.co", P],
+    ["ALLOWED_ORIGINS", "https://cuvori.io,https://cuv%D0%BEri.io", OWN], ["ALLOWED_ORIGINS", "https://main--cuvori.netlify%2Eapp", OWN]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const read = name === "SITE_URL" ? r.site : name === "SUPABASE_URL" ? r.supabase : r.origins;
+    const repeated = /%|xn--|cuvri/i.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
+    vuln(!works(r) || JSON.stringify(read) !== JSON.stringify(want) || !(r.notes || []).some(NOT(name)) || repeated,
+      `A20 ${name} = ${JSON.stringify(v)} -> ${said(r)}; SUPABASE_URL ${r.supabase}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 200) : "none"}; repeated: ${repeated ? "YES" : "no"} (must not be read as an address: ${JSON.stringify(want)}, and the admin told ${name} is not a web address)`);
+  }
+  for (const [name, v, want] of [["SITE_URL", "https://cuvori.io/a%20b", "https://cuvori.io"], ["SUPABASE_URL", P + "/rest%2Fv1/", P], ["ALLOWED_ORIGINS", "https://main--cuvori.netlify.app/?x=%41", [...OWN, "https://main--cuvori.netlify.app"]]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const read = name === "SITE_URL" ? r.site : name === "SUPABASE_URL" ? r.supabase : r.origins;
+    vuln(!works(r) || JSON.stringify(read) !== JSON.stringify(want) || (r.notes || []).some(NOT(name)), `A20b ${name} = ${JSON.stringify(v)} (a %-code after the address) -> ${JSON.stringify(read)}; notes ${JSON.stringify(r.notes)} (normal: read as ${JSON.stringify(want)}, no "not a web address" note)`);
+  }
+}
+{ // A21 (check of 4 December) SUPABASE_URL only Cuvori's own project address, or a test address on a computer: every call to
+  // it carries the secret database key, so another project's address or a typo in the project code never receives it
+  const P = "https://tnxujwlfatcvxzevllfr.supabase.co", OWNP = /is not Cuvori's own Supabase project address/;
+  for (const v of ["tnxujwlfatcvxzevllfx.supabase.co", "https://other-project.supabase.co", "https://abcdefghijklmnopqrst.supabase.co/", "https://tnxujwlfatcvxzevllfr.supabase.co:8443",
+                   "https://x.tnxujwlfatcvxzevllfr.supabase.co", "https://tnxujwlfatcvxzevllfr.supabase.co.evil.example", "MySECRETdoNotShow0.supabase.co"]) {
+    const r = load({ SITE_URL: "https://cuvori.io", SUPABASE_URL: v });
+    const repeated = /llfx|other-project|abcdefghij|8443|x\.tnx|evil|secretdonotshow/i.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
+    vuln(!works(r) || r.supabase !== P || !noted(r, "SUPABASE_URL") || !r.notes.some(n => OWNP.test(n)) || repeated,
+      `A21 SUPABASE_URL = ${JSON.stringify(v)} -> ${r.supabase}; notes: ${r.notes ? JSON.stringify(r.notes).slice(0, 200) : "none"}; repeated: ${repeated ? "YES" : "no"} (must use ${P} and say SUPABASE_URL is not Cuvori's own project, never what was typed)`);
+  }
+  for (const [v, want] of [[P, P], [P + "/", P], ["tnxujwlfatcvxzevllfr.supabase.co", P], ["HTTPS://TNXUJWLFATCVXZEVLLFR.SUPABASE.CO/rest/v1/", P], ["http://localhost:54321", "http://localhost:54321"], ["http://127.0.0.1:54321", "http://127.0.0.1:54321"]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", SUPABASE_URL: v });
+    vuln(!works(r) || r.supabase !== want || (r.notes || []).some(n => OWNP.test(n)), `A21b SUPABASE_URL = ${JSON.stringify(v)} -> ${r.supabase}; notes ${JSON.stringify(r.notes)} (normal: ${want}, no "not Cuvori's own project" note)`);
+  }
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
   // (cuvori.netlify.app) still runs the code of 13 October, which reads SITE_URL, SUPABASE_URL and ALLOWED_ORIGINS strictly and
