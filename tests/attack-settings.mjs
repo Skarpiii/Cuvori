@@ -46,8 +46,10 @@
 // with three of those steps broken, every other check here still passed, as A1's answers are the fallback's too.
 // Check of 11 December: A24 a very long setting (a pasted file, a long run of slashes): the step that works out whether an
 // address was "corrected" took time growing with the square of a run of slashes (120,000 slashes: 5 s before the payment
-// functions could answer; a million: over 5 minutes), and Netlify keeps settings of any size since June 2026. Now an address
-// setting longer than 2,000 characters is not an address, and that step takes one pass.
+// functions could answer; a million: over 5 minutes). Now an address setting longer than 2,000 characters is not an address,
+// and that step takes one pass. Check of 12 December: Netlify's documentation allows a setting at most 5,000 characters (the
+// change of June 2026 removed only the limit on all of them together), where that step took about 0.02 s, so it never slowed
+// a start by seconds. A24c the code and SETUP.md say so: they said Netlify keeps settings of any size.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -357,7 +359,8 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
 }
 { // A24 (check of 11 December) very long settings: the payment functions still start at once, and an address longer than
   // 2,000 characters is not read; one of exactly 2,000 still is (its folder is dropped). 120,000 characters: within what one
-  // setting can hold when the test starts the functions (a computer takes at most 128 KB per setting from the program starting it).
+  // setting can hold when the test starts the functions (a computer takes at most 128 KB per setting from the program starting it),
+  // and far beyond the 5,000 characters Netlify's documentation allows a setting (check of 12 December).
   const slashes = (n) => "/".repeat(n);
   for (const [label, set, check] of [
     ["SITE_URL: 120,000 slashes, then https://cuvori.io", { SITE_URL: slashes(120000) + "https://cuvori.io" }, (r) => r.site === "https://cuvori.io" && r.notes.some(n => n.startsWith("SITE_URL is not a web address"))],
@@ -379,6 +382,18 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
     const got = (r.notes || []).some(n => FIX(name)(n) || (name === "ALLOWED_ORIGINS" && /^ALLOWED_ORIGINS has 1 entry not written as a full web address/.test(n)));
     vuln(!works(r) || got !== said, `A24b ${name} = ${JSON.stringify(v)} -> "corrected it" note: ${got ? "yes" : "no"} (must be ${said ? "yes" : "no"})`);
+  }
+  // A24c (check of 12 December) what the code and SETUP.md say about long settings: Netlify's documentation allows a setting at
+  // most 5,000 characters (the change of June 2026 removed only the limit on all settings together), and at that length the old
+  // step took about 0.02 s. They said Netlify keeps settings of any size, and that a long run of slashes slowed every start of
+  // the payment functions by seconds or minutes. (Only these words are checked: a text saying the same in other words passes.)
+  const fs = await import("node:fs");
+  const libPart = (s) => { const l = s.split("\n"), i = l.findIndex(x => x.startsWith("const noEndSlashes")), j = l.findIndex(x => x.includes("if (typed.length > LONGEST_ADDRESS)"));
+    return i < 4 || j < i ? "" : l.slice(i - 4, j).join("\n"); };
+  for (const [file, part] of [["netlify/lib/cuvori.mjs", libPart], ["SETUP.md", (s) => s.split("\n").find(l => l.includes("anything longer than 2,000 characters")) || ""]]) {
+    const text = part(fs.readFileSync(root + "/" + file, "utf8"));
+    const named = /5,000 characters/.test(text), wrong = text.match(/settings of any size|by seconds, or minutes|at every start of the payment functions/g) || [];
+    vuln(!text || !named || wrong.length, `A24c ${file}, where it speaks of long settings: ${text ? "found" : "NOT FOUND"}; Netlify's limit of 5,000 characters ${named ? "named" : "NOT named"}; wrong words: ${wrong.length ? JSON.stringify(wrong) : "none"} (must name Netlify's limit, and never say settings of any size or starts slowed by seconds or minutes)`);
   }
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
