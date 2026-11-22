@@ -17,14 +17,16 @@ const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 // Cuvori's own keys (Stripe's, Supabase's) never pass: they hold underscores, or parts far longer than 63, or end in digits.
 const HOST_OK = (h) => h.length <= 253 && h.split(".").length >= 2 && h.split(".").every(l => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l))
   && /^([a-z]{2,63}|xn--[a-z0-9-]{1,59})$/.test(h.split(".").pop());
-// a value with its "/" at the end taken off, in one pass: the pattern /\/+$/ did it in time growing with the square of a run
-// of slashes, 5 seconds for 120,000 and over 5 minutes for a million, at every start of the payment functions (check of 11 December)
+// a value with its "/" at the end taken off, in one pass: the pattern /\/+$/ took time growing with the square of a run of
+// slashes, 5 seconds for 120,000 and over 5 minutes for a million, though only about 0.02 s at 5,000 characters, the longest
+// value Netlify's documentation allows a setting (checks of 11 and 12 December)
 const noEndSlashes = (s) => { let end = s.length; while (end > 0 && s.charCodeAt(end - 1) === 47) end--; return s.slice(0, end); };
 const LONGEST_ADDRESS = 2000;
 function originOf(value) {
   const typed = String(value || "").trim();
-  // longer than any web address (a pasted file, a run of slashes): not an address, so nothing after this ever reads a value of
-  // any size. Netlify keeps settings of any size for these functions since June 2026 (check of 11 December).
+  // longer than any web address (a pasted file, a run of slashes): not an address, so nothing after this ever reads a long
+  // value. Netlify's documentation allows a setting at most 5,000 characters (since June 2026 there is no limit on all of them
+  // together); this keeps the start quick even if a longer one ever gets through (checks of 11 and 12 December).
   if (typed.length > LONGEST_ADDRESS) return null;
   // a line break, tab or other space inside (a paste that wrapped, two lines in one field): not one address. The address
   // reader would quietly drop line breaks and tabs and glue the rest into a made-up address Stripe would send clients to.
