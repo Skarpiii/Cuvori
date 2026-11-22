@@ -44,6 +44,10 @@
 // Check of 10 December: A23 the address reader's first steps (an "@", slashes before the address, https written without its
 // colon, another kind of address, HTTP in capitals), checked where falling back to Cuvori's own address can't hide a mistake:
 // with three of those steps broken, every other check here still passed, as A1's answers are the fallback's too.
+// Check of 11 December: A24 a very long setting (a pasted file, a long run of slashes): the step that works out whether an
+// address was "corrected" took time growing with the square of a run of slashes (120,000 slashes: 5 s before the payment
+// functions could answer; a million: over 5 minutes), and Netlify keeps settings of any size since June 2026. Now an address
+// setting longer than 2,000 characters is not an address, and that step takes one pass.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -349,6 +353,32 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     ["cuvori.io@main--cuvori.netlify.app", OWN, "an @: left out"]]) {
     const r = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: v });
     vuln(!works(r) || JSON.stringify(r.origins) !== JSON.stringify(want), `A23 ALLOWED_ORIGINS = ${JSON.stringify(v)} (${why}) -> allowed ${JSON.stringify(r.origins)} (must be ${JSON.stringify(want)})`);
+  }
+}
+{ // A24 (check of 11 December) very long settings: the payment functions still start at once, and an address longer than
+  // 2,000 characters is not read; one of exactly 2,000 still is (its folder is dropped). 120,000 characters: within what one
+  // setting can hold when the test starts the functions (a computer takes at most 128 KB per setting from the program starting it).
+  const slashes = (n) => "/".repeat(n);
+  for (const [label, set, check] of [
+    ["SITE_URL: 120,000 slashes, then https://cuvori.io", { SITE_URL: slashes(120000) + "https://cuvori.io" }, (r) => r.site === "https://cuvori.io" && r.notes.some(n => n.startsWith("SITE_URL is not a web address"))],
+    ["SITE_URL: https://cuvori.io/, 120,000 slashes, then x", { SITE_URL: "https://cuvori.io/" + slashes(120000) + "x" }, (r) => r.site === "https://cuvori.io" && r.notes.some(n => n.startsWith("SITE_URL is not a web address"))],
+    ["ALLOWED_ORIGINS: one entry with 120,000 slashes", { SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: "https://main--cuvori.netlify.app/" + slashes(120000) + "x" }, (r) => JSON.stringify(r.origins) === JSON.stringify(["https://cuvori.io", "https://www.cuvori.io"]) && r.notes.some(n => n.startsWith("ALLOWED_ORIGINS has 1 entry that is not one web address"))],
+    ["ALLOWED_ORIGINS: 5,000 entries", { SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: Array.from({ length: 5000 }, (_, i) => "https://x" + i + ".example").join(",") }, (r) => r.origins.length === 5002],
+    ["SUPABASE_URL: 120,000 slashes inside", { SITE_URL: "https://cuvori.io", SUPABASE_URL: "https://tnxujwlfatcvxzevllfr.supabase.co/" + slashes(120000) + "x" }, (r) => r.supabase === "https://tnxujwlfatcvxzevllfr.supabase.co" && r.notes.some(n => n.startsWith("SUPABASE_URL is not a web address"))],
+    ["SITE_URL of exactly 2,000 characters (a long folder)", { SITE_URL: "https://www.cuvori.io/" + "a".repeat(2000 - 22) }, (r) => r.site === "https://www.cuvori.io" && !r.notes.some(n => n.startsWith("SITE_URL is not a web address"))],
+    ["SITE_URL of 2,001 characters", { SITE_URL: "https://www.cuvori.io/" + "a".repeat(2001 - 22) }, (r) => r.site === "https://cuvori.io" && r.notes.some(n => n.startsWith("SITE_URL is not a web address"))]]) {
+    const t0 = Date.now(); const r = load(set); const ms = Date.now() - t0;
+    const repeated = /\/\/\/\/|x4999|aaaa/.test(JSON.stringify(r.notes || []) + (r.body || ""));
+    vuln(!works(r) || ms > 2000 || !check(r) || repeated, `A24 ${label} -> ${r.error ? "stops: " + r.error : "loads"} in ${ms} ms (with the status and webhook answers); SITE_URL ${r.site}; ${Array.isArray(r.origins) ? r.origins.length : 0} allowed; notes ${r.notes ? JSON.stringify(r.notes.map(n => n.slice(0, 50))) : "none"} (must start well within 2 s, as with a normal setting, and read it as shown)`);
+  }
+  // A24b the step that was made faster still says "corrected" exactly when the address was changed: a "/" at the end, or
+  // capital letters, change nothing; a port that is the address's own (:443) does. (No check here noticed when that step broke.)
+  const FIX = (name) => (n) => n.startsWith(name + " ") && /not written as a full web address; Cuvori corrected it/.test(n);
+  for (const [name, v, said] of [["SITE_URL", "https://cuvori.io/", false], ["SITE_URL", "HTTPS://WWW.CUVORI.IO/", false], ["SITE_URL", "https://cuvori.io:443", true],
+    ["SUPABASE_URL", "https://tnxujwlfatcvxzevllfr.supabase.co/", false], ["ALLOWED_ORIGINS", "https://main--cuvori.netlify.app/", false], ["ALLOWED_ORIGINS", "https://main--cuvori.netlify.app:443/", true]]) {
+    const r = load({ SITE_URL: "https://cuvori.io", [name]: v });
+    const got = (r.notes || []).some(n => FIX(name)(n) || (name === "ALLOWED_ORIGINS" && /^ALLOWED_ORIGINS has 1 entry not written as a full web address/.test(n)));
+    vuln(!works(r) || got !== said, `A24b ${name} = ${JSON.stringify(v)} -> "corrected it" note: ${got ? "yes" : "no"} (must be ${said ? "yes" : "no"})`);
   }
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
