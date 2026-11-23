@@ -422,10 +422,14 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
   // half a flag), England's flag, a keycap, Korean letters built from parts, Hindi and Thai, line breaks, half emoji
   const pieces = ["a", "Ž", "ė", "e\u0301", "\u0301", "\u0301\u0301\u0301", "😀", "👍🏽", "\u{1F3FD}", "👨‍👩‍👧", "\u200D", "\uFE0F", "🇱🇹", "🇱",
     "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", "1️⃣", "ᄀ", "ᅡ", "ᆨ", "क्ष", "्", "ำ", "\r\n", "\n", " ", "\uD83D", "\uDE00", "\u{1D165}"];
-  let seed = 28; const rnd = (k) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % k; };
-  const wrong = []; let tried = 0;
+  // a sound random generator (mulberry32, its whole answer used), seeded so every run tries the same texts. The one used
+  // before took the remainder of a simple formula, which repeats itself: only 14 of the 28 pieces ever came up, never an
+  // emoji with a skin tone, England's flag, a keycap, a line break or the second half of an emoji (check of 13 December)
+  let seed = 28; const rnd = (k) => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return Math.floor(((t ^ (t >>> 14)) >>> 0) / 4294967296 * k); };
+  const wrong = [], used = new Set(); let tried = 0;
   for (let i = 0; i < 400; i++) {
-    let s = ""; for (let j = 0, len = 1 + rnd(40); j < len; j++) s += pieces[rnd(pieces.length)];
+    let s = ""; for (let j = 0, len = 1 + rnd(40); j < len; j++) { const p = rnd(pieces.length); used.add(p); s += pieces[p]; }
     for (let n = 0; n <= 30; n++) for (const u of [Infinity, 1, 3, 7, 12, 20]) {
       tried++; const a = L.cut(s, n, u), b = whole(s, n, u);
       if ((a !== b || !a.isWellFormed()) && wrong.length < 3) wrong.push(`${JSON.stringify(s)} to ${n} characters / ${u} units gave ${JSON.stringify(a)} instead of ${JSON.stringify(b)}`);
@@ -443,7 +447,7 @@ info(`A22 source_transaction on transfers: ${[...new Set(STRIPE.transfers.map(t 
     const t = performance.now(); const got = L.cut(s, n, u); const ms = Math.round(performance.now() - t);
     if (got !== want || ms > 200) slow.push(`${what}: ${ms} ms, kept ${got.length} units${got !== want ? " (WRONG)" : ""}`);
   }
-  vuln(wrong.length || slow.length, `A28 shortening text: ${tried} cuts of hard text, ${wrong.length ? "different from splitting the whole text, or half an emoji kept: " + wrong.join("; ") : "all the same as splitting the whole text, never half an emoji"}; ${slow.length ? "too slow or wrong: " + slow.join("; ") : "6 MB texts done at once"}`);
+  vuln(wrong.length || slow.length || used.size < pieces.length, `A28 shortening text: ${tried} cuts of hard text (pieces used: ${used.size} of ${pieces.length}, must be all), ${wrong.length ? "different from splitting the whole text, or half an emoji kept: " + wrong.join("; ") : "all the same as splitting the whole text, never half an emoji"}; ${slow.length ? "too slow or wrong: " + slow.join("; ") : "6 MB texts done at once"}`);
 }
 console.log(out.join("\n"));
 console.log(`\n${out.filter(l => l.startsWith("VULNERABLE")).length} vulnerable / ${out.filter(l => l.startsWith("safe")).length} safe / ${out.filter(l => l.startsWith("info")).length} info`);

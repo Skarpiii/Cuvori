@@ -50,6 +50,10 @@
 // and that step takes one pass. Check of 12 December: Netlify's documentation allows a setting at most 5,000 characters (the
 // change of June 2026 removed only the limit on all of them together), where that step took about 0.02 s, so it never slowed
 // a start by seconds. A24c the code and SETUP.md say so: they said Netlify keeps settings of any size.
+// Check of 13 December: A25 the rule for a host name (HOST_OK) at each of its limits, through ALLOWED_ORIGINS, where it alone
+// decides whether an entry becomes an allowed website. It could be broken in any one of 10 ways (no 253 limit, parts of 64,
+// any sign in a part, no rule for the ending, a one-letter ending, digits in the ending, a name of one part, "_", "-" at the
+// edge of a part, an empty part) and every check here still passed; only switching it off was noticed.
 // Check of 23 November: A18 an address setting written in a way production's older code (13 October) can't read — semicolons
 // between the addresses in ALLOWED_ORIGINS, two slashes at the end, a list with no address in it — stopped every payment
 // function there at its next deploy while this code said nothing; now the admin page says so, naming only the setting.
@@ -395,6 +399,30 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     const named = /5,000 characters/.test(text), wrong = text.match(/settings of any size|by seconds, or minutes|at every start of the payment functions/g) || [];
     vuln(!text || !named || wrong.length, `A24c ${file}, where it speaks of long settings: ${text ? "found" : "NOT FOUND"}; Netlify's limit of 5,000 characters ${named ? "named" : "NOT named"}; wrong words: ${wrong.length ? JSON.stringify(wrong) : "none"} (must name Netlify's limit, and never say settings of any size or starts slowed by seconds or minutes)`);
   }
+}
+{ // A25 (check of 13 December) the rule for a host name (HOST_OK) at each of its limits: a part of at most 63 characters,
+  // a name of at most 253, at least two parts, each of a-z, 0-9 and "-" but never "-" at its edges, and an ending of 2 to 63
+  // letters or an international one (xn--…). Through ALLOWED_ORIGINS, where the rule alone decides whether an entry becomes
+  // an allowed website: names at each limit are kept, names just past it are left out, and nothing typed is repeated.
+  const L = (k, c = "a") => c.repeat(k);
+  const n253 = [L(63), L(63), L(63), L(58)].join(".") + ".io", n254 = [L(63), L(63), L(63), L(59)].join(".") + ".io";
+  // a made-up key in the shape of Supabase's old keys: three parts, the middle one far longer than 63, the last all letters
+  const fakeKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + Buffer.from(JSON.stringify({ iss: "supabase", ref: "madeupmadeupmadeupmx", role: "service_role", iat: 1700000000, exp: 2000000000 })).toString("base64url") + ".QwErTyUiOpAsDfGhJkLzXcVbNmQwErTyUiOpAsDfGhJ";
+  const KEEP = [["a part of 63 characters", L(63) + ".io"], ["a name of 253 characters", n253], ["an ending of 63 letters", "cuvori." + L(63, "z")],
+    ["an international ending (xn--)", "xn--80ak6aa92e.xn--p1ai"], ["a part that starts with a digit", "1password.com"], ["two hyphens inside a part", "main--cuvori.netlify.app"],
+    ["parts of digits before the ending", "1.2.3.com"]];
+  const OUT = [["a part of 64 characters", L(64) + ".io"], ["a name of 254 characters", n254], ["an ending of 64 letters", "cuvori." + L(64, "z")],
+    ["a name of one part", "cuvori"], ["an ending of one letter", "cuvori.i"], ["an ending with a digit", "cuvori.io1"], ["an underscore", "a_b.cuvori.io"],
+    ["a sign (*) in a part", "a*b.cuvori.io"], ["a hyphen at the start of a part", "-a.cuvori.io"], ["a hyphen at the end of a part", "a-.cuvori.io"],
+    ["an empty part", "a..cuvori.io"], ["a made-up key in the shape of Supabase's old keys", fakeKey]];
+  const r = load({ SITE_URL: "https://cuvori.io", ALLOWED_ORIGINS: [...KEEP, ...OUT].map(([, h]) => "https://" + h).join(",") });
+  const got = Array.isArray(r.origins) ? r.origins : [];
+  for (const [what, h] of KEEP) vuln(!works(r) || !got.includes("https://" + h), `A25 ALLOWED_ORIGINS: ${what} -> ${got.includes("https://" + h) ? "kept" : "LEFT OUT"} (a real host name: must be kept)`);
+  for (const [what, h] of OUT) vuln(!works(r) || got.includes("https://" + h.toLowerCase()), `A25 ALLOWED_ORIGINS: ${what} -> ${got.includes("https://" + h.toLowerCase()) ? "KEPT" : "left out"} (not a host name: must be left out)`);
+  const said = (r.notes || []).map(n => /^ALLOWED_ORIGINS has (\d+) entr(y|ies) that (is|are) not one web address/.exec(n)).find(Boolean);
+  const repeated = /zzzz|aaaaaaaa|a_b|a\*b|-a\.|a-\.|\.\.|io1|cuvori\.i[^o]|eyj|qwerty/i.test(JSON.stringify(r.notes || []) + (r.body || "") + r.log);
+  vuln(!works(r) || got.length !== 2 + KEEP.length || !said || +said[1] !== OUT.length || repeated,
+    `A25 ALLOWED_ORIGINS with ${KEEP.length} host names at the limits and ${OUT.length} just past them -> ${got.length} allowed; the admin is told ${said ? said[1] : "nothing"} ${said && said[1] === "1" ? "entry is" : "entries are"} not one web address; repeated: ${repeated ? "YES" : "no"} (must be ${2 + KEEP.length} allowed: Cuvori's own 2 and the ${KEEP.length}; told ${OUT.length}; nothing typed repeated)`);
 }
 { // A18 (check of 23 November) an address setting written in a way production's older code can't read. Production
   // (cuvori.netlify.app) still runs the code of 13 October, which reads SITE_URL, SUPABASE_URL and ALLOWED_ORIGINS strictly and
