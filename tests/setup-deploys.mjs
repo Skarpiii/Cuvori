@@ -133,5 +133,19 @@ check(/or pays an Order or a part of it out automatically, it clears the Order's
 const goLive = steps.find(p => /^5\.\s+Then put the page of this update live/.test(p));
 check(!goLive || /until production has (it|this code)[^.]*(note|notes)[^.]*Part 3, item 7/i.test(goLive), "Part 20, step 5: pricing-v2's protections kept in an Order's note don't stop production's older hourly job until production has the code");
 
+// netlify.toml (check of 14 December): no redirect rule from a /.netlify address. Netlify refuses one on every build
+// ("path" field must not start with "/.netlify") and ignores it: the rule that stood there from 17 September, to keep the
+// payment functions away from the page's catch-all rule, protected nothing and put a warning in every deploy log. The
+// function calls reach the functions without it (on cuvori.io stripe-status answered, and Admin panel → Payment costs said
+// "Protected payments: ON"). The page's own rules stay, and the comment says why no such rule can be written.
+const toml = fs.readFileSync(path.join(root, "netlify.toml"), "utf8");
+const tomlRules = toml.split("\n").filter(l => !/^\s*#/.test(l)).join("\n");          // comment lines left out
+const froms = [...tomlRules.matchAll(/\bfrom\s*=\s*(["'])(.*?)\1/g)].map(m => m[2]);   // "…" or '…', also in { from = … }
+const redirectsFile = fs.existsSync(path.join(root, "_redirects")) ? fs.readFileSync(path.join(root, "_redirects"), "utf8") : "";
+const fileFroms = redirectsFile.split("\n").map(l => l.trim().split(/\s+/)[0]).filter(f => f && !f.startsWith("#"));
+check(froms.length > 0 && ![...froms, ...fileFroms].some(f => f.startsWith("/.netlify")), `netlify.toml (and _redirects): no redirect rule from a /.netlify address, which Netlify refuses and ignores; rules from: ${JSON.stringify([...froms, ...fileFroms])}`);
+check(froms.includes("/") && froms.includes("/*"), "netlify.toml: the page's own rules stay (\"/\" and every other unknown address go to index.html)");
+check(/Netlify refuses a redirect rule for a \/\.netlify address/.test(toml) && !/must not be caught by the page redirect/.test(toml), "netlify.toml says why no rule can keep the functions from the page rule (Netlify refuses one), and no longer promises that protection");
+
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);
