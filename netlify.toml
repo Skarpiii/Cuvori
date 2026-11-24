@@ -9,11 +9,10 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Serverless functions (Stripe escrow) must not be caught by the page redirect below.
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+# The payment functions answer at /.netlify/functions/…, and the page rules below do not catch them (check of 14 December:
+# on cuvori.io stripe-status answered, and Admin panel → Payment costs said "Protected payments: ON"). No rule can be
+# written to keep them from those rules: Netlify refuses a redirect rule for a /.netlify address on every build ("path"
+# field must not start with "/.netlify") and ignores it, so the one that stood here from 17 September protected nothing.
 
 [[redirects]]
   from = "/"
