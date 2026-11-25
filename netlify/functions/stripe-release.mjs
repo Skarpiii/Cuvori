@@ -1,5 +1,5 @@
 // POST { contract_id, milestone_id? } (client) — "Approve & release". Whole Order, or one milestone.
-import { escrowEnabled, db, userFromRequest, json, bad, refuse, settle, releaseMilestone, readJson, safe, isBanned, limitTries, heldCents, owedCents, closeCheckout, moneyUnchanged, MIN_TOPUP_CENTS, orderPayoutAccount, accountReady, chargebackOpen } from "../lib/cuvori.mjs";
+import { escrowEnabled, db, userFromRequest, json, bad, refuse, settle, releaseMilestone, readJson, safe, isBanned, limitTries, heldCents, owedCents, closeCheckout, moneyUnchanged, MIN_TOPUP_CENTS, orderPayoutAccount, accountReady, chargebackOpen, outsideRefundsCounted } from "../lib/cuvori.mjs";
 
 export default safe(async (req) => {
   if (req.method !== "POST") return bad("Method not allowed", 405);
@@ -9,7 +9,7 @@ export default safe(async (req) => {
   if (me.banned) return refuse(403, "Account suspended", "account_suspended");
   await limitTries(me, "pay_release");        // at most about 10 tries a minute and 50 a day: nobody can use up Stripe's limits for everyone
   const { contract_id: id, milestone_id } = await readJson(req);
-  const c = await db.contract(id);
+  let c = await db.contract(id);
   if (!c || c.client !== me.id) return refuse(403, "Not your order", "not_your_order");
   if (c.payment_mode !== "escrow") return refuse(409, "Nothing to release right now", "nothing_to_release");
   if (chargebackOpen(c)) return json(409, { error: "A card chargeback is open on this payment. Nothing can move until the bank decides.", code: "chargeback_open" });
@@ -26,6 +26,10 @@ export default safe(async (req) => {
   }
 
   if (c.has_milestones) return refuse(409, "This order is released milestone by milestone", "by_milestone");
+  // A refund made in the Stripe dashboard that the Order does not count yet (its notice did not get through) is counted first,
+  // as when its notice comes: the Order goes into a dispute, and there is nothing to release (check of 15 November: the
+  // freelancer was paid money the client already had back)
+  if (["funded", "delivered"].includes(c.status)) { const was = c.status; c = await outsideRefundsCounted(c); if (c.status !== was) return refuse(409, "Nothing to release right now", "nothing_to_release"); }
   const resume = c.status === "releasing" && c.resolution === "release";               // resume an interrupted release
   // the state first: Release on an Order that is already closed (a second tab, a second click) is told there is nothing
   // to release, never "amount missing", which would sound as if money were lost
@@ -46,7 +50,11 @@ export default safe(async (req) => {
     const now = new Date().toISOString();
     // Only while the price and what was paid in are still the ones checked above: an increase accepted or a payment
     // recorded a moment ago would otherwise be left out of the release.
-    const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(funded,delivered)&${moneyUnchanged(c)}`, { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_by: me.id, resolved_at: now, auto_release_at: null });
+    // (since schema v56 the database refuses to start paying out an Order that went into dispute or got a chargeback at this
+    // very moment: there is nothing to release then)
+    const rows = await db.update("contracts", `id=eq.${c.id}&status=in.(funded,delivered)&${moneyUnchanged(c)}`, { status: "releasing", resolution: "release", split_editor_cents: cents, refund_cents: 0, resolved_by: me.id, resolved_at: now, auto_release_at: null })
+      .catch(e => { if (/release_paused/.test(String(e && e.message))) return "paused"; throw e; });
+    if (rows === "paused") return refuse(409, "Nothing to release right now", "nothing_to_release");
     row = rows && rows[0] || null;
     if (!row) return refuse(409, "The order changed a moment ago. Reload the page and try again.", "order_changed");
   }

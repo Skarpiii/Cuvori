@@ -2,7 +2,7 @@
 // Order whose price grew through an accepted amendment. The client sees the same breakdown on the
 // page before clicking (order_quote), and the Stripe page shows the same three lines: the price, the card fee and
 // (since schema v50) Stripe's payout fee.
-import { escrowEnabled, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession, addNote, dropNote, hasNote } from "../lib/cuvori.mjs";
+import { escrowEnabled, segregationOn, fsWhere, FS_BLOCKED, stripe, db, userFromRequest, json, bad, SITE_URL, quoteFor, readJson, safe, orderPayoutAccount, accountReady, isBanned, limitTries, sameMode, centsOf, MIN_CENTS, MAX_CENTS, MIN_TOPUP_CENTS, cut, heldCents, chargebackOpen, isSession, moneyUnchanged, moneyPost, dropKeyIf, idemBusy, idemMismatch, stripeFingerprint, REPLAYED, IDEM_KEY, applyPaidSession, addNote, dropNote, hasNote, isPlan2, paymentsPaused } from "../lib/cuvori.mjs";
 
 // What Cuvori writes on Stripe's page, in the language the client uses on Cuvori. The page sends its language; anything
 // else (missing, unknown, not text) means English. Only these fixed texts change — never an amount. `locale` shows
@@ -76,10 +76,10 @@ function stripeTitle(raw, room) {
 //   or Stripe said "retry" with it: a repeat never changes, so the same key would only fail again for 24 hours),
 //   or Stripe saying the key belongs to a different request: that key is dropped (only that one: never a newer key
 //   another tab has just stored) and one fresh try is made, so the client never gets an old answer instead of a new try.
-async function makePage(scope, params) {
+async function makePage(scope, params, preview = false) {
   let waits = 0, fresh = false;
   for (;;) {
-    try { return await moneyPost(scope, "/checkout/sessions", params); }
+    try { return await moneyPost(scope, "/checkout/sessions", params, { preview }); }
     catch (e) {
       if (idemBusy(e) && waits < 10) { waits++; await sleep(400); continue; }
       if (!fresh && (idemMismatch(e) || (e && e.replayed && e.status >= 400))) { fresh = true; await dropKeyIf(scope, e.idemKey); continue; }
@@ -189,20 +189,47 @@ export default safe(async (req) => {
   if (!Number.isSafeInteger(amount) || amount < minFor || amount > MAX_CENTS) return refuse(409, "Payment amount out of range", "amount_out_of_range");
   if (chargebackOpen(c)) return refuse(409, "A card chargeback is open on this order; nothing can be paid until the bank decides", "chargeback_open");
   sameMode(c);                                   // an Order paid in test mode takes no real money, and the other way round
+  // The Order's last page was paid and its payment is not on the Order yet (the webhook has not come, or recording it broke
+  // off after the card was charged): it is recorded now, the same way the webhook does, and no new page is made. A new page
+  // charged the client a second time, and the first payment then went back without Stripe's card fee (audit of 31 October).
+  // (what Stripe said about that page is kept: when Stripe hands the same open page back below, it is not asked again)
+  let lastSeen = null;
+  if (isSession(c.stripe_checkout_id)) {
+    const last = lastSeen = await stripe("GET", `/checkout/sessions/${c.stripe_checkout_id}`).catch(e => { if (e && e.status === 404) return null; throw e; });
+    if (last && last.status === "complete" && last.client_reference_id === c.id && last.payment_intent && last.payment_intent !== c.stripe_payment_intent) {
+      const r = await applyPaidSession(last);
+      if (r === "pending") return json(409, { error: "The last payment for this order is still being recorded. Please try again in a moment.", code: "busy" });
+      const now = await db.contract(c.id);
+      if (!now || now.status !== c.status || now.amount_cents !== c.amount_cents || (now.funded_cents ?? null) !== (c.funded_cents ?? null)) {
+        // nothing was taken from that page (its hold let go) and the Order changed meanwhile: shown again as it is now
+        if (r === "released" || r === "unpaid") return json(409, { error: "The order changed, reload", code: "order_changed" });
+        // code: the page says the Order isn't waiting for a payment — it has just been paid — and reloads it
+        return json(409, { error: "This order is not waiting for payment", code: "not_payable" });
+      }
+    }
+  }
   // code: the page says it in the client's language (the Fund button shows even then: the page only knows whether the
   // freelancer finished their Stripe setup, not whether they were banned after the Order was accepted)
-  if (await isBanned(c.editor)) return json(409, { error: "This freelancer cannot receive payments", code: "freelancer_unavailable" });
+  // (said neutrally: the client is not told why, so a ban stays Cuvori's business)
+  if (await isBanned(c.editor)) return json(409, { error: "This freelancer can't take payments right now", code: "freelancer_unavailable" });
   const acct = await orderPayoutAccount(c);      // Stripe confirming the account is gone = not ready; a problem on Cuvori's side stops here, noted on the Order
   // code: the page says it in the client's language. The page shows the Fund button by the database's "ready" mark, which
   // the check above has just brought in line with Stripe, so after a reload the button is gone and the page says why.
   if (!accountReady(acct)) return json(409, { error: "The freelancer's Stripe account can't receive payments right now. Ask them to check Payout details under Settings on Cuvori.", code: "freelancer_not_ready" });
+  // Payments paused on purpose (SETUP.md Part 5, item 10: the stripe_payments_paused setting, for Orders at either prices;
+  // Orders at today's prices are also paused by the fee row's payer, below): no new payment page is made
+  if (await paymentsPaused()) return refuse(503, "Payments through Cuvori are paused on purpose at the moment (the stripe_payments_paused setting in Supabase).", "payments_paused");
 
   // The card fee is charged at a rate that covers even the most expensive cards (the fee table's "unknown country" row), the same for everyone,
   // and the same number the page showed. Nothing the client declares can lower it. Once the payment is made,
   // whatever was collected above the provider's real fee is refunded to the card automatically (settleFee).
   // Stripe's payout fees (schema v50) are the third line, at cost; a top-up pays only their percentage (the fixed part was
   // paid with the first payment). The three lines add up to the total the page showed (quoteFor checks that).
-  const quote = await quoteFor(amount, c.currency || "EUR", null, "any", "card", kind === "topup");
+  // Under the new prices (plan 2) the client pays exactly the agreed price, or what is still owed of it: no card fee, no
+  // payout fee (Cuvori pays the card costs). The page says so in its details (fee 0, payout fee 0, the plan).
+  const p2 = isPlan2(c);
+  const quote = p2 ? { pricing_version: c.pricing_version, price_cents: amount, processing_cents: 0, connect_cents: 0, cuvori_cents: 0, total_cents: amount, currency: c.currency || "EUR", card_costs_paid_by: "platform", topup: kind === "topup" }
+    : await quoteFor(amount, c.currency || "EUR", null, "any", "card", kind === "topup");
   const fee = quote.processing_cents, connect = quote.connect_cents, total = quote.total_cents;
   const currency = (c.currency || "EUR").toLowerCase();
   // The first line on Stripe's page: the price — or, for a top-up, the price increase both sides agreed to — named after
@@ -220,6 +247,11 @@ export default safe(async (req) => {
   // nothing is charged, so nobody pays a card fee on money that has to go back.
   const slot = Math.floor(Date.now() / 1800e3);
   const prev = c.stripe_checkout_id;
+  // Money held apart (funds segregation, off unless STRIPE_FUNDS_SEGREGATION is "on", see SETUP.md Part 22): a payment
+  // under the new prices asks Stripe to hold it apart from Cuvori's own money, and the page takes only the cards Stripe can
+  // hold apart (it blocks the Discover Global Network). The page is made under Stripe's preview version; it says how it
+  // asked (allocated_funds), so the charge and every payout later go by what this page did, not by today's setting.
+  const fs = p2 && segregationOn() ? fsWhere() : null;
   const params = {
     mode: "payment",
     client_reference_id: c.id,
@@ -232,10 +264,12 @@ export default safe(async (req) => {
     success_url: `${SITE_URL}/?cs={CHECKOUT_SESSION_ID}#orders?paid=${c.id}`,
     cancel_url: `${SITE_URL}/#orders?cancelled=${c.id}`,
     line_items: items,
-    payment_intent_data: { capture_method: "manual", transfer_group: `contract_${c.id}`, metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind } },
+    payment_intent_data: { capture_method: "manual", transfer_group: `contract_${c.id}`, ...(fs === "checkout" ? { allocated_funds: { enabled: true } } : {}),
+      metadata: { contract_id: c.id, editor: c.editor, client: c.client, kind, ...(p2 ? { pricing_version: String(c.pricing_version) } : {}), ...(fs ? { allocated_funds: fs } : {}) } },
+    ...(fs ? { payment_method_options: { card: { restrictions: { brands_blocked: FS_BLOCKED } } } } : {}),
     // the breakdown travels with the page (Stripe keeps up to 500 characters per value): when this page's payment is confirmed,
     // this breakdown — not the one from a page made later with a changed fee table — is the one saved on the Order
-    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), connect_cents: String(connect), kind, ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
+    metadata: { contract_id: c.id, amount_cents: String(amount), fee_cents: String(fee), connect_cents: String(connect), kind, ...(fs ? { allocated_funds: fs } : {}), ...(p2 ? { pricing_version: String(c.pricing_version) } : {}), ...(kind === "fund" ? { quote: JSON.stringify(quote).slice(0, 500) } : {}) },
   };
   // One key per exact request, kept in the database like the keys of payouts and refunds. It is named after the exact
   // text Stripe receives, so the same request again (two tabs in one language, Back and Fund again, a retry after a slow
@@ -243,13 +277,13 @@ export default safe(async (req) => {
   // new version, or a new version writing the request differently) is a new request with its own key, never one Stripe
   // refuses. After a definite failure at Stripe the key is dropped, so the next click is a fresh try instead of Stripe
   // repeating that failure for the rest of the half hour.
-  const scope = `checkout:${c.id}:${stripeFingerprint("/checkout/sessions", params)}`;
-  let session = await makePage(scope, params);
+  const scope = `checkout:${c.id}:${stripeFingerprint("/checkout/sessions", params, !!fs)}`;
+  let session = await makePage(scope, params, !!fs);
   // a page that can no longer be paid is never handed out: its key is dropped (only that key, so a new page another tab
   // has just made under a newer key stays the one both tabs get) and one new page is made
   const renew = async () => {
     await dropKeyIf(scope, session[IDEM_KEY]);
-    const renewed = await makePage(scope, params);
+    const renewed = await makePage(scope, params, !!fs);
     // the database could not forget the key, so Stripe handed back the same page again: never sent to the client
     if (renewed.id === session.id) throw new Error("the payment page's key could not be renewed");
     return renewed;
@@ -261,7 +295,7 @@ export default safe(async (req) => {
   // and a page made more than a minute ago is looked up too, in case that mark is ever missing. A page this very request
   // has just made is open, so a hiccup at Stripe in a second call never stops a first click.
   if (session[REPLAYED] || !(Number(session.created) >= Date.now() / 1000 - 60)) {
-    const live = await stripe("GET", `/checkout/sessions/${session.id}`);
+    const live = lastSeen && lastSeen.id === session.id && lastSeen.status === "open" ? lastSeen : await stripe("GET", `/checkout/sessions/${session.id}`);
     if (live.status === "complete") {
       // paid already: confirmed right now, the same way as on the return from Stripe (a problem there is left to the
       // return and the webhook, which confirm it too)
@@ -270,10 +304,14 @@ export default safe(async (req) => {
       // moment (the freelancer was suspended, say), or the card never got that far. If the Order still waits for exactly
       // this payment, a new page is made now, rather than telling the client for the rest of the half hour that it is not
       // waiting for a payment. An Order that changed meanwhile is shown again as it is now.
-      if (r === "released" || r === "unpaid") {
+      // The same goes for a page whose payment is on the Order already ("already") while the Order, as this request read it
+      // with that payment counted, still waits for this amount: a second price increase of the same size within the half
+      // hour is the very same request, so Stripe handed back the first increase's page, paid and recorded, and the client
+      // could not pay the second one until the next half hour (review of 2 November).
+      if (r === "released" || r === "unpaid" || r === "already") {
         const now = await db.contract(c.id);
         const same = !!now && now.status === c.status && now.amount_cents === c.amount_cents && (now.funded_cents ?? null) === (c.funded_cents ?? null);
-        if (!same) return json(409, { error: "The order changed, reload", code: "order_changed" });
+        if (!same) return r === "already" ? json(409, { error: "This order is not waiting for payment", code: "not_payable" }) : json(409, { error: "The order changed, reload", code: "order_changed" });
         if (live.id === prev) replacedDone = true;
         session = await renew();
       } else {
