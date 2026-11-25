@@ -282,6 +282,10 @@ const PROVIDER_DOWN = "The payment provider did not answer. Nothing was lost —
 const refundGone = (c, owed, back = 0) => { const eur = (x) => `${(nz(x) / 100).toFixed(2)} ${String(c.currency || "EUR").toUpperCase()}`;
   return `Stripe can no longer refund this payment to the client's card (it is too old for a card refund): ${eur(owed)} is owed to the client${back > 0 ? ` (${eur(back)} of this refund went back to the card)` : ""}. Pay it to them another way (a bank transfer); the Order stays open until a person closes it`; };
 const BANNED = "This freelancer cannot receive payments";
+// an Order handed in whose price increase both sides accepted is not paid in yet: its automatic payout waits (paid out now,
+// the Order would close and the increase be dropped for good). Only an Order from before v56: since v56 an Order handed in
+// whose price goes up is back to being worked on. (check of 25 November 2026: it waited in silence, past its payout date)
+const INCREASE_UNPAID = "The price increase both sides accepted is not paid in yet: the automatic payout waits until the client pays it, or Cuvori decides the Order.";
 // a payout from money held apart whose earlier try Stripe has not confirmed yet (its answer was lost): nothing is paid until
 // Stripe shows what that try did
 const UNCONFIRMED = "Stripe has not confirmed an earlier try of this payout yet. Cuvori checks again every hour before paying anything; nothing needs to be done.";
@@ -1804,8 +1808,11 @@ async function stepStopped(c, what, e) {
 // releaseMilestone) or a decision settles the Order, and comes back the next hour if it is marked as handled while the
 // payout still can't be made. (check of 26 November: such a payout was skipped every hour without a word, and the Order
 // kept promising it on a date gone by; check of 27 November: written again every hour, one database call per Order)
+// why "increase_unpaid": an Order handed in whose accepted price increase is not paid in (INCREASE_UNPAID; check of
+// 25 November 2026), with the code the client's own approval gets then ("topup_unpaid", stripe-release.mjs); its note goes
+// the same way, once the client has paid and the payout goes through.
 export async function payoutWaits(c, what, why) {
-  const e = why === "banned" ? fail(BANNED, 409, "under_review") : fail(NOT_READY, 409, "freelancer_not_ready");
+  const e = why === "banned" ? fail(BANNED, 409, "under_review") : why === "increase_unpaid" ? fail(INCREASE_UNPAID, 409, "topup_unpaid") : fail(NOT_READY, 409, "freelancer_not_ready");
   console.error("automatic payout waits", what, "order", c && c.id, why);
   if (c && typeof c.money_error === "string" && hasNote(c.money_error, n => n === stepText(what, e.message))) return;
   await stepStopped(c, what, e);
