@@ -71,14 +71,21 @@ const SHORT = "not enough money is held for this part any more: it waits for Cuv
 // An Order not released because a price increase both sides accepted is not paid in: its payment page may have been paid a
 // moment ago (Stripe's notice not in yet). That payment is added now, the same way the webhook does, so it is never lost
 // and the Order is released in full on the next run. The page is left open otherwise: the client can still pay it.
+// Not paid in: the Order says so (payoutWaits, at the end of the run), as a payout that waits for its freelancer does
+// (check of 25 November 2026: it waited in silence, its payout date gone by); just paid: nothing to say.
+const OWING = "an accepted price increase is not paid in yet", JUST_PAID = "the price increase was paid a moment ago: released in full on the next run";
 async function owing(c) {
   if (isSession(c.stripe_checkout_id)) {
     try {
       const s = await stripe("GET", `/checkout/sessions/${c.stripe_checkout_id}`);
-      if (s && s.status === "complete" && s.client_reference_id === c.id && s.payment_intent && s.payment_intent !== c.stripe_payment_intent) await applyPaidSession(s);
+      if (s && s.status === "complete" && s.client_reference_id === c.id && s.payment_intent && s.payment_intent !== c.stripe_payment_intent) {
+        await applyPaidSession(s);
+        const now = await db.contract(c.id).catch(() => null);
+        if (now && owedCents(now) < MIN_TOPUP_CENTS) return JUST_PAID;
+      }
     } catch (e) { console.error("checking the price increase's payment page failed for", c.id, e && e.message); }
   }
-  return "an accepted price increase is not paid in yet";
+  return OWING;
 }
 
 // Netlify stops a scheduled function after 30 seconds. The run stops starting new work in time, so it never stops in the
@@ -104,17 +111,18 @@ export default async () => {
   const aside = (r, why) => (why === "freelancer banned" ? failed : skipped).push({ id: r.id, why });
   // An automatic payout that can't go through says so on its Order, under "Needs a hand" (payoutWaits): the freelancer is
   // banned, or their Stripe setup isn't finished (check of 26 November: it was skipped every hour without a word, and the
-  // Order kept promising the payout on a date gone by). One set aside while the lists are read (a banned freelancer's) is
+  // Order kept promising the payout on a date gone by), or an accepted price increase is not paid in (check of 25 November
+  // 2026: the same silence). One set aside while the lists are read (a banned freelancer's, an unpaid increase's) is
   // noted at the end of the run, in the time left (check of 27 November: written while the lists were read, before the
   // run looked at the clock, the notes of 40 such Orders at slow answers left no time for any payout at all).
-  const waits = async (c, what, why) => { await payoutWaits(c, what, why === "freelancer banned" ? "banned" : "not_ready").catch(e => console.error("payout note not saved", c && c.id, e && e.message)); };
+  const waits = async (c, what, why) => { await payoutWaits(c, what, why === "freelancer banned" ? "banned" : why === OWING ? "increase_unpaid" : "not_ready").catch(e => console.error("payout note not saved", c && c.id, e && e.message)); };
   const notes = [], noteLater = (c, what, why) => notes.push({ c, what, why });
   // due: delivered, the review window over. Not while a chargeback or the bank's inquiry is open on the Order's payment,
   // and not while a price increase both sides accepted is not paid in: closing the Order then would drop the increase
   // for good (the client pays it, or the admin decides). The client's own approval and the admin's decision still work.
   const due = await batchOf("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&${oldestFirst("auto_release_at")}`, c => c.editor,
     async c => chargebackOpen(c) ? "chargeback open" : inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : owedCents(c) >= MIN_TOPUP_CENTS ? owing(c) : null,
-    async (c, why) => { aside(c, why); if (why === "freelancer banned") noteLater(c, "automatic payout", why); });
+    async (c, why) => { aside(c, why); if (why === "freelancer banned" || why === OWING) noteLater(c, "automatic payout", why); });
   // stuck: a release or a decision whose money move failed earlier; not one that started a moment ago. Oldest first; one
   // that still has to pay a freelancer who can't be paid goes last (it may only need its transfer at Stripe counted).
   // Cuvori's decision is carried out only once it is on record (its history line): one whose record could not be saved
