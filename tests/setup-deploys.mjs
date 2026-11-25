@@ -147,5 +147,27 @@ check(froms.length > 0 && ![...froms, ...fileFroms].some(f => f.startsWith("/.ne
 check(froms.includes("/") && froms.includes("/*"), "netlify.toml: the page's own rules stay (\"/\" and every other unknown address go to index.html)");
 check(/Netlify refuses a redirect rule for a \/\.netlify address/.test(toml) && !/must not be caught by the page redirect/.test(toml), "netlify.toml says why no rule can keep the functions from the page rule (Netlify refuses one), and no longer promises that protection");
 
+// The webhook's seventh event (check of 25 November 2026, the calendar date). pricing-v2 notices a refund that fails at
+// Stripe afterwards (the client's card account closed) only through `charge.refund.updated`, and the destination made with
+// today's SETUP.md has six events: without the seventh, the Order keeps saying the money went back to the client, who never
+// got it, and nobody is told. So the step that puts this update live (Running v56, step 5) says to add it to the
+// destination already there; and every event the webhook acts on for Cuvori's own account, on the API version Cuvori uses,
+// is named where a destination is made (Part 5 step 4, Part 15 step 3).
+{
+  const hook = fs.readFileSync(path.join(root, "netlify/functions/stripe-webhook.mjs"), "utf8");
+  const listed = /const HANDLED = \[([^\]]*)\]/.exec(hook);
+  const handled = listed ? [...listed[1].matchAll(/"([a-z_.]+)"/g)].map(m => m[1]) : [];
+  // account.updated comes from the freelancers' accounts (its own destination); refund.updated and refund.failed only on
+  // newer API versions than the one Cuvori's destinations keep
+  const own = handled.filter(e => !["account.updated", "refund.updated", "refund.failed"].includes(e));
+  const goLive = steps.find(s => /^5\. /.test(s) && s.includes("compare/main...pricing-v2")) || "";
+  check(own.includes("charge.refund.updated") && goLive.includes("`charge.refund.updated`") && /\*\*Edit destination\*\* → \*\*Select events\*\*/.test(goLive) && /Your account/.test(goLive),
+    "Running v56, step 5 (the merge that puts this update live): add `charge.refund.updated` to the Stripe destination already there (Your account → Edit destination → Select events)");
+  check(/(no harm|harmless)[^.]*received/.test(goLive), "…and it says that adding it before the merge does no harm (today's code answers an event it does not act on as received)");
+  const part5 = steps.find(s => /^4\. Stripe → \*\*Developers\*\*/.test(s)) || "", part15 = steps.find(s => /^3\. \*\*Webhook\*\*/.test(s)) || "";
+  check(own.length === 7 && [part5, part15].every(s => own.every(e => s.includes("`" + e + "`")) && /\bseven\b/.test(s)),
+    `every event the webhook acts on for Cuvori's own account (${own.length}: ${own.join(", ")}) is named where a destination is made (Part 5 step 4, Part 15 step 3)`);
+}
+
 console.log(`\nsetup deploy steps: ${failed ? `${failed} of ${n} checks FAILED` : `all ${n} checks passed`}`);
 process.exit(failed ? 1 : 0);

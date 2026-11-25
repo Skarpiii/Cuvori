@@ -59,6 +59,7 @@ echo "== roles & tampering"; out=$(node tests/attack-roles.mjs 2>/dev/null | tai
 echo "== Stripe accounts per mode"; out=$(node tests/attack-connect.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== webhook formats";  out=$(node tests/attack-webhook-format.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== checks of 26 to 30 November (the hourly job: a payout that can't go through says so, what can't be paid holds back nothing also while its notes are written, Netlify's 30 seconds, a review period that started again, the parts of every open Order; decisions saved before anything changes and told once, from the admin, also with a long note; one log line when something failed or was left for the next hour; what the admin reads when a decision can't be saved, decisions told within 7 days, never one being made; its lists and the decisions it tells read whole, each row once, a profile answer without its banned mark left to the Order's own check)"; out=$(node tests/attack-hourly-nov26.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
+echo "== check of 25 November 2026 (the hourly job: an automatic payout that waits for an accepted price increase not paid in says so on the Order, and the note goes once it is paid or decided)"; out=$(node tests/attack-check-nov25.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== error texts";      out=$(node tests/attack-error-text.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== retry keys";       out=$(node tests/attack-idempotency.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
 echo "== payment races";    out=$(node tests/attack-payment-race.mjs 2>/dev/null | tail -1); echo "$out"; echo "$out" | grep -q "^0 vulnerable" || r=1
@@ -115,5 +116,6 @@ echo "== oauth return";     page tests/oauth-return.js
 echo "== the new prices on the page"; page pricing-page.js
 echo "== Orders at the new prices on the page (Order screen, admin panel)"; page tests/plan2-page.js
 echo "== check of 2 December (what the Order says about its money: a payout that waits for the freelancer's Stripe setup or for Cuvori, payout and chargeback times, one copy of the texts)"; page tests/money-notes.js
+echo "== check of 25 November 2026 on the page (an Order handed in whose accepted price increase is not paid in promises no payout date: both sides read that the payout waits for it)"; page tests/increase-waits-page.js
 [ $r = 0 ] && echo "ALL CHECKS PASSED" || echo "SOMETHING FAILED"
 exit $r

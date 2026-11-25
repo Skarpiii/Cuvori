@@ -76,8 +76,17 @@ for (const type of ["payment_intent.created", "customer.created", "invoice.paid"
 // ---------- W9: SETUP.md creates the webhook with Snapshot, in Stripe's words of October 2026 ----------
 {
   const text = fs.readFileSync(process.env.TARGET ? process.env.TARGET.replace(/\/?$/, "/") + "SETUP.md" : fileURLToPath(new URL("../SETUP.md", import.meta.url)), "utf8");
-  const steps = text.split(/\n(?=\d+\.\s|#)/).filter(p => /stripe-webhook/.test(p) && /(Webhooks|destination)/.test(p));
+  const all = text.split(/\n(?=\d+\.\s|#)/).filter(p => /stripe-webhook/.test(p) && /(Webhooks|destination)/.test(p));
+  // a step that only adds an event to the destination already there (Edit destination, no + Add destination: Running v56,
+  // step 5, check of 25 November 2026) is checked as that, below; every other one as a step that creates the webhook
+  const edits = all.filter(p => /\*\*Edit destination\*\*/.test(p) && !/\*\*\+ Add destination\*\*/.test(p));
+  const steps = all.filter(p => !edits.includes(p));
   vuln(steps.length < 2, `W9 the SETUP.md steps that create the Stripe webhook were found (${steps.length}, must be 2: Part 5 step 4 and Part 15 item 3)`);
+  for (const p of edits) {
+    const name = p.replace(/\s+/g, " ").replace(/\*\*/g, "").slice(0, 60);
+    const missing = ["**Developers**", "**Webhooks**", "**Your account**", "**Connected accounts**", "**Edit destination** → **Select events**", "main--cuvori.netlify.app/.netlify/functions/stripe-webhook", "`charge.refund.updated`"].filter(w => !p.includes(w));
+    vuln(missing.length > 0, `W9b "${name}…" (adds an event to the destination already there) names Stripe's buttons, the address, which destination (Your account, not Connected accounts) and the event -> missing: ${JSON.stringify(missing)}`);
+  }
   for (const p of steps) {
     const name = p.replace(/\s+/g, " ").replace(/\*\*/g, "").slice(0, 60);
     const missing = ["**Developers**", "**Webhooks**", "**+ Add destination**", "**Your account**", "**Snapshot**", "**Webhook endpoint**", "**Endpoint URL**", "**Create destination**", "**Signing secret**", "**Connected accounts**", "STRIPE_CONNECT_WEBHOOK_SECRET", "main--cuvori.netlify.app/.netlify/functions/stripe-webhook",
