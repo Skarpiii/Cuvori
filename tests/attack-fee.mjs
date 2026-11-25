@@ -127,7 +127,7 @@ const connectOf = (s) => Number(s.metadata && s.metadata.connect_cents || 0);
 {
   const c = mk({ amount_cents: 10000 }); const f = await fund(fx, c); const pi = f.session.payment_intent; const ch = chargeOf(pi);
   const w = await call(fx.webhook, req("POST", "x", signed({ type: "charge.dispute.created", data: { object: { id: "dp_F9", charge: ch.id, payment_intent: pi, amount: ch.amount - ch.amount_refunded, currency: "eur", status: "needs_response" } } })));
-  vuln(w.status !== 200 || c.status !== "disputed" || c.chargeback_status !== "open", `F9a dispute opens -> ${w.status}, status=${c.status}, chargeback=${c.chargeback_status}`);
+  vuln(w.status !== 200 || c.status !== "funded" || c.chargeback_status !== "open", `F9a dispute opens -> ${w.status}, status=${c.status}, chargeback=${c.chargeback_status} (must be 200, funded: the Order keeps its status, open)`);
   const lost = await call(fx.webhook, req("POST", "x", signed({ type: "charge.dispute.closed", data: { object: { id: "dp_F9", charge: ch.id, payment_intent: pi, amount: ch.amount - ch.amount_refunded, currency: "eur", status: "lost" } } })));
   vuln(lost.status !== 200 || c.refunded_cents !== 10000 || c.status !== "refunded", `F9b lost -> ${lost.status}, refunded_cents=${c.refunded_cents} (the full price, not price minus the fee refund), status=${c.status}`);
   reset();
@@ -193,17 +193,20 @@ const connectOf = (s) => Number(s.metadata && s.metadata.connect_cents || 0);
 }
 
 // ---------- F12b: the breakdown saved on the Order is the one of the page that was paid ----------
-// Page A is paid; before Cuvori confirms it, the fee table changes and the client makes page B (A cannot be closed: it is
-// already complete). A's confirmation must keep A's amounts, A's fee and A's breakdown on the Order, not B's.
+// Page A is paid in the very moment the fee table has changed and the client makes page B in another tab (A cannot be
+// closed then: it is already complete). A's confirmation must keep A's amounts, A's fee and A's breakdown on the Order, not
+// B's. (A page paid before Fund is pressed again is recorded at that click, and no page B is made: tests/attack-fixes-nov1.mjs L3.)
 {
   const quoteAt = (pct, fixed) => (p) => { const total = Math.ceil((p + fixed) / (1 - pct / 100)); return { price_cents: p, processing_cents: total - p, cuvori_cents: 0, total_cents: total, currency: "EUR", payer: "client", percent: pct, fixed_cents: fixed, schedule_id: 3, region: "ANY" }; };
   const c = mk({ amount_cents: 10000 });
   hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, quoteAt(3.25, 25)(args.p_price_cents)] : null;
   const rA = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
   const A = c.stripe_checkout_id, feeA = rA.json && rA.json.fee;
-  const sA = pay(A);                                                   // the client pays on page A; Cuvori has not confirmed it yet
+  let sA = null;
   hooks.rpc = async (fn, args) => fn === "order_quote" ? [200, quoteAt(3.5, 30)(args.p_price_cents)] : null;   // the fee table changes
-  const rB = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+  // the client pays on page A while page B is being made; Cuvori has not confirmed it yet
+  hooks.stripe = async (path, method) => { if (method === "POST" && path === "/checkout/sessions") { hooks.stripe = null; sA = pay(A); } return null; };
+  const rB = await call(fx.checkout, req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } })); hooks.stripe = null;
   const B = c.stripe_checkout_id, feeB = rB.json && rB.json.fee;
   const w = await call(fx.webhook, req("POST", "x", signed({ type: "checkout.session.completed", data: { object: sA } })));   // A's confirmation arrives
   const q = c.quote || {};

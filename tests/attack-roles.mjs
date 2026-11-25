@@ -389,15 +389,17 @@ const STRANGERS = [["anon", undefined], ["stranger-client", "tok_cl2"], ["second
     vuln(r0.status !== 200 || r.status !== 200 || c.status !== "completed" || moneyOut(c).transferred !== 15000,
       `R-U2 +€50 paid, then released -> ${r.status} ${r.json && r.json.error || ""}, status ${c.status}, transferred ${moneyOut(c).transferred} (must be 15000)`);
   }
-  // U3: the client left the €50 payment page open and went silent. The automatic release pays out the €100 held,
-  // closes the Order — and the page, so nothing can be paid into the closed Order (it would go back to the card, fee on Cuvori)
+  // U3: the client left the €50 payment page open and went silent. The automatic release no longer pays out the €100 held
+  // and closes the Order: that dropped the increase both agreed to for good (audit of 31 October). The Order waits, its
+  // page stays open and can still be paid; the admin can decide it (attack-fixes-nov1 F6)
   {
     const c = await raised(); await checkout(c); const page = c.stripe_checkout_id; c.auto_release_at = past(1); onlyDue(c);
     await auto();
-    vuln(c.status !== "completed" || moneyOut(c).transferred !== 10000 || STRIPE.sessions[page].status !== "expired" || backToCard(c),
-      `R-U3 automatic release with the €50 page open -> status ${c.status}, transferred ${moneyOut(c).transferred} (must be 10000), €50 page ${STRIPE.sessions[page].status} (must be expired), refunds ${backToCard(c)}`);
+    vuln(c.status !== "delivered" || moneyOut(c).transferred !== 0 || STRIPE.sessions[page].status !== "open" || backToCard(c),
+      `R-U3 automatic release with the €50 page open -> status ${c.status}, transferred ${moneyOut(c).transferred} (must stay delivered, 0), €50 page ${STRIPE.sessions[page].status} (must stay open), refunds ${backToCard(c)}`);
     const late = await checkout(c);
-    vuln(late.status === 200, `R-U3 a new €50 page after the close -> ${late.status} ${late.json && late.json.error || ""}`);
+    vuln(late.status !== 200, `R-U3 the client pays the €50 after all -> Fund ${late.status} ${late.json && late.json.error || ""} (must work: the Order still waits for it)`);
+    c.status = "completed";
   }
   // U4: the €50 was paid a moment before the automatic release, Stripe's message not in yet. The payment is added to
   // the Order (not sent back), the release waits one run, then pays out all €150; the late message changes nothing

@@ -43,7 +43,7 @@ for (const [name, ev] of [
 }
 
 // ---------- W4–W5: an event Cuvori handles, arriving without the object it is about ----------
-const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "account.updated", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed"];
+const HANDLED = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "account.updated", "charge.refunded", "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.closed", "charge.refund.updated", "refund.updated", "refund.failed"];
 for (const type of HANDLED) {
   for (const [what, data] of [["no data", undefined], ["data without object", {}], ["object null", { object: null }], ["object a list", { object: [] }], ["object without id", { object: { object: "x" } }]]) {
     const before = snap();
@@ -76,12 +76,21 @@ for (const type of ["payment_intent.created", "customer.created", "invoice.paid"
 // ---------- W9: SETUP.md creates the webhook with Snapshot, in Stripe's words of October 2026 ----------
 {
   const text = fs.readFileSync(process.env.TARGET ? process.env.TARGET.replace(/\/?$/, "/") + "SETUP.md" : fileURLToPath(new URL("../SETUP.md", import.meta.url)), "utf8");
-  const steps = text.split(/\n(?=\d+\.\s|#)/).filter(p => /stripe-webhook/.test(p) && /(Webhooks|destination)/.test(p));
+  const all = text.split(/\n(?=\d+\.\s|#)/).filter(p => /stripe-webhook/.test(p) && /(Webhooks|destination)/.test(p));
+  // a step that only adds an event to the destination already there (Edit destination, no + Add destination: Running v56,
+  // step 5, check of 25 November 2026) is checked as that, below; every other one as a step that creates the webhook
+  const edits = all.filter(p => /\*\*Edit destination\*\*/.test(p) && !/\*\*\+ Add destination\*\*/.test(p));
+  const steps = all.filter(p => !edits.includes(p));
   vuln(steps.length < 2, `W9 the SETUP.md steps that create the Stripe webhook were found (${steps.length}, must be 2: Part 5 step 4 and Part 15 item 3)`);
+  for (const p of edits) {
+    const name = p.replace(/\s+/g, " ").replace(/\*\*/g, "").slice(0, 60);
+    const missing = ["**Developers**", "**Webhooks**", "**Your account**", "**Connected accounts**", "**Edit destination** → **Select events**", "main--cuvori.netlify.app/.netlify/functions/stripe-webhook", "`charge.refund.updated`"].filter(w => !p.includes(w));
+    vuln(missing.length > 0, `W9b "${name}…" (adds an event to the destination already there) names Stripe's buttons, the address, which destination (Your account, not Connected accounts) and the event -> missing: ${JSON.stringify(missing)}`);
+  }
   for (const p of steps) {
     const name = p.replace(/\s+/g, " ").replace(/\*\*/g, "").slice(0, 60);
     const missing = ["**Developers**", "**Webhooks**", "**+ Add destination**", "**Your account**", "**Snapshot**", "**Webhook endpoint**", "**Endpoint URL**", "**Create destination**", "**Signing secret**", "**Connected accounts**", "STRIPE_CONNECT_WEBHOOK_SECRET", "main--cuvori.netlify.app/.netlify/functions/stripe-webhook",
-      "`checkout.session.completed`", "`checkout.session.async_payment_succeeded`", "`charge.refunded`", "`charge.dispute.created`", "`charge.dispute.closed`", "`account.updated`"].filter(w => !p.includes(w));
+      "`checkout.session.completed`", "`checkout.session.async_payment_succeeded`", "`charge.refunded`", "`charge.dispute.created`", "`charge.dispute.closed`", "`charge.refund.updated`", "`account.updated`"].filter(w => !p.includes(w));
     vuln(missing.length > 0 || !/not \*\*Thin\*\*/.test(p), `W9 "${name}…" names Stripe's buttons, Snapshot (not Thin), the address, the five events and the connected-accounts one -> missing: ${JSON.stringify(missing)}${/not \*\*Thin\*\*/.test(p) ? "" : ' and "not Thin"'}`);
   }
 }

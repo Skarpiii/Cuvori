@@ -107,8 +107,8 @@ const reversalsOf = (c) => { const ids = new Set(STRIPE.transfers.filter(t => t.
   const ch = chargeOf(f.session.payment_intent); STRIPE.disputes[ch.id] = { status: "needs_response" };
   const w = await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.created", ch)));           // the bank pulls the whole payment
   const m = moneyOut(c);
-  vuln(r.status !== 200 || w.status !== 200 || c.status !== "disputed" || m.transferred !== 0,
-    `C5a chargeback for the whole €300 after €100 was paid out -> release ${r.status}, webhook ${w.status}, status=${c.status}, freelancer keeps=${m.transferred} (must be 0: pulled back until the bank decides), released_cents=${c.released_cents}`);
+  vuln(r.status !== 200 || w.status !== 200 || c.status !== "funded" || c.chargeback_status !== "open" || m.transferred !== 0,
+    `C5a chargeback for the whole €300 after €100 was paid out -> release ${r.status}, webhook ${w.status}, status=${c.status}, chargeback ${c.chargeback_status}, freelancer keeps=${m.transferred} (must be 0: pulled back until the bank decides; the Order keeps its status, funded), released_cents=${c.released_cents}`);
   STRIPE.disputes[ch.id].status = "lost";
   const l = await call(fx.webhook, req("POST", "x", cbEvent("charge.dispute.closed", ch, { status: "lost" })));
   vuln(l.status !== 200 || c.status !== "refunded" || c.refunded_cents !== 30000 || moneyOut(c).transferred !== 0, `C5b ...lost -> ${l.status}, status=${c.status}, refunded_cents=${c.refunded_cents} (must be 30000), freelancer keeps=${moneyOut(c).transferred}`);
