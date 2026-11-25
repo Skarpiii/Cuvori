@@ -369,7 +369,8 @@ insert into public.conversations (id, user_a, user_b) values ('10000000-0000-000
 -- helpers that stand in for the payment provider (owner-only, like the Netlify functions with the service key)
 create or replace function t.fund(oid uuid) returns void language sql security definer as $$
   update public.contracts set status = 'funded', funded_at = now(), funded_cents = amount_cents, stripe_payment_intent = 'pi_t_' || left(oid::text, 8) where id = oid;
-  insert into public.order_payments (order_id, kind, amount_cents, fee_cents, provider, provider_ref) select id, 'fund', amount_cents, 787, 'stripe', 'pi_t' from public.contracts where id = oid;
+  -- the line names the Order's own payment, as the payment code writes it (since v56 one Stripe payment has one payment line)
+  insert into public.order_payments (order_id, kind, amount_cents, fee_cents, provider, provider_ref) select id, 'fund', amount_cents, 787, 'stripe', stripe_payment_intent from public.contracts where id = oid;
   insert into public.order_events (order_id, actor, event, data) select id, null, 'funded', jsonb_build_object('amount_cents', amount_cents) from public.contracts where id = oid;
 $$;
 create or replace function t.release_ms(mid uuid) returns void language sql security definer as $$
@@ -435,6 +436,8 @@ begin
   perform t.as_user('106'); out := out || '|' || public.order_amendment_decide(aid, true);
   select * into c from public.contracts where id = oid;
   out := out || '|' || c.amount_cents || '/' || c.amendments || '/' || (select count(*) from public.order_milestones where order_id = oid) || '/' || public.order_held_cents(c) || '/' || (c.amount_cents - c.funded_cents);
+  -- v56: while the accepted increase is not paid in, a part is handed in only while the money held covers it (this one
+  -- is covered: €750 held); a part beyond what is held waits for the increase (schema_v56 section 6)
   -- the client disputes: nothing more is released automatically
   perform t.as_user('206'); out := out || '|' || public.order_milestone_action(m2, 'submit');
   perform t.as_user('106'); out := out || '|' || public.order_action(oid, 'dispute', 'the second part is not what we agreed');
