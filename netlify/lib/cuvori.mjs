@@ -117,10 +117,14 @@ export const CONNECT_WEBHOOK_SECRET = env("STRIPE_CONNECT_WEBHOOK_SECRET");
 // pk_…) can never check Stripe's signature: every notice to that endpoint would be refused, and nothing said why (check of
 // 22 November). The admin page now names the setting to correct, never the secret. Payments stay on: the page records a
 // payment when the client comes back from paying; what only comes as a notice waits until the setting is corrected.
+// Automatic payouts wait too (WEBHOOK_SECRET_OK, the hourly job): a chargeback, or a refund made in the Stripe dashboard,
+// reaches its Order only as a notice, and an Order whose client's bank had opened a chargeback was paid out on its date
+// (check of 26 November 2026). The client's own approval and Cuvori's decisions go on.
 const WEBHOOK_SECRET_SHAPE = /^whsec_[A-Za-z0-9_+/=-]+$/;
-for (const [name, secret, what] of [["STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET, "about Cuvori's payments, refunds and chargebacks"], ["STRIPE_CONNECT_WEBHOOK_SECRET", CONNECT_WEBHOOK_SECRET, "about the freelancers' Stripe accounts"]])
+export const WEBHOOK_SECRET_OK = WEBHOOK_SECRET_SHAPE.test(WEBHOOK_SECRET);
+for (const [name, secret, what] of [["STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET, "about Cuvori's payments, refunds and chargebacks are refused, and nothing is paid out automatically"], ["STRIPE_CONNECT_WEBHOOK_SECRET", CONNECT_WEBHOOK_SECRET, "about the freelancers' Stripe accounts are refused"]])
   if (secret && !WEBHOOK_SECRET_SHAPE.test(secret))
-    note(`${name} can't be a Stripe webhook signing secret: it must be one word that starts with whsec_, copied from Stripe without quotes, spaces or line breaks. Until it is corrected, Stripe's notices ${what} are refused. ${WHERE}`);
+    note(`${name} can't be a Stripe webhook signing secret: it must be one word that starts with whsec_, copied from Stripe without quotes, spaces or line breaks. Until it is corrected, Stripe's notices ${what}. ${WHERE}`);
 // Where Stripe sends people back (after paying, after setting up payouts). Not set: Netlify's own address (URL), and the
 // admin page says so, since that address may serve an older copy of the page. Set but not a web address: Cuvori's own
 // address, never Netlify's.
@@ -566,9 +570,16 @@ export function verifyWebhook(rawBody, sigHeader, secret = WEBHOOK_SECRET, toler
 // the whole key. The Netlify log says why once per start, with the key's first 3 characters only.
 const SERVICE_KEY_NAME = env("SUPABASE_SECRET_KEY") ? "SUPABASE_SECRET_KEY" : "SUPABASE_SERVICE_ROLE_KEY";
 const SERVICE_KEY_WHOLE = /^[A-Za-z0-9._-]+$/.test(SERVICE_KEY);
+// Supabase's PUBLIC key, which sits next to the secret one in Supabase: the publishable key (sb_publishable_…), or the older
+// anon key, a JWT whose role is "anon" (any role but service_role is not the secret key). It is never sent, like Stripe's
+// public key: it was taken for a working key, so the admin page said ON, every button answered "Something went wrong" and
+// the hourly job found no Order at all, paid out and refunded nothing and said nothing (check of 26 November 2026). A key
+// that is neither (no JWT whose role can be read) is left to Supabase, as before.
+const jwtRole = (k) => { const parts = k.split("."); if (parts.length !== 3) return null; try { const r = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")).role; return typeof r === "string" ? r : null; } catch { return null; } };
+const SERVICE_KEY_PUBLIC = SERVICE_KEY_WHOLE && (SERVICE_KEY.startsWith("sb_publishable_") || ![null, "service_role"].includes(jwtRole(SERVICE_KEY)));
 // for stripe-status: whether the database key can be used at all (never the key), so the admin panel can say "ON, but
 // paused" and name the setting, as it does for the Stripe key
-export const SERVICE_KEY_OK = !!SERVICE_KEY && SERVICE_KEY_WHOLE;
+export const SERVICE_KEY_OK = !!SERVICE_KEY && SERVICE_KEY_WHOLE && !SERVICE_KEY_PUBLIC;
 let serviceKeyLogged = false;
 // Every button then answers "payments paused" with the code the page says in the person's language (fnPlain in
 // index.html); the admin also reads this sentence, which names the setting to correct.
@@ -577,6 +588,10 @@ function requireServiceKey() {
   if (!SERVICE_KEY_WHOLE) {
     if (!serviceKeyLogged) { serviceKeyLogged = true; console.error(`Database paused: ${SERVICE_KEY_NAME} in Netlify has a space, a line break or another character that is not part of a Supabase key (it starts with "${SERVICE_KEY.slice(0, 3)}"); copy the key again from Supabase, in one piece`); }
     throw fail(`Payments are paused: the database key in Netlify (${SERVICE_KEY_NAME}) has a space, a line break or another character that is not part of a Supabase key. It must be copied again from Supabase, in one piece.`, 503, PAUSED);
+  }
+  if (SERVICE_KEY_PUBLIC) {
+    if (!serviceKeyLogged) { serviceKeyLogged = true; console.error(`Database paused: ${SERVICE_KEY_NAME} in Netlify is Supabase's public key (publishable or anon), not the secret one; copy the secret key from Supabase (Project Settings → API Keys)`); }
+    throw fail(`Payments are paused: the database key in Netlify (${SERVICE_KEY_NAME}) is Supabase's public key (publishable or anon), not the secret one. Copy the secret key from Supabase (Project Settings → API Keys).`, 503, PAUSED);
   }
 }
 // The highest price plan this payment code knows (schema v56, pricing_engine): sent with every database request, so the
