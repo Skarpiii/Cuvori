@@ -48,8 +48,13 @@ function originOf(value) {
   let url; try { url = new URL("https://" + rest); } catch { return null; }
   const local = LOCAL_HOSTS.includes(url.hostname);
   if (!local && !HOST_OK(url.hostname)) return null;
-  const host = scheme === "http" && url.port === "80" ? url.hostname : url.host;   // http's own port, written out: not a port of its own
-  const origin = `${local ? scheme || "http" : "https"}://${host}`;
+  const used = local ? scheme || "http" : "https";
+  let host = scheme === "http" && url.port === "80" ? url.hostname : url.host;   // http's own port, written out: not a port of its own
+  // a test address on a computer used with http: its port read as http reads it, so 443 is kept and 80 (http's own) is not,
+  // as a browser there sends it ("http://localhost:443" was read as http://localhost, "localhost:80" as http://localhost:80;
+  // check of 25 November 2026)
+  if (used === "http") { try { host = new URL("http://" + rest).host; } catch { return null; } }
+  const origin = `${used}://${host}`;
   return { origin, corrected: origin !== noEndSlashes(typed).toLowerCase() };
 }
 const note = (text) => { SETTINGS_NOTES.push(text); console.error("Netlify setting:", text); };
@@ -77,7 +82,7 @@ function addressSetting(name, value, fallback, kind = null) {
 function readAddress(name, value, fallback, kind, oldReads) {
   const o = originOf(value);
   if (!o) { note(`${name} is not a web address, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
-  if (kind && !kind.ok(o.origin)) { note(`${name} is not ${kind.what}, so Cuvori uses ${fallback} instead. ${WHERE}`); return fallback; }
+  if (kind && !kind.ok(o.origin)) { note(`${name} is not ${kind.what}, so Cuvori uses ${fallback} instead. ${WHERE}${oldReads && kind.oldUses ? " " + kind.oldUses : ""}`); return fallback; }
   // written the short way: when production's code can't read it, the note about that already says to write it in full
   if (o.corrected && oldReads) note(`${name} is not written as a full web address; Cuvori corrected it. Check it in Netlify under Project configuration → Environment variables.`);
   return o.origin;
@@ -89,7 +94,9 @@ const CUVORI_SITE = "https://cuvori.io";
 // or any other website never gets it (check of 4 December: any ….supabase.co address was taken, so a typo in the project
 // code sent the key there). Moving Cuvori to another Supabase project means changing CUVORI_SUPABASE here.
 const CUVORI_SUPABASE = "https://tnxujwlfatcvxzevllfr.supabase.co";
-const SUPABASE_PROJECT = { what: `Cuvori's own Supabase project address (${CUVORI_SUPABASE})`, ok: (o) => o === CUVORI_SUPABASE || LOCAL_HOSTS.includes(new URL(o).hostname) };
+// oldUses: what production's older code (13 October) would do with such an address if deployed again, as it reads it (check of
+// 25 November 2026: the note did not say that production would send the secret database key there)
+const SUPABASE_PROJECT = { what: `Cuvori's own Supabase project address (${CUVORI_SUPABASE})`, oldUses: "Until it is corrected, never deploy production: its older code (13 October) would use this address and send it the secret database key.", ok: (o) => o === CUVORI_SUPABASE || LOCAL_HOSTS.includes(new URL(o).hostname) };
 export const SUPABASE_URL = addressSetting("SUPABASE_URL", env("SUPABASE_URL"), CUVORI_SUPABASE, SUPABASE_PROJECT);
 // SUPABASE_URL a test address on a computer (localhost): used, for testing with a local Supabase, but on Netlify every payment
 // function then fails to reach the database (paying, payouts, the hourly job) and nothing said why. The admin page says so now,
@@ -105,6 +112,10 @@ export const STRIPE_KEY = env("STRIPE_SECRET_KEY");
 // letter from another alphabet that looks the same) is never sent: Node refuses to send such a header and puts the whole
 // header, the key with it, into its error text, and that text would end up in the Netlify log.
 const KEY_PREFIX = /^(sk|rk)_(live|test)_/;
+// a key's first 3 characters, for the log, only when they are the start of a Stripe or Supabase key (sk_, rk_, pk_, sb_, or
+// eyJ, a JWT's): never secret. Of anything else (a password typed into the wrong setting) nothing is written (check of 26
+// November 2026: its first 3 characters were)
+const keyStart = (k) => (/^(sk_|rk_|pk_|sb_|eyJ)/.test(k) ? ` (it starts with "${k.slice(0, 3)}")` : "");
 const STRIPE_KEY_WHOLE = /^(sk|rk)_(live|test)_[A-Za-z0-9_]+$/.test(STRIPE_KEY);
 // Test and live are two separate worlds at Stripe: an account, payment or payout made with test keys does not exist for
 // live keys, and the other way round. The key says which one these functions work in (none when the key can't be used).
@@ -168,7 +179,9 @@ function originsSetting(value) {
   return [...new Set([...DEFAULT_ORIGINS, ...list])];
 }
 export const ALLOWED_ORIGINS = originsSetting(env("ALLOWED_ORIGINS"));
-export const AUTO_RELEASE_DAYS = 7; // hard-coded in order_action() too
+// What the page shows where an Order gives no days of its own (stripe-status). Each Order is paid out after its own
+// auto_days, 7 when it has none (order_action(), order_milestone_action()); SETUP.md, Part 6, item 5, lists every copy of the 7.
+export const AUTO_RELEASE_DAYS = 7;
 // Cuvori's conservative per-payment total cap, including the quoted fee.
 // Provider limits also depend on currency/payment method and must be checked at Checkout.
 export const MAX_PAYMENT_CENTS = 99999999;
@@ -319,14 +332,14 @@ let platformSeen = { id: null, at: 0 };
 export const forgetStripeMode = () => { modeSeen = { mode: null, at: 0 }; keyPlatform = null; platformSeen = { id: null, at: 0 }; };
 // A Stripe key that is not a secret key (Stripe's public "pk_…" key pasted by mistake, or another secret in its place)
 // never moves money: payments pause, and both the Netlify log and the admin say exactly why. The log names only the key's
-// first three characters, which are never secret.
+// first three characters, and only when they are the start of a key (keyStart): those are never secret.
 function requireStripeMode() {
   if (STRIPE_MODE) return;
   if (KEY_PREFIX.test(STRIPE_KEY)) {
-    console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify has a space, a line break or another character that is not part of a Stripe key (it starts with "${STRIPE_KEY.slice(0, 3)}"); copy the key again from Stripe, in one piece`);
+    console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify has a space, a line break or another character that is not part of a Stripe key${keyStart(STRIPE_KEY)}; copy the key again from Stripe, in one piece`);
     throw fail("Payments are paused: the Stripe key in Netlify (STRIPE_SECRET_KEY) has a space, a line break or another character that is not part of a Stripe key. It must be copied again from Stripe, in one piece.", 503, PAUSED);
   }
-  if (STRIPE_KEY) console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify is not a Stripe secret key (it starts with "${STRIPE_KEY.slice(0, 3)}"; a secret key starts with sk_live_ or sk_test_, a restricted key with rk_live_ or rk_test_)`);
+  if (STRIPE_KEY) console.error(`Payments paused: STRIPE_SECRET_KEY in Netlify is not a Stripe secret key${keyStart(STRIPE_KEY)}: a secret key starts with sk_live_ or sk_test_, a restricted key with rk_live_ or rk_test_`);
   throw fail(STRIPE_KEY ? "Payments are paused: the Stripe key in Netlify (STRIPE_SECRET_KEY) is not a secret key. It must start with sk_live_ or sk_test_ (rk_ for a restricted key)."
                         : "Payments are not configured. Please contact support.", 503, PAUSED);
 }
@@ -567,7 +580,7 @@ export function verifyWebhook(rawBody, sigHeader, secret = WEBHOOK_SECRET, toler
 // ---- Supabase REST with the service role ----
 // The Supabase key is one word too (sb_secret_… or, for the older service key, a JWT: letters, digits, "_", "-" and
 // dots). One with anything else in it is never sent, for the same reason as the Stripe key: Node's error text for it holds
-// the whole key. The Netlify log says why once per start, with the key's first 3 characters only.
+// the whole key. The Netlify log says why once per start, with the key's first 3 characters only when they are a key's start.
 const SERVICE_KEY_NAME = env("SUPABASE_SECRET_KEY") ? "SUPABASE_SECRET_KEY" : "SUPABASE_SERVICE_ROLE_KEY";
 const SERVICE_KEY_WHOLE = /^[A-Za-z0-9._-]+$/.test(SERVICE_KEY);
 // Supabase's PUBLIC key, which sits next to the secret one in Supabase: the publishable key (sb_publishable_…), or the older
@@ -586,7 +599,7 @@ let serviceKeyLogged = false;
 function requireServiceKey() {
   if (!SERVICE_KEY) throw fail("Payments are paused: there is no database key in Netlify (SUPABASE_SECRET_KEY, or the older SUPABASE_SERVICE_ROLE_KEY).", 503, PAUSED);
   if (!SERVICE_KEY_WHOLE) {
-    if (!serviceKeyLogged) { serviceKeyLogged = true; console.error(`Database paused: ${SERVICE_KEY_NAME} in Netlify has a space, a line break or another character that is not part of a Supabase key (it starts with "${SERVICE_KEY.slice(0, 3)}"); copy the key again from Supabase, in one piece`); }
+    if (!serviceKeyLogged) { serviceKeyLogged = true; console.error(`Database paused: ${SERVICE_KEY_NAME} in Netlify has a space, a line break or another character that is not part of a Supabase key${keyStart(SERVICE_KEY)}; copy the key again from Supabase, in one piece`); }
     throw fail(`Payments are paused: the database key in Netlify (${SERVICE_KEY_NAME}) has a space, a line break or another character that is not part of a Supabase key. It must be copied again from Supabase, in one piece.`, 503, PAUSED);
   }
   if (SERVICE_KEY_PUBLIC) {
