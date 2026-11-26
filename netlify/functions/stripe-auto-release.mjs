@@ -2,7 +2,7 @@
 // Releases whole Orders and single milestones whose review window has passed with no answer, finishes
 // releases and decisions that failed at the provider earlier (money settling, account not ready), and
 // expires stale job posts. Everything it does is idempotent; running it twice changes nothing.
-import { escrowEnabled, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart, outsideRefundsCounted, payoutWaits } from "../lib/cuvori.mjs";
+import { escrowEnabled, WEBHOOK_SECRET_OK, sweepHeldApart, announceDecision, tellDecisions, markCountedParts, INQUIRY_HEAD, db, stripe, isSession, applyPaidSession, settle, releaseMilestone, json, heldCents, owedCents, MIN_TOPUP_CENTS, isBanned, orderPayoutAccount, accountReady, chargebackOpen, inquiryOpen, inquiryStillOpen, repayWon, coverChargeback, nextChargeback, OTHER_CB, hasNote, acctCols, settleFee, closeCheckout, moneyUnchanged, repairFirstLines, repairTopupLines, repairPayoutLines, retryLateRefunds, repairPlan2Lines, recordPlan2Fees, retryStates, retryDue, retryTries, retryLater, retryDone, FEE_WAIT_MS, noteFeeUnknown, retryOrder, RETRY_READ, decisionMissing, closeEmptyOrders, takeoverUnfinished, noteShortPart, outsideRefundsCounted, payoutWaits } from "../lib/cuvori.mjs";
 
 export const config = { schedule: "@hourly" };
 const ago = (min) => new Date(Date.now() - min * 60e3).toISOString();
@@ -66,6 +66,11 @@ async function batchOf(table, query, editorOf, hold, aside, bannedLast = false) 
   return batch(into);
 }
 const ASKED = "the client's bank asked about the payment (an inquiry): no automatic release until it ends";
+// Stripe's notices can't be checked (STRIPE_WEBHOOK_SECRET in Netlify can't be a signing secret; the admin page says so): a
+// chargeback, or a refund made in the Stripe dashboard, would never reach its Order, so nothing is paid out on a date alone
+// until the setting is corrected (check of 26 November 2026: the chargeback's notice was refused and the Order paid out on
+// its date). What a person decided goes on: the client's approval, Cuvori's decision, a cancellation.
+const NO_NOTICES = "STRIPE_WEBHOOK_SECRET in Netlify can't be a Stripe webhook signing secret, so a chargeback could not reach the Order: automatic payouts wait until it is corrected";
 const UNRECORDED = "Cuvori's decision is not on record: it waits for the admin to decide again";
 const SHORT = "not enough money is held for this part any more: it waits for Cuvori's decision";
 // An Order not released because a price increase both sides accepted is not paid in: its payment page may have been paid a
@@ -100,6 +105,8 @@ export default async () => {
   let expired = 0;
   try { expired = Number(await db.rpc("expire_jobs", {})) || 0; } catch (e) { console.error("expire_jobs failed", e.message); }
   if (!escrowEnabled()) return json(200, { skipped: "escrow not configured", expired });
+  const byDate = WEBHOOK_SECRET_OK;                    // automatic payouts (on a date alone) only while Stripe's notices can be checked
+  if (!byDate) console.error("hourly job:", NO_NOTICES);
   // "Stripe check failed" notes on unpaid Orders with no new failure for a day (each failure renews its note) or from
   // before notes had a time: nothing needs doing on those — no money was taken — so they leave the admin panel's "Needs
   // a hand" list. "Stripe account check" notes stay until the account is sorted out; other notes are never touched.
@@ -120,7 +127,7 @@ export default async () => {
   // due: delivered, the review window over. Not while a chargeback or the bank's inquiry is open on the Order's payment,
   // and not while a price increase both sides accepted is not paid in: closing the Order then would drop the increase
   // for good (the client pays it, or the admin decides). The client's own approval and the admin's decision still work.
-  const due = await batchOf("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&${oldestFirst("auto_release_at")}`, c => c.editor,
+  const due = !byDate ? [] : await batchOf("contracts", `status=eq.delivered&payment_mode=eq.escrow&auto_release_at=lte.${encodeURIComponent(now)}&select=*&${oldestFirst("auto_release_at")}`, c => c.editor,
     async c => chargebackOpen(c) ? "chargeback open" : inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : owedCents(c) >= MIN_TOPUP_CENTS ? owing(c) : null,
     async (c, why) => { aside(c, why); if (why === "freelancer banned" || why === OWING) noteLater(c, "automatic payout", why); });
   // stuck: a release or a decision whose money move failed earlier; not one that started a moment ago. Oldest first; one
@@ -129,7 +136,7 @@ export default async () => {
   // waits for the admin, and the Order's note says so (decisionMissing; check of 2 November: it was carried out anyway)
   const stuck = await batchOf("contracts", `status=in.(releasing,resolving)&payment_mode=eq.escrow&resolved_at=lte.${encodeURIComponent(ago(10))}&select=*&${oldestFirst("resolved_at")}`,
     c => (Number.isInteger(c.split_editor_cents) && c.split_editor_cents > 0 && !c.stripe_transfer_id ? c.editor : null),
-    async c => chargebackOpen(c) ? "chargeback open" : await decisionMissing(c) ? UNRECORDED : c.status === "releasing" && !c.resolved_by && inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : null, aside, true);
+    async c => chargebackOpen(c) ? "chargeback open" : await decisionMissing(c) ? UNRECORDED : c.status === "releasing" && !c.resolved_by && !byDate ? NO_NOTICES : c.status === "releasing" && !c.resolved_by && inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : null, aside, true);
   for (const c of [...due, ...stuck]) {
     if (over("orders")) { waiting++; continue; }
     try {
@@ -189,7 +196,7 @@ export default async () => {
   // (such a part is said on its Order once, so a person decides it: check of 6 November, it waited without a word)
   const msHold = async m => { const c = orderOf.get(m.order_id); return chargebackOpen(c) ? "chargeback open" : m.amount_cents > heldCents(c) ? (await noteShortPart(c, m).catch(() => {}), SHORT) : m.status === "submitted" && inquiryOpen(c) && await inquiryStillOpen(c) ? ASKED : null; };
   const msEditor = m => (orderOf.get(m.order_id) || {}).editor;
-  await sortOut(msDue.sort(byTime), msEditor, msHold, async (m, why) => { aside(m, why); if (why === "freelancer banned") noteLater(orderOf.get(m.order_id) || { id: m.order_id }, `milestone ${m.id}`, why); }, msInto);
+  await sortOut(byDate ? msDue.sort(byTime) : [], msEditor, msHold, async (m, why) => { aside(m, why); if (why === "freelancer banned") noteLater(orderOf.get(m.order_id) || { id: m.order_id }, `milestone ${m.id}`, why); }, msInto);
   // (a part the client approved is tried after the others also when its freelancer is banned: its payout may be at Stripe
   // already, its answer lost, and is then counted; no new payout is made while the ban lasts. Check of 7 November)
   await sortOut(msOwed.sort(byTime), msEditor, msHold, aside, msInto, true);
@@ -333,6 +340,6 @@ export default async () => {
   if (broke.length || waiting)
     console.error(`hourly run summary: ${broke.length} failed, ${waiting} left for the next hour${waiting ? " (its time was up)" : ""}, ${done.length} done` +
       (broke.length ? `; failed: ${broke.slice(0, 5).map(f => `${f.id || "-"} (${String(f.why || "").slice(0, 120)})`).join(", ")}${broke.length > 5 ? ` and ${broke.length - 5} more` : ""}` : ""));
-  return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, expired, feesSettled: feesSettled + feesSettled2, linesAdded, lateRefunded, waiting,
+  return json(200, { released: done, failed: failed.length, failures: failed.slice(0, 20), skipped, ...(byDate ? {} : { held: NO_NOTICES }), expired, feesSettled: feesSettled + feesSettled2, linesAdded, lateRefunded, waiting,
     ...(heldApart && heldApart.done ? { heldApartReleased: heldApart.done } : {}) });
 };
