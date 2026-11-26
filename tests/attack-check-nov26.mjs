@@ -13,6 +13,14 @@
 //    public key, the second webhook secret, SITE_URL set to Netlify's address, the payment cap, the payout-fee ceiling, a
 //    disputed Order refunded in full from the Stripe dashboard, an old Order without counters being paid out or decided,
 //    payments without a database key, and a website whose name only starts like Cuvori's.
+// E  what the checks of lines 30–85 (25 and 26 November 2026) found and nobody had asked to fix yet, fixed with the rest:
+//    E1 a test address on a computer with a port: "http://localhost:443" was read as http://localhost (the wrong port), and
+//       "localhost:80" kept its port although http://localhost is what a browser there sends; E2 SUPABASE_URL another
+//       project's address: today's code uses Cuvori's own, but production's older code would send it the secret database key
+//       if deployed again, and the admin note did not say so; E3–E7 breaks no test noticed: another kind of address written
+//       in capitals (line 42), a %-code after a backslash (47), a note not written to the log (55), notes without where to
+//       correct them (56), production's rule against a user name in an address (65); E8 the first 3 characters of a value
+//       that is not a key at all (a password typed into the wrong setting) were written to the Netlify log.
 // Run: node tests/attack-check-nov26.mjs   (TARGET=<folder> checks another copy)
 import fs from "node:fs";
 import path from "node:path";
@@ -41,7 +49,7 @@ const CHILD = `
       if (url.pathname === "/rest/v1/rpc/rate_limit_tries") return ok("ok");
       return ok([]); };
     const lib = await import(root + "/netlify/lib/cuvori.mjs");
-    Object.assign(out, { site: lib.SITE_URL, mode: lib.STRIPE_MODE ?? null, dbKeyOk: lib.SERVICE_KEY_OK ?? null, connect: lib.CONNECT_WEBHOOK_SECRET, escrow: lib.escrowEnabled(), notes: lib.SETTINGS_NOTES || [] });
+    Object.assign(out, { site: lib.SITE_URL, origins: lib.ALLOWED_ORIGINS, mode: lib.STRIPE_MODE ?? null, dbKeyOk: lib.SERVICE_KEY_OK ?? null, connect: lib.CONNECT_WEBHOOK_SECRET, escrow: lib.escrowEnabled(), notes: lib.SETTINGS_NOTES || [] });
     const st = (await import(root + "/netlify/functions/stripe-status.mjs")).default;
     const ask = (o, auth) => new Request("https://main--cuvori.netlify.app/.netlify/functions/x", { method: "POST", headers: { origin: o || "https://cuvori.io", "content-type": "application/json", ...(auth ? { authorization: "Bearer admin_token" } : {}) }, body: JSON.stringify({ contract_id: "${UUID}" }) });
     const s = await st(new Request("https://main--cuvori.netlify.app/.netlify/functions/stripe-status", { headers: { origin: "https://cuvori.io" } }));
@@ -243,6 +251,57 @@ const quoteAt = (pct, fixed) => (p) => { const total = Math.ceil((p + fixed) / (
   const got = {};
   for (const o of Object.keys(asks)) { const r = await call(fx.status, req("GET", "x", { headers: { origin: o } })); got[o] = r.headers.get("access-control-allow-origin"); }
   vuln(Object.keys(asks).some(o => got[o] !== asks[o]), `G10 which website may read the answer -> ${JSON.stringify(got)} (only cuvori.io and www.cuvori.io, exactly)`);
+}
+
+// ---------- E: the checks of lines 30–85, fixed with the rest ----------
+for (const [typed, want] of [["http://localhost:443", "http://localhost:443"], ["localhost:80", "http://localhost"], ["http://localhost:80", "http://localhost"], ["https://localhost:443", "https://localhost"],
+  ["https://localhost:80", "https://localhost:80"], ["http://127.0.0.1:443/", "http://127.0.0.1:443"], ["localhost:8888", "http://localhost:8888"], ["http://cuvori.io:80", "https://cuvori.io"], ["cuvori.io:443", "https://cuvori.io"]]) {
+  const r = load({ SITE_URL: typed }), a = load({ ALLOWED_ORIGINS: typed });
+  vuln(!!r.error || r.site !== want || !(a.origins || []).includes(want),
+    `E1 ${JSON.stringify(typed)} -> SITE_URL used ${r.site}, allowed ${JSON.stringify((a.origins || []).filter(o => !/cuvori\.(io|netlify\.app)$/.test(o) || /:\d/.test(o)))} (must be ${want}: the port as typed, none when it is the scheme's own, as a browser there sends it)`);
+}
+for (const [typed, readable] of [["https://abcdefghijklmnopqrst.supabase.co", true], ["https://tnxujwlfatcvxzevllfr.supabase.co:8443", true], ["https://tnxujwlfatcvxzevllfr.supabase.co.evil.example", true], ["abcdefghijklmnopqrst.supabase.co", false]]) {
+  const r = load({ SUPABASE_URL: typed });
+  const n = (r.notes || []).find(x => x.startsWith("SUPABASE_URL is not Cuvori's own")) || "", old = (r.notes || []).some(x => x.startsWith("SUPABASE_URL is written in a way production's older code"));
+  const warns = /production/.test(n) && /secret database key/.test(n);
+  vuln(!!r.error || !n || n.length > 400 || n.includes(typed) || (readable ? !warns : warns || !old),
+    `E2 SUPABASE_URL ${JSON.stringify(typed)} (production's older code ${readable ? "reads it, and would use it" : "can't read it, and stops"}) -> note (${n.length} characters): ${JSON.stringify(n)}; note that production stops: ${old} (${readable ? "must warn that production would send it the secret database key" : "the note that production stops says it"})`);
+}
+{ // E3 (line 42) another kind of address is refused however its name is written, capitals too
+  const r = load({ ALLOWED_ORIGINS: "Partner.Example://x" });
+  vuln(!!r.error || (r.origins || []).some(o => /partner/.test(o)) || !(r.notes || []).some(n => n.startsWith("ALLOWED_ORIGINS has 1 entry that is not one web address")),
+    `E3 ALLOWED_ORIGINS "Partner.Example://x" (an address of the kind "partner.example://") -> allowed ${JSON.stringify(r.origins)} (must be left out, with a note)`);
+}
+{ // E4 (line 47) a %-code is looked for in the website's name only: after a backslash (the reader takes it for "/") it is part of the path
+  const a = load({ ALLOWED_ORIGINS: "https://partner.example\\x%20y" }), b = load({ ALLOWED_ORIGINS: "https://partner.ex%61mple" });
+  vuln(!!a.error || !(a.origins || []).includes("https://partner.example") || (b.origins || []).some(o => /partner/.test(o)),
+    `E4 "https://partner.example\\x%20y" -> allowed ${(a.origins || []).includes("https://partner.example")} (must be: the %-code is after the name); "https://partner.ex%61mple" -> allowed ${(b.origins || []).some(o => /partner/.test(o))} (must not be: a %-code in the name)`);
+}
+const WORST = { SUPABASE_URL: "not an address", SITE_URL: "https://me@cuvori.io", ALLOWED_ORIGINS: "*;partner.example", STRIPE_WEBHOOK_SECRET: '"whsec_x"', STRIPE_CONNECT_WEBHOOK_SECRET: "whsec_a b" };
+{ // E5 (line 55), E6 (line 56) every note is written to the Netlify log too, and says where to correct the setting
+  const r = load(WORST), notes = r.notes || [];
+  const unlogged = notes.filter(n => !r.log.includes("Netlify setting: " + n)), nowhere = notes.filter(n => !n.includes("Project configuration → Environment variables"));
+  vuln(!!r.error || notes.length < 5 || unlogged.length || nowhere.length,
+    `E5/E6 every setting broken at once -> ${notes.length} notes; not in the log ${unlogged.length}; without where to correct it ${nowhere.length}${nowhere.length ? " e.g. " + JSON.stringify(nowhere[0].slice(0, 120)) : ""}`);
+}
+{ // E7 (line 65) production's older code refuses an address with a user name in it, so the admin page warns that it stops there
+  const r = load({ SITE_URL: "https://me@cuvori.io" });
+  vuln(!!r.error || r.site !== "https://cuvori.io" || !(r.notes || []).some(n => n.startsWith("SITE_URL is written in a way production's older code")),
+    `E7 SITE_URL "https://me@cuvori.io" -> used ${r.site}; note that production's older code stops on it: ${(r.notes || []).some(n => n.startsWith("SITE_URL is written in a way production's older code"))}`);
+}
+{ // E8 nothing of a value that is not a key at all is written to the log (a key's own start, sk_ or pk_, may be named)
+  const PW = `
+    const H = await import(process.env.T_ROOT + "/tests/fn-harness.mjs");
+    const logs = []; console.error = (...a) => logs.push(a.map(String).join(" "));
+    const fx = await H.fns(); const c = H.mk();
+    const r = await H.call(fx.checkout, H.req("POST", "x", { token: "tok_cl", body: { contract_id: c.id } }));
+    console.log("RESULT " + JSON.stringify({ status: r.status, code: r.json && r.json.code, log: logs.join("\\n") }));`;
+  const p = spawnSync(process.execPath, ["--input-type=module", "-e", PW], { env: { PATH: process.env.PATH, HOME: process.env.HOME, T_ROOT: root, HARNESS_STRIPE_KEY: "Hunter2Secret!" }, encoding: "utf8", timeout: 60000 });
+  const line = (p.stdout || "").split("\n").find(l => l.startsWith("RESULT ")), s = line ? JSON.parse(line.slice(7)) : { log: "", error: (p.stderr || "").slice(-200) };
+  const d = load({ SUPABASE_SECRET_KEY: "Mypass word9" }), k = load({ SUPABASE_SECRET_KEY: "sb_secret_Ab Cd" });
+  vuln(s.status !== 503 || s.code !== "payments_paused" || /Hun/.test(s.log) || !/STRIPE_SECRET_KEY/.test(s.log)
+       || !d.release || d.release.code !== "payments_paused" || /Myp/.test(d.log) || !/SUPABASE_SECRET_KEY/.test(d.log) || !/starts with "sb_"/.test(k.log),
+    `E8 a password in STRIPE_SECRET_KEY -> Pay ${s.status} ${s.code}; its first characters in the log: ${/Hun/.test(s.log)}; a password in SUPABASE_SECRET_KEY -> ${d.release && d.release.code}; its first characters in the log: ${/Myp/.test(d.log)}; a database key with a space still named by its start: ${/starts with "sb_"/.test(k.log)}`);
 }
 
 console.log(out.join("\n"));
