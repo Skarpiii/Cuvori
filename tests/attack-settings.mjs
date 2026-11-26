@@ -438,7 +438,9 @@ const noted = (r, name) => Array.isArray(r.notes) && r.notes.some(n => n.include
     return !((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash); };
   const OLD = (name, value) => { const v = value.trim(); if (name !== "ALLOWED_ORIGINS") return OLD_ONE(v);
     const list = v.split(",").map(s => s.trim()).filter(Boolean); return list.length > 0 && list.every(OLD_ONE); };
-  const prodNotes = (notes, name) => (notes || []).filter(n => n.startsWith(name + " ") && /production/.test(n));
+  // the note that production's older code can't read the setting (oldCodeNote); not the one that it would read it and use
+  // another Supabase project's address (check of 26 November 2026: tests/attack-check-nov26.mjs, E2)
+  const prodNotes = (notes, name) => (notes || []).filter(n => n.startsWith(name + " is written in a way production's older code"));
   const P = "https://tnxujwlfatcvxzevllfr.supabase.co", OWN = ["https://cuvori.io", "https://www.cuvori.io"], MAIN = [...OWN, "https://main--cuvori.netlify.app"];
   const texts = {};
   // a: production stops on these; this code must load, read them as before, and tell the admin, once, naming the setting only
