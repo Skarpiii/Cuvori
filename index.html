@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-jMu+1lHbv882KzvSKUnL+UKE8LQN7NVXM0qlFadaOoU=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-tNQ/qr1M+KscYcWjBgrdhr9VNC2RiXzyHT3Rjl/omFY=' 'sha256-lwjujBIzFVE/fYeB/7SPoXhruI62bXLpv13YaRLUWfk=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self' https://main--cuvori.netlify.app https://cuvori.netlify.app https://tnxujwlfatcvxzevllfr.supabase.co wss://tnxujwlfatcvxzevllfr.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Cuvori — commission-free marketplace for editors, videographers and photographers." />
@@ -7626,9 +7626,19 @@
       ${euLine}<div class="muted small" style="grid-column:1/-1">${escapeHtml(t("o_processingHint"))}</div>${connectOf(q)>0?`<div class="muted small" style="grid-column:1/-1">${escapeHtml(t("o_connectHint"))}</div>`:""}</div>`;
   }
 
+  // An Order's money note is for the payment code and the admin (schema v56, check of 27 November 2026): the Orders are read
+  // through my_orders, which gives each person their Orders with only what the note means for them (money_note). Before v56
+  // runs that function is not there yet, and the table is read as before.
+  async function myOrders(conv){
+    const r=await sb.rpc("my_orders",conv?{ p_conversation:conv }:{});
+    if(!r.error) return Array.isArray(r.data)?r.data:[];
+    if(r.error.code!=="PGRST202") return [];
+    let q=sb.from("contracts").select("*"); if(conv) q=q.eq("conversation_id",conv);
+    const { data } = await q.order("created_at",{ascending:false});
+    return data||[];
+  }
   async function activeOrderFor(conv){
-    const { data } = await sb.from("contracts").select("*").eq("conversation_id",conv).in("status",O_ACTIVE).order("created_at",{ascending:false}).limit(1);
-    return (data||[])[0]||null;
+    return (await myOrders(conv)).find(c=>O_ACTIVE.includes(c.status))||null;   // newest first, as before
   }
   async function openOrderFlow(win){
     if(!requireAuth()) return;
@@ -7823,8 +7833,7 @@
     if(!REAL) return;
     const host=$("#contractsList"); if(!host) return;
     if(!signedIn()){ host.innerHTML=`<div class="empty-state small"><strong>${t("p_noContractsTitle")}</strong><p class="muted">${t("c_signInToSee")}</p></div>`; return; }
-    const { data } = await sb.from("contracts").select("*").order("created_at",{ascending:false});
-    const rows=data||[];
+    const rows=await myOrders();
     const sc=$("[data-stat='contracts'] .stat-num, .stat[data-route='contracts'] .stat-num"); if(sc) sc.textContent=rows.filter(c=>O_ACTIVE.includes(c.status)).length;
     if(!rows.length){ host.innerHTML=`<div class="empty-state small"><strong>${t("p_noContractsTitle")}</strong><p class="muted">${t("c_howToStart")}</p></div>`; return; }
     for(const c of rows){ await ensurePerson(c.editor); await ensurePerson(c.client); }
@@ -8039,7 +8048,8 @@
         if(iAmFl){ act("dispute","secondary danger-text",t("es_clientNotResponding"),()=>oNoteModal(t("es_disputeTitleEd"), t("es_disputeDescEd"), t("es_disputePh"), t("es_disputeBtn"), false, async note=>{ if(!note){ toast(t("a_fillAll")); return; } if(await rpc("dispute",note)()){ closeModal(); toast(t("es_disputeSent")); again(); } })); hint=topup?escapeHtml(fill(t("es_editorWaitsTopup"),{amt:oMoney(topup,cur)})):fill(t("es_editorDeliveredHint"),{d:o.auto_release_at?fmtDate(o.auto_release_at):"—"}); }
       }
       if(o.status==="disputed"){ extra=`<div class="notice" style="margin-top:12px"><strong>${t("es_disputeBy")} ${escapeHtml(o.dispute_by===o.editor?flName:clName)}</strong><div style="white-space:pre-wrap;margin-top:4px">${escapeHtml(o.dispute_reason||"")}</div></div>`; hint=t("es_disputeHint"); }
-      const noteKind=oNoteKind(o.money_error);
+      // what the money note means for this person: given by the database since v56 (money_note: the note itself is the admin's)
+      const noteKind=typeof o.money_note==="string"?(["","not_ready","settling","other"].includes(o.money_note)?o.money_note:"other"):oNoteKind(o.money_error);
       if(o.status==="releasing"||o.status==="resolving") hint=noteKind==="settling"?t("es_settling"):noteKind==="other"?t("es_moneyCheck"):noteKind?"":t("es_processing");
       // a payout waits for the freelancer's Stripe setup (the Order's own, a part's, or the automatic one): said to both,
       // and the freelancer gets the button to it; their "released to you automatically by …" waits for it too

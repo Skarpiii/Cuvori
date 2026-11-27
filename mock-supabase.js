@@ -187,6 +187,9 @@
         let out=null, error=null;
         try{
           if(st.op==="select"){
+            // schema v56 (check of 27 November 2026): an Order's money note is not readable from the table, and so not every
+            // column at once (select *): the page reads its Orders through my_orders
+            if(table==="contracts"&&window.__mockPrices&&(String(st.sel||"*").includes("*")||/money_error\b/.test(String(st.sel||"")))) throw Object.assign(new Error("permission denied for table contracts"),{code:"42501"});
             let r = rows().filter(match);
             // RLS-ish: editor_profiles only public or own; projects only of public editors or own; invites hidden
             if(table==="editor_profiles") r = r.filter(x => (x.is_public && !(db.profiles.find(p=>p.id===x.id)||{}).banned) || x.id===uid());
@@ -390,8 +393,17 @@
         const n=(c.amendments||0)+1; c.amount_cents+=a.price_delta_cents; c.price=c.amount_cents/100; if(a.new_deadline) c.deadline=a.new_deadline; c.revisions=(c.revisions||0)+a.revisions_add; if(a.scope_add) c.description=(c.description||"")+"\n\nAmendment "+n+": "+a.scope_add; if(a.deliverables_add) c.deliverables=(c.deliverables||"")+"\n"+a.deliverables_add; c.amendments=n;
         let pos=db.order_milestones.filter(m=>m.order_id===c.id).length; (a.milestones||[]).forEach(m=>db.order_milestones.push({id:uuid(),order_id:c.id,position:++pos,title:String(m.title).trim(),amount_cents:Number(m.amount_cents),due:m.due||null,status:"pending",created_at:new Date().toISOString()}));
         a.status="accepted"; a.decided_at=new Date().toISOString(); a.decided_by=uid(); olog(c,"amendment_accepted",{amendment:a.id,price_delta_cents:a.price_delta_cents,price_cents:c.amount_cents,deadline:c.deadline,n}); evt(c,"amendment_accepted",a.price_delta_cents,a.note); return {data:"ok"}; }
+      // schema v56 (check of 27 November 2026): an Order as the one asking may read it, whole for the admin, for its two people
+      // without its money note but with what it means for them (money_note, as public.money_note_kind)
+      const noteKind=(note)=>{ const parts=String(note||"").split(" · Also: ").map(x=>x.trim()).filter(Boolean); if(!parts.length) return "";
+        if(parts.some(x=>x.includes("Stripe account is not ready to receive money"))) return "not_ready";
+        return parts.every(x=>x.includes("is still settling at the payment provider")||x.includes("balance still settling"))?"settling":"other"; };
+      const orderForMe=(c)=>{ if(!window.__mockPrices||adm()) return {...c}; const o={...c}; delete o.money_error; o.money_note=noteKind(c.money_error); return o; };
+      if(fn==="my_orders"){ if(!window.__mockPrices) return {data:null,error:{code:"PGRST202",message:"Could not find the function public."+fn+" in the schema cache"}};
+        return {data:db.contracts.filter(x=>(x.editor===uid()||x.client===uid()||adm())&&(!args.p_conversation||x.conversation_id===args.p_conversation))
+          .map((x,i)=>[x,i]).sort((a,b)=>String(b[0].created_at||"").localeCompare(String(a[0].created_at||""))||b[1]-a[1]).map(([x])=>orderForMe(x))}; }
       if(fn==="order_bundle"){ const c=db.contracts.find(x=>x.id===args.p_order&&(x.editor===uid()||x.client===uid()||adm())); if(!c) return {data:null}; const ep=db.editor_profiles.find(e=>e.id===c.editor), pe=db.profiles.find(p=>p.id===c.editor), pc=db.profiles.find(p=>p.id===c.client);
-        return {data:{order:{...c},milestones:db.order_milestones.filter(m=>m.order_id===c.id).sort((a,b)=>a.position-b.position).map(m=>({...m})),amendments:db.order_amendments.filter(a=>a.order_id===c.id).map(a=>({...a})),events:db.order_events.filter(e=>e.order_id===c.id).map(e=>({id:e.id,actor:e.actor,event:e.event,data:e.data,at:e.created_at})),payments:db.order_payments.filter(p=>p.order_id===c.id).map(p=>({...p})),client_name:pc?pc.first_name:"",freelancer_name:(ep&&ep.display_name)||(pe&&pe.first_name)||""}}; }
+        return {data:{order:orderForMe(c),milestones:db.order_milestones.filter(m=>m.order_id===c.id).sort((a,b)=>a.position-b.position).map(m=>({...m})),amendments:db.order_amendments.filter(a=>a.order_id===c.id).map(a=>({...a})),events:db.order_events.filter(e=>e.order_id===c.id).map(e=>({id:e.id,actor:e.actor,event:e.event,data:e.data,at:e.created_at})),payments:db.order_payments.filter(p=>p.order_id===c.id).map(p=>({...p})),client_name:pc?pc.first_name:"",freelancer_name:(ep&&ep.display_name)||(pe&&pe.first_name)||""}}; }
       // schema v56's order_price_breakdown: what an Order costs and pays, as agreed (its two people and the admin; NULL
       // otherwise). No prices in this fake database (before v56): the function is not there either
       if(fn==="order_price_breakdown"){ if(!window.__mockPrices) return {data:null,error:{code:"PGRST202",message:"Could not find the function public."+fn+" in the schema cache"}};
