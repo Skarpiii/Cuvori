@@ -378,6 +378,10 @@ create or replace function t.release_ms(mid uuid) returns void language sql secu
   update public.contracts c set released_cents = released_cents + m.amount_cents from public.order_milestones m where m.id = mid and c.id = m.order_id;
   insert into public.order_payments (order_id, milestone_id, kind, amount_cents, provider, provider_ref) select order_id, id, 'release', amount_cents, 'stripe', 'tr_t' from public.order_milestones where id = mid;
 $$;
+-- the test's own look at an Order, as the database owner: since v56 (check of 27 November 2026) an Order's two people read
+-- every column of it but its money note, so a whole row (select *) is the owner's to read, not theirs
+create or replace function t.order_row(p uuid) returns public.contracts language sql stable security definer as $$ select * from public.contracts where id = p $$;
+grant execute on function t.order_row(uuid) to authenticated;
 create or replace function t.as_user(u text) returns text language sql as $$ select set_config('request.jwt.claim.sub', t.u(u)::text, true) $$;
 grant execute on function t.fund(uuid), t.release_ms(uuid), t.as_user(text) to authenticated;
 
@@ -393,14 +397,14 @@ create or replace function t.f_edit_before_accept() returns text language plpgsq
 declare oid uuid; c public.contracts%rowtype; out text := '';
 begin
   perform t.as_user('102'); oid := public.order_create('10000000-0000-0000-0000-000000000006', t.v18_order(9000));
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || coalesce(c.client_accepted_version::text, '-') || '/' || coalesce(c.freelancer_accepted_version::text, '-') || '/' || c.status;
   perform t.as_user('203'); out := out || '|' || public.order_update(oid, t.v18_order(9500));
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || coalesce(c.client_accepted_version::text, '-') || '/' || coalesce(c.freelancer_accepted_version::text, '-') || '/' || c.status || '/' || c.terms_version || '/' || c.amount_cents;
   out := out || '|' || public.order_accept(oid, (select terms_version from public.contracts where id = oid));                                     -- the editor accepting his own change again: nothing new
   perform t.as_user('102'); out := out || '|' || public.order_accept(oid, (select terms_version from public.contracts where id = oid));
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || c.status || '/' || coalesce(c.accepted_version::text, '-') || '/' || (c.client_accepted_at is not null and c.freelancer_accepted_at is not null)::text;
   out := out || '|' || public.order_update(oid, t.v18_order(9900));                  -- accepted: no more silent edits
   out := out || '|' || (select string_agg(event, ',' order by id) from public.order_events where order_id = oid);
@@ -423,25 +427,25 @@ begin
   perform t.as_user('106'); out := out || '|' || public.order_milestone_action(m1, 'submit');            -- the client cannot submit work
   perform t.as_user('206'); out := out || '|' || public.order_milestone_action(m1, 'submit', 'first draft is up', 'https://frame.io/x');
   perform t.as_user('106'); out := out || '|' || public.order_milestone_action(m1, 'request_changes', 'make the intro shorter');
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || (select status from public.order_milestones where id = m1) || '/' || c.changes_used || '/' || c.changes_open::text;
   perform t.as_user('206'); out := out || '|' || public.order_milestone_action(m1, 'submit', 'shorter intro');
   perform t.as_user('106'); out := out || '|' || public.order_milestone_action(m1, 'approve');           -- protected payment: money only moves through the provider
   perform t.release_ms(m1);
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || c.funded_cents || '/' || c.released_cents || '/' || public.order_held_cents(c);
   -- more work: +€100 as a fourth milestone, proposed by the freelancer, accepted by the client
   perform t.as_user('206'); aid := public.order_amend(oid, '{"note":"Add a 30s teaser","price_delta_cents":10000,"milestones":[{"title":"Teaser","amount_cents":10000}]}');
   out := out || '|' || public.order_amendment_decide(aid, true);                                         -- the proposer cannot accept his own amendment
   perform t.as_user('106'); out := out || '|' || public.order_amendment_decide(aid, true);
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || c.amount_cents || '/' || c.amendments || '/' || (select count(*) from public.order_milestones where order_id = oid) || '/' || public.order_held_cents(c) || '/' || (c.amount_cents - c.funded_cents);
   -- v56: while the accepted increase is not paid in, a part is handed in only while the money held covers it (this one
   -- is covered: €750 held); a part beyond what is held waits for the increase (schema_v56 section 6)
   -- the client disputes: nothing more is released automatically
   perform t.as_user('206'); out := out || '|' || public.order_milestone_action(m2, 'submit');
   perform t.as_user('106'); out := out || '|' || public.order_action(oid, 'dispute', 'the second part is not what we agreed');
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || c.status || '/' || (select count(*) from public.order_milestones where order_id = oid and auto_release_at is not null);
   begin perform t.as_user('206'); aid := public.order_amend(oid, '{"note":"pay me more","price_delta_cents":5000}'); out := out || '|amended'; exception when others then out := out || '|' || sqlerrm; end;
   out := out || '|' || (select count(*) from public.order_payments where order_id = oid) || '/' || (select string_agg(event, ',' order by id) from public.order_events where order_id = oid);
@@ -466,7 +470,7 @@ begin
   perform t.as_user('203'); out := out || '|' || public.order_action(oid, 'complete');          -- the freelancer cannot approve his own work
   out := out || '|' || public.order_action(oid, 'deliver', 'fixed');
   perform t.as_user('102'); out := out || '|' || public.order_action(oid, 'complete');
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   out := out || '|' || c.status || '/' || c.funded_cents || '/' || c.released_cents || '/' || (select string_agg(kind, ',' order by created_at) from public.order_payments where order_id = oid);
   return out;
 end $$;
@@ -757,7 +761,7 @@ begin
   perform t.as_user('207'); aid := public.order_amend(oid, '{"note":"small discount","price_delta_cents":-2000}');   -- allowed: nothing paid yet
   perform t.fund(oid);                                                                                                -- the client pays €100
   perform t.as_user('107'); r := public.order_amendment_decide(aid, true);                                            -- the client accepts the discount afterwards
-  select * into c from public.contracts where id = oid;
+  c := t.order_row(oid);
   return r || '|' || c.amount_cents || '|' || public.order_held_cents(c);
 end $$;
 grant execute on function t.f_discount_after_funding() to authenticated;
