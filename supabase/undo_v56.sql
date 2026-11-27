@@ -341,6 +341,20 @@ revoke select (id, order_id, milestone_id, kind, amount_cents, fee_cents, provid
                connect_cents, commission_cents, payout_cents, payout_purpose, pricing_version) on table public.order_payments from authenticated;
 grant select on table public.order_payments to authenticated;
 
+-- both sides of an Order read its money note again, and the page reads the table again (my_orders gone), as before v56
+-- (check of 27 November 2026)
+do $grant$
+declare cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into cols
+    from information_schema.columns where table_schema = 'public' and table_name = 'contracts';
+  execute format('revoke select (%s) on table public.contracts from authenticated', cols);
+end $grant$;
+grant select on table public.contracts to authenticated;
+drop function if exists public.my_orders(uuid);
+drop function if exists public.order_for_me(public.contracts);
+drop function if exists public.money_note_kind(text);
+
 drop index if exists public.order_payments_fund_ref_uq;
 drop index if exists public.order_payments_entry_key_uq;
 drop index if exists public.order_payments_v2_object_uq;
@@ -399,6 +413,7 @@ select case when to_regclass('public.pricing_plans') is null
              and pg_get_functiondef('public.order_milestone_action(uuid, text, text, text)'::regprocedure) not like '%v56%'
              and pg_get_functiondef('public.order_action(uuid, text, text, text, integer)'::regprocedure) not like '%v56%'
              and has_table_privilege('authenticated', 'public.order_payments', 'select')
+             and has_table_privilege('authenticated', 'public.contracts', 'select') and to_regprocedure('public.my_orders(uuid)') is null
              and pg_get_functiondef('public.admin_clear_order_note(uuid, text)'::regprocedure) not like '%v56%'
              and pg_get_functiondef('public.admin_list_contracts()'::regprocedure) not like '%v56%'
              and pg_get_functiondef('public.admin_message_user(uuid, text)'::regprocedure) not like '%v56%'
