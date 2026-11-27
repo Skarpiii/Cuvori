@@ -1239,15 +1239,63 @@ end $$;
 -- Reading an Order's payment lines. Both sides of an Order read each line's amounts, its card fee, Stripe's fee on it,
 -- the 5% kept and what was sent; the page uses no more. A line's Stripe ids (provider_ref, charge_ref, fee_refund_ref),
 -- its entry key and its note (it names Stripe disputes) are for the payment code and the admin only, in the table and
--- in the Order screen's data (order_bundle, v18's function with one change marked v56). An Order's own row stays
--- readable whole by its two sides: the page reads it with select('*'), which needs every column.
+-- in the Order screen's data (order_bundle, v18's function with the changes marked v56). The same for the Order's own
+-- money note (contracts.money_error, below: check of 27 November 2026).
 revoke select on table public.order_payments from authenticated;
 grant select (id, order_id, milestone_id, kind, amount_cents, fee_cents, provider, status, created_at, provider_fee_cents, fee_refund_cents,
               connect_cents, commission_cents, payout_cents, payout_purpose, pricing_version) on table public.order_payments to authenticated;
+
+-- An Order's money note (contracts.money_error) is for the payment code and the admin (check of 27 November 2026). It names
+-- Stripe's ids ("chargeback dp_… also open on payment pi_…", "the client's bank asked about payment pi_…"), what went wrong
+-- at Stripe and Cuvori's own steps, and both people on the Order read it whole: a freelancer could read that the client's
+-- bank had asked about the payment. The page needs only what the note means for each of them (oNoteKind in index.html):
+-- the freelancer's Stripe setup to finish ('not_ready'), money still settling ('settling'), or something Cuvori checks
+-- ('other'). Now both read every column of their Order but the note; the Order screen's data (order_bundle) and the Orders
+-- list (my_orders, which the page reads instead of the table) give them that meaning as money_note; the admin still reads
+-- the whole note. The grant names every column there is when this runs: a later file that adds a column to contracts
+-- grants it too (tests/attack-money-note.mjs, M2, fails until it does).
+revoke select on table public.contracts from authenticated;
+do $grant$
+declare cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into cols
+    from information_schema.columns where table_schema = 'public' and table_name = 'contracts' and column_name <> 'money_error';
+  execute format('grant select (%s) on table public.contracts to authenticated', cols);
+end $grant$;
+-- what a note means for the Order's two people, exactly as the page's oNoteKind reads it (tests/attack-money-note.mjs, M5):
+-- the note's parts (joined by " · Also: "); one that says the freelancer's Stripe account is not ready: 'not_ready'; every
+-- one saying the money is still settling: 'settling'; any other note: 'other'; no note: ''
+create or replace function public.money_note_kind(p_note text)
+returns text language sql immutable set search_path = public as $$
+  with parts as (select btrim(x) as x from unnest(string_to_array(coalesce(p_note, ''), ' · Also: ')) x where btrim(x) <> '')
+  select case when not exists (select 1 from parts) then ''
+              when exists (select 1 from parts where strpos(x, 'Stripe account is not ready to receive money') > 0) then 'not_ready'
+              when not exists (select 1 from parts where strpos(x, 'is still settling at the payment provider') = 0 and strpos(x, 'balance still settling') = 0) then 'settling'
+              else 'other' end;
+$$;
+-- an Order as the one asking may read it: whole for the admin; for its two people without the note, with its meaning
+create or replace function public.order_for_me(c public.contracts)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select case when public.is_admin() then to_jsonb(c)
+              else (to_jsonb(c) - 'money_error') || jsonb_build_object('money_note', public.money_note_kind(c.money_error)) end;
+$$;
+revoke execute on function public.order_for_me(public.contracts) from public, anon, authenticated;
+-- the Orders the one asking may read (as the table's rule: their own, every one for the admin), newest first; with a chat,
+-- only that chat's. The page's Orders list and a chat's current Order read this instead of the table.
+create or replace function public.my_orders(p_conversation uuid default null)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(public.order_for_me(c) order by c.created_at desc, c.id), '[]'::jsonb)
+    from public.contracts c
+   where (auth.uid() in (c.editor, c.client) or public.is_admin())
+     and (p_conversation is null or c.conversation_id = p_conversation);
+$$;
+revoke execute on function public.my_orders(uuid) from public, anon;
+grant execute on function public.my_orders(uuid) to authenticated;
 create or replace function public.order_bundle(p_order uuid)
 returns jsonb language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'order', to_jsonb(c),
+    -- v56: the Order without its money note, except for the admin; its two people get what the note means for them
+    'order', public.order_for_me(c),
     'milestones', coalesce((select jsonb_agg(to_jsonb(m) order by m.position) from public.order_milestones m where m.order_id = c.id), '[]'::jsonb),
     'amendments', coalesce((select jsonb_agg(to_jsonb(a) order by a.created_at) from public.order_amendments a where a.order_id = c.id), '[]'::jsonb),
     'events', coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'actor', e.actor, 'event', e.event, 'data', e.data, 'at', e.created_at) order by e.id) from public.order_events e where e.order_id = c.id), '[]'::jsonb),
@@ -1628,6 +1676,10 @@ select case when to_regclass('public.pricing_plans') is not null and to_regclass
              and (select count(*) from pg_trigger where tgname = 'admin_audit_row' and not tgisinternal) >= 14
              and pg_get_functiondef('public.contracts_money_first()'::regprocedure) like '%release_too_early%'
              and to_regprocedure('public.admin_order_evidence(uuid)') is not null
+             and not has_column_privilege('authenticated', 'public.contracts', 'money_error', 'select')
+             and has_column_privilege('authenticated', 'public.contracts', 'pricing_version', 'select')
+             and to_regprocedure('public.my_orders(uuid)') is not null
+             and pg_get_functiondef('public.order_bundle(uuid)'::regprocedure) like '%order_for_me%'
             then 'v56 applied: the new prices are in the database' || case when (select version from public.pricing_switch) = 1 then ' and switched off' else '' end
                  || '. New Orders get plan ' || (select version from public.pricing_switch)
                  || ' (' || (select name from public.pricing_plans p join public.pricing_switch s on s.version = p.version) || '). Orders from before v56, left as they were: '
