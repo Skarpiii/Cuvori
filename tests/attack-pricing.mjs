@@ -1508,7 +1508,8 @@ const PARTS = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount
 }
 { // P15i the two sides of an Order read their payment lines' amounts (the card fee and Stripe's fee too), never a line's
   // Stripe ids, entry key or note: in the table and in the Order screen's data. The admin reads them all. The page reads
-  // the Order itself with select('*'): that still works for both sides
+  // the Order itself through my_orders since the check of 27 November 2026: every column of it but its money note, which
+  // only the admin reads (tests/attack-money-note.mjs), so the row whole (select *) is refused, its other columns are not
   const base = `${PAID1} ${svc(false)} insert into public.order_payments (order_id, kind, amount_cents, fee_cents, provider, provider_ref, charge_ref, status, note, provider_fee_cents, fee_refund_cents, fee_refund_ref)
     values (${O}, 'fund', 10000, 325, 'stripe', 'pi_old', 'ch_old', 'succeeded', 'fund', 180, 145, 're_fee'); ${owner}`;
   const hidden = ["provider_ref", "charge_ref", "fee_refund_ref", "entry_key", "note"];
@@ -1516,12 +1517,13 @@ const PARTS = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount
   const leaked = ["861", "862"].flatMap(who => hidden.map(col => [`${who === "861" ? "client" : "freelancer"} ${col}`, read(who, col)])).filter(([, r]) => r.ok).map(([what, r]) => `${what}: ${pick(r, "v")}`);
   const amounts = tx(`${base} ${as("861")} select 'v: ' || string_agg(concat_ws('/', kind, amount_cents, fee_cents, provider_fee_cents, fee_refund_cents, status, provider), ',') from public.order_payments where order_id = ${O}; ${owner}`);
   const star = tx(`${base} ${as("862")} select 'n: ' || count(*) from (select * from public.contracts where id = ${O}) x; ${owner}`);
+  const cols = tx(`${base} ${as("862")} select 'n: ' || count(*) from (select id, status, amount_cents, pricing_version, commission_bps from public.contracts where id = ${O}) x; select 'list: ' || jsonb_array_length(public.my_orders()); ${owner}`);
   const bundle = (who) => pick(tx(`${base} ${as(who)} select 'b: ' || coalesce((public.order_bundle(${O})->'payments')::text, 'none'); ${owner}`), "b");
   const client = bundle("861"), admin = bundle("401"), stranger = bundle("863");
   const inBundle = hidden.filter(k => client.includes(`"${k}"`));
-  vuln(leaked.length || pick(amounts, "v") !== "fund/10000/325/180/145/succeeded/stripe" || pick(star, "n") !== "1" || inBundle.length || !/"amount_cents": 10000/.test(client)
+  vuln(leaked.length || pick(amounts, "v") !== "fund/10000/325/180/145/succeeded/stripe" || !/permission denied/.test(pick(star, "n")) || pick(cols, "n") !== "1" || pick(cols, "list") !== "1" || inBundle.length || !/"amount_cents": 10000/.test(client)
        || !/"provider_ref": "pi_old"/.test(admin) || !/"note": "fund"/.test(admin) || stranger !== "none",
-    `P15i a payment line's Stripe ids, entry key and note read by the Order's two sides -> ${leaked.length ? "READ: " + leaked.join("; ") : "refused"}; its amounts -> ${pick(amounts, "v")}; the Order row whole (select *) -> ${pick(star, "n")} row; in the Order screen's data -> ${inBundle.length ? "STILL THERE: " + inBundle.join(", ") : "left out"}, amounts there: ${/"amount_cents": 10000/.test(client)}; the admin's -> ${/"provider_ref": "pi_old"/.test(admin) ? "all there" : admin.slice(0, 60)}; a stranger -> ${stranger.slice(0, 20)} (must be refused; fund/10000/325/180/145/succeeded/stripe; 1; left out, true; all there; none)`);
+    `P15i a payment line's Stripe ids, entry key and note read by the Order's two sides -> ${leaked.length ? "READ: " + leaked.join("; ") : "refused"}; its amounts -> ${pick(amounts, "v")}; the Order row whole (select *) -> ${pick(star, "n")} (refused: it holds the money note), its other columns -> ${pick(cols, "n")} row, the Orders list -> ${pick(cols, "list")}; in the Order screen's data -> ${inBundle.length ? "STILL THERE: " + inBundle.join(", ") : "left out"}, amounts there: ${/"amount_cents": 10000/.test(client)}; the admin's -> ${/"provider_ref": "pi_old"/.test(admin) ? "all there" : admin.slice(0, 60)}; a stranger -> ${stranger.slice(0, 20)} (must be refused; fund/10000/325/180/145/succeeded/stripe; 1; left out, true; all there; none)`);
 }
 { // P15j undo puts back everything v56 changed, exactly: every function's text, rights and settings, every trigger, index
   // and row rule, and who may read or write each table and column, as before v56 (the rules of P15 included)
@@ -1538,7 +1540,7 @@ const PARTS = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount
   const cb = "chargeback dp_2 also open on payment pi_top: Cuvori handles it once chargeback dp_1 is done; until then nothing on this Order is paid out or refunded";
   const other = "a refund was made in the Stripe dashboard";
   const noted = (note) => `${PAID1} update public.contracts set status = 'completed', chargeback_id = 'dp_1', chargeback_status = 'won', money_error = '${note}' where id = ${O};`;
-  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.contracts where id = ${O})); ${owner}
+  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.admin_list_contracts() where id = ${O})); ${owner}
     select 'left: ' || coalesce(money_error, 'none') from public.contracts where id = ${O};`;
   const count = (label) => `select '${label}: ' || public.orders_with_money_on_the_way();`;
   const alone = tx(`${noted(cb)} ${clear}`), mixed = tx(`${noted(other + " · Also: " + cb)} ${clear}`), plain = tx(`${noted(other)} ${clear}`);
@@ -1566,7 +1568,7 @@ const PARTS = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount
   const inquiry = "the client''s bank asked about payment pi_old (100.00 EUR, inquiry dp_9): answer it in Stripe''s dashboard under Disputes";
   const shown = inquiry.replace(/''/g, "'");
   const noted = (note) => `${PAID1} update public.contracts set status = 'delivered', money_error = '${note}' where id = ${O};`;
-  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.contracts where id = ${O})); ${owner}
+  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.admin_list_contracts() where id = ${O})); ${owner}
     select 'left: ' || coalesce(money_error, 'none') from public.contracts where id = ${O};`;
   const alone = tx(`${noted(inquiry)} ${clear}`), mixed = tx(`${noted("a refund was made in the Stripe dashboard · Also: " + inquiry)} ${clear}`);
   const left = (r) => pick(r, "left") === shown ? "the inquiry's note" : pick(r, "left").slice(0, 40);
@@ -1578,7 +1580,7 @@ const PARTS = `[{"title":"Part 1","amount_cents":4000},{"title":"Part 2","amount
   const dn = "decision not on record: Cuvori''s ''refund'' decision could not be saved in the Order''s history, so nothing of it has moved and it is not carried out. Decide this Order again in the admin panel";
   const shown = dn.replace(/''/g, "'");
   const noted = (note) => `${PAID1} update public.contracts set status = 'resolving', resolution = 'refund', money_error = '${note}' where id = ${O};`;
-  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.contracts where id = ${O})); ${owner}
+  const clear = `${as("401")} select 'clear: ' || public.admin_clear_order_note(${O}, (select money_error from public.admin_list_contracts() where id = ${O})); ${owner}
     select 'left: ' || coalesce(money_error, 'none') from public.contracts where id = ${O};`;
   const alone = tx(`${noted(dn)} ${clear}`), mixed = tx(`${noted("a refund was made in the Stripe dashboard · Also: " + dn)} ${clear}`);
   const left = (r) => pick(r, "left") === shown ? "the decision's note" : pick(r, "left").slice(0, 40);
