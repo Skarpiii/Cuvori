@@ -1264,10 +1264,13 @@ begin
 end $grant$;
 -- what a note means for the Order's two people, exactly as the page's oNoteKind reads it (tests/attack-money-note.mjs, M5):
 -- the note's parts (joined by " · Also: "); one that says the freelancer's Stripe account is not ready: 'not_ready'; every
--- one saying the money is still settling: 'settling'; any other note: 'other'; no note: ''
+-- one saying the money is still settling: 'settling'; any other note: 'other'; no note: ''. A part of blank space only is
+-- no part, with the same blank characters as the page's trim() (spaces, tabs, line breaks and the other blank ones;
+-- check of 28 November 2026, M5b: plain spaces only before, so a note of line breaks said "Cuvori is checking")
 create or replace function public.money_note_kind(p_note text)
 returns text language sql immutable set search_path = public as $$
-  with parts as (select btrim(x) as x from unnest(string_to_array(coalesce(p_note, ''), ' · Also: ')) x where btrim(x) <> '')
+  with blank(s) as (select E' \t\n\u000B\f\r                 　﻿'),
+       parts as (select btrim(x, blank.s) as x from blank, unnest(string_to_array(coalesce(p_note, ''), ' · Also: ')) x where btrim(x, blank.s) <> '')
   select case when not exists (select 1 from parts) then ''
               when exists (select 1 from parts where strpos(x, 'Stripe account is not ready to receive money') > 0) then 'not_ready'
               when not exists (select 1 from parts where strpos(x, 'is still settling at the payment provider') = 0 and strpos(x, 'balance still settling') = 0) then 'settling'
