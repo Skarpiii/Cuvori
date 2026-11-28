@@ -8,7 +8,9 @@
 // Orders list (my_orders) give them only that meaning (money_note), and the admin still reads the whole note.
 // M1 the note can't be read from the table (the column, or every column at once) by either person; M2 every other column
 // is readable (the page and the database's own rules read them); M3 the Order screen's data; M4 the Orders list; M5 the
-// meaning is the page's own (oNoteKind) for every kind of note; M6 the rules on the Order's parts, history and payment lines
+// meaning is the page's own (oNoteKind) for every kind of note; M5b also for notes of blank space (check of 28 November
+// 2026: the database left out only plain spaces, the page every blank character, so a note of line breaks or tabs said
+// "Cuvori is checking"), every character on its own and after a note; M6 the rules on the Order's parts, history and payment lines
 // still let both people read them; M7 a stranger and the public role read nothing; M8 undoing v56 gives the page its table
 // back. Every check is rolled back.
 // Run: node tests/attack-money-note.mjs   (needs the local Postgres of tests/db; it is started here)
@@ -34,7 +36,7 @@ for (const f of ["tests/db/10_harness.sql", "tests/db/20_seed.sql", ...MIGRATE.s
   execFileSync("psql", [...PSQL, "-q", "-f", path.join(root, f)], { env: { ...process.env, PGOPTIONS: "-c client_min_messages=warning" }, stdio: "ignore" });
 
 const env = { ...process.env, PGOPTIONS: "-c client_min_messages=warning" };
-const run = (sql) => { const r = spawnSync("psql", [...PSQL], { input: sql, encoding: "utf8", env }); return { ok: r.status === 0, out: (r.stdout || "").trim(), err: (r.stderr || "").trim() }; };
+const run = (sql) => { const r = spawnSync("psql", [...PSQL], { input: sql, encoding: "utf8", env, maxBuffer: 256 * 1024 * 1024 }); return { ok: r.status === 0 && !r.error, out: (r.stdout || "").trim(), err: ((r.error ? r.error.message + " " : "") + (r.stderr || "")).trim() }; };   // M5b's answer is more than Node's usual 1 MB
 const U = (n) => `t.u('${n}')`;
 const as = (who) => who === "anon" ? "set local role anon; select set_config('request.jwt.claim.sub', '', true);"
   : `set local role authenticated; select set_config('request.jwt.claim.sub', ${U(who)}::text, true);`;
@@ -118,6 +120,21 @@ for (const [who, name, admin] of [["961", "the client", false], ["962", "the fre
   const wrong = notes.map((n, i) => ({ n, page: oNoteKind ? oNoteKind(n) : "(no oNoteKind)", db: pick(r, "k" + i) })).filter(x => x.page !== x.db);
   vuln(!oNoteKind || !SETTLING || !REFUND_SETTLING || !NOT_READY || wrong.length > 0,
     `M5 the database's meaning of a note is the page's own (oNoteKind), for ${notes.length} notes (the server's sentences, joined ones, empty ones) -> different: ${wrong.length}${wrong.length ? " e.g. " + JSON.stringify(wrong.slice(0, 2)) : ""}`);
+  // M5b blank space: every character (all of the first 65,536 but the empty one, which text can't hold, and the halves of
+  // two-part ones; then some beyond), on its own, after a note that says the money is settling, and around one; with
+  // notes made of line breaks, tabs and other blank space
+  const chars = [];
+  for (let c = 1; c < 0x10000; c++) if (c < 0xd800 || c > 0xdfff) chars.push(String.fromCharCode(c));
+  chars.push(...[0x1f600, 0xe0020, 0x10ffff].map(c => String.fromCodePoint(c)));
+  const blanks = ["\n", "\t", "\r\n", " \n ", " ", "　﻿", `${SETTLING} · Also: \n`, `${SETTLING} · Also: \t`, `\n${SETTLING}\n`, `${SETTLING}\n · Also: ${SETTLING}`,
+    `${SETTLING} · Also:  `, `${SETTLING} · Also:  `, `${SETTLING} · Also: · Also: ${SETTLING}`, " · Also:  · Also: ", "​", "\u0085", "᠎", `x · Also: ${NOT_READY}`, `${NOT_READY} · Also: \r`];
+  const many = SETTLING ? [...blanks, ...chars, ...chars.map(c => `${SETTLING} · Also: ${c}`), ...chars.map(c => `${c}${SETTLING}${c}`)] : [];
+  const r2 = tx(`select 'all: ' || string_agg(public.money_note_kind(x), ',' order by n) from jsonb_array_elements_text($m5b$${JSON.stringify(many)}$m5b$::jsonb) with ordinality as t(x, n);`);
+  const dbKinds = pick(r2, "all").split(",");
+  const wrong2 = many.map((n, i) => ({ n, page: oNoteKind ? oNoteKind(n) : "(no oNoteKind)", db: dbKinds[i] ?? "(no answer)" })).filter(x => x.page !== x.db);
+  const show = (n) => JSON.stringify(n.length > 30 ? n.slice(0, 8) + "…" + n.slice(-12) : n);
+  vuln(!oNoteKind || !SETTLING || many.length < 190000 || dbKinds.length !== many.length || wrong2.length > 0,
+    `M5b the same for blank space: ${many.length} notes (every character on its own, after a note and around one; line breaks, tabs, blank parts) -> answered by the database: ${dbKinds.length}; different: ${wrong2.length}${wrong2.length ? " e.g. " + wrong2.slice(0, 3).map(x => `${show(x.n)} page "${x.page}", database "${x.db}"`).join("; ") : ""}`);
 }
 
 // ---------- M6 the Order's parts, history and payment lines ----------
